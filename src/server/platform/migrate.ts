@@ -1,0 +1,155 @@
+/**
+ * 带编号记录的 SQL 迁移执行器（README-切片说明.md §迁移策略）。
+ *
+ * 为什么手写而不是跑 Drizzle-Kit 生成流水线：
+ * 本切片需要延迟外键顺序、联合唯一、部分唯一索引、行内 CHECK 与盖楼触发器，
+ * 这些是 Drizzle schema 表达不稳或生成器管不到的地方。**权威结构是 migrations/*.sql**。
+ *
+ * 版本记录表 schema_migrations 是本切片唯一不在业务文档中的表，仅记录已应用迁移。
+ */
+
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type { SqliteDatabase } from './db';
+import { openDatabase, resolveDbPath } from './db';
+
+export interface AppliedMigration {
+  version: string;
+  appliedAt: number;
+}
+
+function ensureRegistry(db: SqliteDatabase): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version    TEXT PRIMARY KEY,
+      applied_at INTEGER NOT NULL CHECK (applied_at >= 0)
+    );
+  `);
+}
+
+function listMigrationFiles(dir: string): string[] {
+  return readdirSync(dir)
+    .filter((f) => f.endsWith('.sql'))
+    .sort((a, b) => a.localeCompare(b, 'en'));
+}
+
+export interface MigrateResult {
+  databaseFile: string;
+  applied: string[];
+  alreadyApplied: string[];
+  foreignKeyCheck: string[];
+}
+
+/**
+ * 应用所有未执行迁移。
+ * 每个迁移文件在**独立事务**内执行；失败即回滚该文件，已成功的不重跑。
+ */
+export function migrate(options: {
+  db?: SqliteDatabase;
+  file?: string;
+  migrationsDir?: string;
+  now?: number;
+} = {}): MigrateResult {
+  const file = options.file ?? resolveDbPath(process.env.DSH_REVIEW_DB_PATH);
+  const dir = options.migrationsDir ?? join(process.cwd(), 'migrations');
+  const db = options.db ?? openDatabase({ file });
+  const now = options.now ?? Date.now();
+
+  ensureRegistry(db);
+
+  const done = new Set(
+    (db.prepare('SELECT version FROM schema_migrations').all() as { version: string }[]).map((r) => r.version),
+  );
+
+  const applied: string[] = [];
+  const already: string[] = [];
+
+  for (const name of listMigrationFiles(dir)) {
+    if (done.has(name)) {
+      already.push(name);
+      continue;
+    }
+    const sql = readFileSync(join(dir, name), 'utf8');
+    const run = db.transaction(() => {
+      db.exec(sql);
+      db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(name, now);
+    });
+    run();
+    applied.push(name);
+  }
+
+  const foreignKeyCheck = (db.pragma('foreign_key_check') as unknown[]).map((row) => JSON.stringify(row));
+
+  return { databaseFile: file, applied, alreadyApplied: already, foreignKeyCheck };
+}
+
+/** 启动自检（依赖与 Linux 部署第 4 节）：能力不足时明确失败，不静默降级。 */
+export interface SelfCheckResult {
+  ok: boolean;
+  sqliteVersion: string;
+  foreignKeys: boolean;
+  journalMode: string;
+  schemaVersion: string | null;
+  missingTables: string[];
+  problems: string[];
+}
+
+/** 本切片要求存在的业务表（权威结构见 migrations/0001_baseline.sql）。 */
+export const REQUIRED_TABLES = [
+  'users',
+  'external_identities',
+  'user_sessions',
+  'repositories',
+  'plugins',
+  'content_entities',
+  'reviews',
+  'review_revisions',
+  'content_drafts',
+  'draft_save_receipts',
+  'content_submissions',
+  'content_moderation_records',
+  'comments',
+  'comment_revisions',
+  'background_tasks',
+  'background_task_attempts',
+  'operation_records',
+  'configuration_revisions',
+  'site_settings',
+] as const;
+
+export function selfCheck(db: SqliteDatabase): SelfCheckResult {
+  const problems: string[] = [];
+
+  const versionRow = db.prepare('SELECT sqlite_version() AS v').get() as { v: string } | undefined;
+  const sqliteVersion = String(versionRow?.v ?? 'unknown');
+  const foreignKeys = db.pragma('foreign_keys', { simple: true }) === 1;
+  if (!foreignKeys) problems.push('foreign_keys 未启用');
+
+  const journalMode = String(db.pragma('journal_mode', { simple: true }));
+
+  const existing = new Set(
+    (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map((r) => r.name),
+  );
+  const missingTables = REQUIRED_TABLES.filter((t) => !existing.has(t));
+  if (missingTables.length > 0) problems.push(`缺少业务表：${missingTables.join(', ')}`);
+
+  const hasRegistry = existing.has('schema_migrations');
+  const schemaVersion = hasRegistry
+    ? ((db.prepare('SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1').get() as { version: string } | undefined)
+        ?.version ?? null)
+    : null;
+  if (!hasRegistry) problems.push('缺少 schema_migrations，尚未执行迁移');
+
+  const fkIssues = db.pragma('foreign_key_check') as unknown[];
+  if (fkIssues.length > 0) problems.push(`foreign_key_check 报出 ${fkIssues.length} 条不一致`);
+
+  return {
+    ok: problems.length === 0,
+    sqliteVersion,
+    foreignKeys,
+    journalMode,
+    schemaVersion,
+    missingTables,
+    problems,
+  };
+}

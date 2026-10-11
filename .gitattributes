@@ -1,0 +1,26 @@
+# 行尾规范化：让 Windows 批处理在任何克隆上都是 CRLF，否则 cmd.exe 会报语法错。
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# 文本文件统一 LF（跨平台一致），检出时按平台转换。
+*.ts   text eol=lf
+*.tsx  text eol=lf
+*.js   text eol=lf
+*.mjs  text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+*.sql  text eol=lf
+*.css  text eol=lf
+*.html text eol=lf
+*.yml  text eol=lf
+
+# 二进制：不要做任何行尾转换。
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.webp binary
+*.ico  binary
+*.sqlite binary
+
+# 锁文件：语言统计与 diff 噪音大，标记为生成物。
+package-lock.json linguist-generated=true

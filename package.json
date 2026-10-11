@@ -1,0 +1,38 @@
+{
+  "name": "dsh-plugin-review",
+  "version": "0.1.0-slice",
+  "private": true,
+  "type": "module",
+  "description": "DSH Plugin Review · 最小功能切片（登录 → 收录插件 → 写/审/发一篇评测 → 评论）",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "next dev -p 3100",
+    "build": "next build",
+    "start": "next start -p 3100",
+    "worker": "tsx src/worker/main.ts",
+    "db:migrate": "tsx src/server/platform/migrate-cli.ts",
+    "db:check": "tsx src/server/platform/selfcheck-cli.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "better-sqlite3": "13.0.3",
+    "drizzle-orm": "0.45.4",
+    "next": "16.4.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "7.6.13",
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
+  }
+}
