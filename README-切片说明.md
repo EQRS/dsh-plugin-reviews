@@ -9,6 +9,31 @@
 
 ## 1. 怎么跑
 
+### 方式一：一键启动脚本（Windows）
+
+```cmd
+npm install
+dev.cmd
+```
+
+`dev.cmd` 会依次：建 `.data` → 应用迁移 → 启动自检 → 拉起 Web（http://127.0.0.1:3100）。
+
+| 命令 | 作用 |
+|---|---|
+| `dev.cmd` | 迁移 + 自检 + 启动 Web（默认） |
+| `dev.cmd web` | 只启动 Web |
+| `dev.cmd worker` | 只启动 worker（另开一个窗口） |
+| `dev.cmd migrate` | 只跑迁移 + 自检 |
+| `dev.cmd test` | 类型检查 + 跑测试 |
+| `dev.cmd accept` | 跑 HTTP 验收（需 Web 已在运行） |
+| `dev.cmd demo` | 造一条演示评测（需 Web 已在运行） |
+| `dev.cmd reset` | 删掉 `.data` 重建（仅本地开发） |
+
+> 脚本用 CRLF + ASCII 输出编写，已在 `core.autocrlf=true` 的环境下**用真实 clone 验证过**检出后仍可执行
+> （见 `.gitattributes` 的 `*.cmd text eol=crlf`）。若在 Linux/macOS 上跑，直接用方式二。
+
+### 方式二：直接用 npm 脚本（跨平台）
+
 ```bash
 npm install
 npm run db:migrate      # 建库 + 应用迁移（19 张表 + 16 个触发器）
