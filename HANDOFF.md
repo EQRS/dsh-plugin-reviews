@@ -15,10 +15,13 @@
 浏览器点击链路两轮共 22 步（§5.2 / §5.3）。
 **已提交并推送：`938f32a`（第二轮）→ `c8c4138`（交接书）→ 第三轮见 §6。**
 
+**真实 GitHub 登录已跑通一次完整往返**（2026-10-12 晚，真账号 `liceses`、真 OAuth App、真授权页）——
+在此之前它只验到"未配置时明确 503"。见 §5.4。**主人自己的账号 `icelily` / `01a130c1-…` 已是管理员。**
+
 **第三轮补掉的是"页面上的洞"**（§1.2 第 16、17 条）：后台审核按钮、作者撤回按钮、评论回复、
 `/onboarding`、首个管理员指定方式 —— 以及一个真正的断点：**人工通过之后没有任何东西去发布**。
 
-**当前没有待办的技术债**；剩下的都是"要么等主人给密钥，要么本来就在切片范围外"（§3）。
+**当前没有待办的技术债**；剩下的都是"要么等主人给密钥/域名，要么本来就在切片范围外"（§3）。
 
 ---
 
@@ -72,7 +75,9 @@
 | 浏览器点击链路 | 第二轮 **9 步** + 第三轮 **13 步**（人工） | README-切片说明.md §5.2 / §5.3 |
 | 人工审核 → 自动发布 | 通过（任务 ID 与 worker 日志对得上） | README §5.3 第 4—6 步 |
 | 真实 GitHub 收录 | 成功收录 `packages/bundle/base` | 见 §5.1 |
-| 浏览器真登录 | 导航栏变为真实用户 ID + 登出 | 见 §5.2 |
+| 浏览器真登录（测试通道） | 导航栏变为真实用户 ID + 登出 | 见 §5.2 |
+| **真实 GitHub OAuth 往返** | **通过**（真账号 `liceses` → 授权 → 回调建号 → onboarding → 提为管理员） | 见 §5.4 |
+| 凭据预检（假 code 换 token） | `bad_verification_code`（= 凭据配对正确） | 见 §5.4 第 3 步 |
 
 端到端脚本覆盖：登录 → 会话接口 → 收录真实插件 → 建草稿 → 保存 → **过期版本被拒** → 提交(pending)
 → **真 worker 进程** → `published` → 公开修订指针切换 → 匿名可读 → 发评论 → worker 发布
@@ -90,28 +95,35 @@
 
 ### 3.1 需要主人动手（我做不了）
 
-1. **真实 GitHub 登录生效**：在 https://github.com/settings/developers 建 OAuth App，
-   callback 填 `http://127.0.0.1:3100/api/auth/github/callback`，
-   把 Client ID/Secret 写进 `.env.local`。
-   三个变量 `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` / `GITHUB_REDIRECT_URI` **都必填**
-   （`redirect_uri` 没有默认值，漏了照样判"未配置"），缺任一个 `/api/session` 的
-   `githubLoginConfigured` 就是 `false`。**在主人给出 Client Secret 之前，不能声称"OAuth 已跑通"**。
-   > 2026-10-12 已把 `.env.local` 铺好：`GITHUB_REDIRECT_URI` 已填、`SESSION_SECRET` 已随机生成
-   > （43 字符 ≥ 32）、`BOOTSTRAP_ADMIN_GITHUB_ID` 已填主人账号的数字 ID（`liceses` / `121547321`），
-   > 只剩 `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` 两行等着粘贴。
-   > Next dev **会自动重载 `.env.local`**（日志出现 `Reload env: .env.local`），但稳妥起见改完重启一次。
+1. ~~**真实 GitHub 登录生效**~~ ✅ **已完成（2026-10-12 晚，本机）**：App `dsh-plugin-review-dev`，
+   callback `http://127.0.0.1:3100/api/auth/github/callback`，`GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`
+   已填进 `.env.local`，真账号 `liceses` 走完授权 → 回调 → 建号 → `/onboarding`，见 §5.4。
+   **剩余**：生产域名 / HTTPS / 反代下的回调**没验过** —— GitHub 每个 App 只允许填**一个** callback URL，
+   换域名时要改这一处或另建一个 App。生产还要把 `SESSION_SECRET` 换成新生成的（现在这个是本机跑用的）。
+   > 记性：三个变量 `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` / `GITHUB_REDIRECT_URI` **都必填**
+   > （`redirect_uri` 没有默认值，漏了照样判"未配置"），缺任一个 `/api/session` 的
+   > `githubLoginConfigured` 就是 `false`。Next dev 会**自动重载** `.env.local`（日志 `Reload env: .env.local`）。
+   > 配完先跑 `node scripts/check-github-oauth.mjs`：它检查三项是否齐全，并拿一个**假 code** 去换 token ——
+   > GitHub 回 `bad_verification_code` 就说明**凭据配对正确**（凭据错会回 `incorrect_client_credentials`），
+   > 于是不用点进去才发现配错。脚本不打印任何密钥；两条负路径都实测咬得动（错 secret → 退出码 1）。
+   > ⚠️ 它用 `process.exitCode` 而不是 `process.exit()`：后者在本机会撞 libuv 断言（`0xC0000409`）。
 2. 可选：`GITHUB_TOKEN`（`gh auth token` 的输出）把收录探针限额 60 → 5000 次/小时。
 3. **首个管理员**（站内没有提权入口，这是刻意的），两条路：
    - **部署配置引导（推荐，第一次登录就生效）**：`.env.local` 里
      `BOOTSTRAP_ADMIN_GITHUB_ID=<你的 GitHub 数字 ID>`（`gh api user --jq .id`）。
      语义是**引导**：只有当库里**一个可用管理员都没有**时才提升 ——
      被降过权的账号不会在下次登录时自己变回来。
+     > 本机这次它**没有**生效（库里已有 10 个验收留下的管理员），这是设计如此；最后是用下面第 2 条提的。
    - **上机指定/撤销**（账号得先登录过一次）：
      ```cmd
      node scripts/grant-admin.mjs --list
      node scripts/grant-admin.mjs --github-login <你的 GitHub 账号>
      ```
      `--revoke` 在会把最后一个可用管理员降级时拒绝执行。
+4. **准备给真人用之前**（现在都还开着，仅供本机验收）：
+   - `DSH_REVIEW_ALLOW_TEST_LOGIN=1` → 任何人点「测试登录」就能凭空造身份，**能连上站就等于谁都能进来**。
+   - `DSH_REVIEW_CONTENT_SCREEN=basic` → 只是本地词表，会**自动放行**；生产该留空走人工，或接真审核。
+   - 本机 `.data/app.sqlite` 里全是验收垃圾（50 个账号、10 个管理员）；要干净起步就换一个新路径跑迁移（**别删旧库**）。
 
 ### 3.2 明确未做（**不要当成已完成**）
 
@@ -255,6 +267,22 @@ Next dev 默认把 `127.0.0.1` 视为**跨源**并拦掉 `/_next/*`
 > **评论提交必须入队 `comment_publish`**（一律 `review_publish` 的话，评论会静默地永远发不出去）。
 > 浏览器点之前，这两条缝都被"验收脚本自己调 `publishReview`"盖着。
 
+### 5.4 真实 GitHub OAuth 往返（2026-10-12 晚，真账号真授权）
+
+App `dsh-plugin-review-dev`、账号 `liceses`、scope `read:user`。完整表在 README §5.4，要点：
+
+| # | 操作 | 结果 |
+|---|---|---|
+| 1 | 填 Client ID/Secret → 等 dev 自动重载 | 日志 `Reload env: .env.local`；`/api/session` 的 `githubLoginConfigured` 变 `true` |
+| 2 | **凭据预检**：拿假 `code` 换 token | `bad_verification_code`（= 凭据配对正确；凭据错会是 `incorrect_client_credentials`）。**这招以后配 OAuth 都该先用** |
+| 3 | 点「用 GitHub 登录」 | 真授权页：`dsh-plugin-review-dev` → 账号 `liceses`，仅 *Profile information (read-only)*，回调指向 `127.0.0.1:3100` |
+| 4 | 点 `Authorize` | GitHub 随即发授权通知邮件；回调落在 `/onboarding?returnTo=%2F` —— **真实新用户落地页**（上一轮才补的，之前是 404） |
+| 5 | 读库 | `users` **只多 1 条**：`01a130c1-31ab-7eeb-b4c5-29db261ca979`，昵称 `icelily`；`external_identities.provider_user_id = 121547321`（稳定数字 ID）、`provider_username = liceses` |
+| 6 | 检查引导闸门 | **没有**自动变管理员（库里已有 10 个）—— 设计如此 |
+| 7 | `node scripts/grant-admin.mjs --github-login liceses` | 提为管理员；硬刷新后导航栏出现「（管理员）」，`/admin` 可用 |
+
+> 剩下没验的只有**生产域名 / HTTPS / 反代下的回调**（GitHub 每个 App 只允许填一个 callback URL）。
+
 ---
 
 ## 6. 仓库与提交
@@ -328,7 +356,7 @@ src/components/        session-nav · plugin-submit-form · review-editor · com
                        start-draft-button · admin-decision-form · profile-form · withdraw-button · api-client
 src/worker/            main（独立进程）· handlers（4 处理器）· content-screen（本地基础筛查）
 tests/                 18 文件 / 367 测试（用真实临时库 + 真实迁移，**不用 `:memory:`**）
-scripts/               验收与自检脚本；grant-admin.mjs（指定/撤销管理员）
+scripts/               验收与自检脚本；grant-admin.mjs（指定/撤销管理员）；check-github-oauth.mjs（凭据体检）
 docs/                  设计映射、并行分组协议、模块签名契约、验收纪律、环境坑
 ```
 

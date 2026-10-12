@@ -96,6 +96,7 @@ node scripts/grant-admin.mjs --github-login <账号> --revoke
 | `npx tsx scripts/acceptance-e2e-chain.mjs` | **整条链**：登录→收录真实插件→写→提交→**真 worker 发布**→评论→**回复**→登出 | **22/22** |
 | `npx tsx scripts/seed-demo.mjs` | 造一条保持公开的演示评测（用于看页面真实渲染） | 见下 |
 | `node scripts/verify-node-cpsync.mjs` | 复核本机 Node 的 `cpSync` CJK 崩溃（环境坑，与本项目功能无关） | 见 `docs/环境坑-cpSync-CJK崩溃.md` |
+| `node scripts/check-github-oauth.mjs` | **OAuth 凭据体检**：三个变量齐不齐 + 拿假 `code` 去换 token，区分"凭据错"与"code 错"（**不打印任何密钥**） | 本机：`bad_verification_code` → 凭据正确（退出码 0） |
 
 > `acceptance-http*.mjs` 需要 dev server 在跑；它们走真实 HTTP，不是调用函数。
 > 它们都**不假设库里没有别的数据**（早先版本假设为空，被演示数据干扰过，已修），
@@ -180,7 +181,7 @@ DSH_REVIEW_ALLOW_TEST_LOGIN=1
 
 | 外部能力 | 当前行为 |
 |---|---|
-| GitHub OAuth | **代码已完整实现**（`/api/auth/github/start` → GitHub → `/callback`，S256 PKCE + state 摘要 + 浏览器绑定 Cookie + 一次性消费）。**需要主人做一件事**：在 https://github.com/settings/developers 建 OAuth App，callback 填 `http://127.0.0.1:3100/api/auth/github/callback`，把 Client ID/Secret 写进 `.env.local`。没配时按钮**明说未配置**，不会让用户点了才撞 503 |
+| GitHub OAuth | **已配置并在本机跑通一次真实往返**（2026-10-12 晚，App `dsh-plugin-review-dev`）：授权页 → 回调 → 建号 → `/onboarding` → 指定管理员，全程浏览器点击，见 §5.4。实现上仍是 S256 PKCE + state 摘要 + 浏览器绑定 Cookie + 一次性消费；scope 只要 `read:user`。**未验证**：生产域名 / HTTPS / 反代下的回调（GitHub 每个 App 只允许填**一个** callback URL） |
 | GitHub 收录检查 | **已接真实 api.github.com**（真机验证：收录 `deepseek-ai/deepseek-harness` 的 `packages/bundle/base` 成功；仓库根无 `dsh.bundle` → 400；不存在的仓库 → 400 且不泄露存在性）。匿名 60 次/小时，建议配 `GITHUB_TOKEN` |
 | 内容筛查 | 默认（未设 `DSH_REVIEW_CONTENT_SCREEN`）→ 提交转 `manual_review`，**绝不自动放行、也不认定违规**。设 `=basic` 启用本地基础筛查，通过则自动发布 —— 仅用于本地/演示，**不是真实审核** |
 
@@ -371,6 +372,32 @@ DSH_REVIEW_ALLOW_TEST_LOGIN=1
 
 ---
 
+## 5.4 真实 GitHub OAuth 往返（2026-10-12 晚，**真账号、真授权**）
+
+在此之前，OAuth 只验到"未配置时明确 503 且不伪装可用"。这一节是**第一次真往返**：
+App `dsh-plugin-review-dev`、账号 `liceses`、scope `read:user`。
+
+| # | 操作 | 观察到的结果 |
+|---|---|---|
+| 1 | 填 `.env.local` 的 `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`，等 dev server 自动重载 | 日志出现 `Reload env: .env.local` |
+| 2 | `GET /api/session` | `githubLoginConfigured: true`（此前 `false`） |
+| 3 | 凭据**预检**：拿一个假 `code` 去换 token | `error: bad_verification_code` —— 说明 client_id/secret **配对正确**，只是 code 是假的（凭据错会返回 `incorrect_client_credentials`） |
+| 4 | `GET /api/auth/github/start?returnTo=%2Fplugins` | 302 到 `github.com/login/oauth/authorize?...&scope=read%3Auser&state=…&code_challenge=…&code_challenge_method=S256` |
+| 5 | 登出旧会话 → 导航栏出现「用 GitHub 登录」→ 点它 | GitHub 授权页：`dsh-plugin-review-dev` wants to access your **liceses** account，仅 *Profile information (read-only)*，`Authorizing will redirect to http://127.0.0.1:3100` |
+| 6 | 点 `Authorize liceses` | GitHub 随即发来"a third-party OAuth application has been added to your account"通知邮件；浏览器回到站点 |
+| 7 | 回调落在 `/onboarding?returnTo=%2F` | **真实新用户首次登录的落地页**（这一页上一轮才补上，之前 302 过来就是 404） |
+| 8 | 读库核对 | `users` 只有 **1** 条新行：`01a130c1-31ab-7eeb-b4c5-29db261ca979`，昵称 `icelily`（取自 GitHub 资料），role `user`；`external_identities` 的 `provider_user_id = 121547321`（**稳定数字 ID**，不是用户名）、`provider_username = liceses` |
+| 9 | 保存昵称 | 跳回 `/`，导航栏显示该用户 ID |
+| 10 | 此时**没有**自动变成管理员 | 正确：引导闸门要求"当前一个可用管理员都没有"，而库里已有 10 个（验收留下的测试账号） |
+| 11 | `node scripts/grant-admin.mjs --github-login liceses` | 「已指定管理员：icelily（`01a130c1-…`）」；硬刷新后导航栏出现「（管理员）」 |
+| 12 | 打开 `/admin` | 待办列表与「通过并发布 / 需修改」表单正常，页脚同时提到 `review_publish` 与 `comment_publish` |
+
+> 这一遍确认了三件事：授权 URL 的参数齐全（scope 最小、有 state 与 S256 challenge）、
+> 回调确实建号并**只建一条**（稳定 ID 幂等）、以及落地页与管理员引导在真实路径上都能用。
+> 仍然**没验证**的：生产域名 / HTTPS / 反向代理下的回调 —— GitHub 每个 App 只允许填一个 callback URL。
+
+---
+
 ## 6. 代码地图
 
 ```
@@ -413,15 +440,15 @@ docs/                  设计映射、并行分组协议、模块签名契约、
   **这两轮各咬出过一批 HTTP 验收咬不到的缺陷**（§5 第 14、16、17 条）。
 - **收录插件已接真实 api.github.com 并真机验证**：真实组合包目录收录成功、仓库根无 `dsh.bundle`
   被正确拒绝、不存在的仓库返回干净 400 且不泄露存在性。
-- **GitHub OAuth 代码完整**（PKCE + state + 浏览器绑定 + 一次性消费），只差主人填 Client ID/Secret。
-  新用户的落地页 `/onboarding` 已存在（此前 302 到它，但页面根本没有）。
+- **GitHub OAuth 已跑通一次真实往返**（2026-10-12 晚，真账号真授权）：授权页 → 回调 → 建号（**只建一条**，认稳定数字 ID）→ `/onboarding` → 指定管理员，全在浏览器里点过（§5.4）。生产域名 / HTTPS 下的回调仍未验证。
 - 核心不变量有真实数据库约束与**反恒真自检**兜底（破坏实现 → 测试必须变红 → 按字节还原）。
 
 **不能说的**：
 
 - 不能说"P0 已实现"——第 2 节列的都是没做的。
-- 不能说"已可上线"——没有 Linux/Docker 构建、**没有跑过真实 OAuth 往返**（我没有 Client Secret）、
-  没有目录定时同步与发现、没有备份恢复演练。
+- 不能说"已可上线"——没有 Linux/Docker 构建、没有目录定时同步与发现、没有备份恢复演练；
+  OAuth 只在本机 `127.0.0.1` 上跑通过，**生产域名/HTTPS/反代下的回调没验过**
+  （GitHub 每个 App 只允许填一个 callback URL，换域名要改或再建一个）。
 - 不能说"外部审核已接入"——内置的只是**本地基础筛查**（默认还关着）；默认走人工，
   这**不是**"自动审核已完成"。
 - 不能说"浏览器交互已自动化验收"——没有 Playwright；点过一遍的是**人工**，回归时不会自动重跑，
