@@ -1,27 +1,30 @@
 # 交接书 · DSH 插件测评网站
 
-> 2026-10-12（第二轮会话收尾）。上一版交接书的内容已并入本文件，旧的过时条目已直接改掉。
+> 2026-10-12（第三轮会话收尾）。上一版交接书的内容已并入本文件，旧的过时条目已直接改掉。
 > **目的**：让接手的人（或下一个会话的我）不必依赖上一轮的记忆，只看本文件 + 仓库就能继续。
 
 ---
 
 ## 0. 一句话状态
 
-**核心链路已实现、真机验证、并且真的用浏览器点通了**：
-登录 → 收录插件 → **从插件页写评测** → 保存 → 提交 → **真 worker 发布** → 公开页可读 → 评论公开。
+**核心链路已实现、真机验证、逐页点通**：
+登录 → 收录插件 → **从插件页写评测** → 保存 → 提交 → **检查/人工审核** → **真 worker 发布** → 公开可读
+→ 评论 → **回复** → 作者**撤回**；新用户落地页 `/onboarding` 可用。
 
-`tsc` exit 0、单测 **357/357**、HTTP 验收 **16+20+14**、端到端 **18/18**，浏览器点击链路 9 步走完（§5.2）。
-**已提交并推送：`938f32a`（61 files）→ `origin/main`。**
+`tsc` exit 0、单测 **361/361（17 文件）**、HTTP 验收 **16 + 21 + 14**、端到端 **22/22**，
+浏览器点击链路两轮共 22 步（§5.2 / §5.3）。
+**已提交并推送：`938f32a`（第二轮）→ `c8c4138`（交接书）→ 第三轮见 §6。**
+
+**第三轮补掉的是"页面上的洞"**（§1.2 第 16、17 条）：后台审核按钮、作者撤回按钮、评论回复、
+`/onboarding`、首个管理员指定方式 —— 以及一个真正的断点：**人工通过之后没有任何东西去发布**。
 
 **当前没有待办的技术债**；剩下的都是"要么等主人给密钥，要么本来就在切片范围外"（§3）。
 
 ---
 
-## 1. 本轮（相对 `e59a71a`）做了什么
+## 1. 这三轮做了什么
 
-提交 `938f32a` 的内容分两块。
-
-### 1.1 第一轮已经写好、这轮才验证到的部分
+### 1.1 第二轮（提交 `938f32a`）：把第一轮写好的东西验到底
 
 - 真实 GitHub OAuth（PKCE S256 + state 摘要 + 浏览器绑定 Cookie + 一次性消费）
 - 真实 api.github.com 收录探针（`POST /api/plugins` 原先永远是 503 的桩）
@@ -29,15 +32,30 @@
 - 图片上传全链路、Markdown sanitize 渲染、5 个前端组件 + 2 个页面、作者撤回
 - `next.config.ts` 的 `allowedDevOrigins`
 
-### 1.2 本轮**新发现并修掉**的两个真缺陷
+### 1.2 第二轮**新发现并修掉**的两个真缺陷
 
 | # | 缺陷 | 怎么发现的 | 修法 |
 |---|---|---|---|
 | 14 | **评测没有"绑定插件"的入口**：插件详情页（设计文档指定的入口）没挂按钮，`/me` 的「写一篇评测」却建出 `plugin_id` 为空的草稿 —— 它能保存、能显示，**一点提交就报"请选择插件"**，而界面上没有任何办法补救 | **人工浏览器点击链路**。HTTP 验收与 357 个单测**全都没碰到这一层**：它们一律直接从 API 带 `pluginId` 建草稿，所以咬不出来 | 插件详情页挂 `StartDraftButton pluginId={plugin.pluginId}`；`/me` 改成引导到插件目录；编辑器顶部明示「关联插件」或「未关联 → 无法提交」 |
 | 15 | `acceptance-http.mjs` 的收录断言**过时**：写死要求 `503` | 跑全量验收读出 **15/16**。查因：探针接真实 api.github.com 之后，不存在的仓库**本就该**返回 `400`（`input_invalid` + 具体原因），`503` 只是探针还是桩时的口径 | 改成"明确拒绝且不假装成功"（400/503 + 错误码白名单 + `ok=false`）；再用**变异副本**把 URL 换成真实插件目录（→ 201 成功）验证它会变红 |
+| 16 | **管理员点"通过"之后没有任何东西会去发布**：`decideByAdmin` 把状态推到 `approved` 就结束了。当时页面上连审核按钮都没有，就算有，按了也不会公开 | 第三轮做后台审核按钮时**读代码**发现的。两个验收脚本都在"通过"之后**直接调用 `publishReview`**，正好把这条缝盖住（与"handlers 空注册表"同一类：验收脚本代替了真实路径） | 新增 `workflows/decide-submission`：决定 + **按提交类型**入队发布任务（评测 → `review_publish`，评论 → `comment_publish`）。子缺陷：一律入队 `review_publish` 的话，被通过的**评论**会静默地永远发不出去 —— 这是浏览器里真踩出来的（点通了评论的"通过"，评论却不出现在讨论组里） |
+| 17 | **一批"接口都有、页面没有"的半截功能**：① callback 对新用户 302 到 `/onboarding`，而**这个页面根本不存在**（真实 OAuth 新用户一登录就 404）；② `identity.updateProfile` 实现了却**没有路由**；③ `commentsService.listReplies` 实现了却**没有路由**（只能看到"3 条回复"这个数字，点不开也回不了）；④ 作者撤回只有 API | 逐页清点"用户能点的地方"（列清单逐条对，不是读代码猜） | 补 `/onboarding`（含 `returnTo` 开放重定向防护）+ `PATCH /api/me/profile` + `/api/content/{id}/comments/{cid}/replies`（补内容可见性与归属核对）+ 作者撤回按钮（两段确认）+ 评论回复 UI + `scripts/grant-admin.mjs` |
 
-> 第 14 条值得记住：**"接口全对、页面走不通"这类缺陷，只有真的去点才会暴露。**
-> 当时页面上甚至没有任何提示，用户只会在最后一步撞墙。
+> 第 14 / 16 / 17 条都指向同一件事：**"接口全对、页面走不通"这类缺陷，只有真的去点才会暴露。**
+> 而第 16 条更狠 —— 它连"点"都没露出来，是**读代码**读出来的：验收脚本替它把活干了。
+
+### 1.3 第三轮新增的文件（都在 §8 代码地图里）
+
+| 文件 | 作用 |
+|---|---|
+| `src/server/workflows/decide-submission.ts` | 人工审核决定 + **按提交类型**入队发布任务（第 16 条的修法） |
+| `src/components/admin-decision-form.tsx` | 后台「通过并发布 / 需修改」表单（原因必填、幂等键、如实报告入队结果） |
+| `src/app/onboarding/page.tsx` + `src/components/profile-form.tsx` | 新用户落地页 + 资料确认（第 17 条①） |
+| `src/app/api/me/profile/route.ts` | `PATCH` 保存昵称（接上早就写好却没路由的 `updateProfile`，第 17 条②） |
+| `src/app/api/content/[contentId]/comments/[commentId]/replies/route.ts` | 组内回复分页（第 17 条③，补内容可见性 + 归属核对） |
+| `src/components/withdraw-button.tsx` | 作者撤回按钮（第 17 条④，两段确认） |
+| `scripts/grant-admin.mjs` | 指定/撤销管理员（首个管理员没有界面入口，见 §3.1） |
+| `tests/decide-submission.test.ts` | 5 个用例：人工通过必须入队、评论提交必须入队 `comment_publish`、needs_changes 不入队、非管理员被拒 |
 
 ---
 
@@ -46,21 +64,25 @@
 | 项目 | 结果 | 复现命令 |
 |---|---|---|
 | 类型检查 | **exit 0** | `npx tsc --noEmit` |
-| 单元/集成测试 | **357 passed / 16 files** | `npx vitest run` |
-| HTTP 读验收 | **16/16** | `node scripts/acceptance-http.mjs`（需 dev server） |
-| HTTP 写验收 | **20/20** | `npx tsx scripts/acceptance-http-write.mjs` |
+| 单元/集成测试 | **361 passed / 17 files** | `npx vitest run` |
+| HTTP 读验收 | **16/16**（连跑两次都一样） | `node scripts/acceptance-http.mjs`（需 dev server） |
+| HTTP 写验收 | **21/21** | `npx tsx scripts/acceptance-http-write.mjs` |
 | 图片上传验收 | **14/14**（可重复运行） | `npx tsx scripts/acceptance-upload.mjs` |
-| **端到端整条链** | **18/18** | `npx tsx scripts/acceptance-e2e-chain.mjs` |
-| 浏览器点击链路 | **9 步点通**（人工） | 见 README-切片说明.md §5.2 |
+| **端到端整条链** | **22/22** | `npx tsx scripts/acceptance-e2e-chain.mjs` |
+| 浏览器点击链路 | 第二轮 **9 步** + 第三轮 **13 步**（人工） | README-切片说明.md §5.2 / §5.3 |
+| 人工审核 → 自动发布 | 通过（任务 ID 与 worker 日志对得上） | README §5.3 第 4—6 步 |
 | 真实 GitHub 收录 | 成功收录 `packages/bundle/base` | 见 §5.1 |
 | 浏览器真登录 | 导航栏变为真实用户 ID + 登出 | 见 §5.2 |
 
 端到端脚本覆盖：登录 → 会话接口 → 收录真实插件 → 建草稿 → 保存 → **过期版本被拒** → 提交(pending)
 → **真 worker 进程** → `published` → 公开修订指针切换 → 匿名可读 → 发评论 → worker 发布
-→ 出现在公开列表 → 登出 → 登出后写操作 401。
+→ 出现在公开列表 → **发回复 → worker 发布 → 从组内回复路由读到 → 计入 replyCount → 用回复 ID 当讨论组被拒**
+→ 登出 → 登出后写操作 401。
 
 > ⚠️ 跑 `acceptance-e2e-chain.mjs` 之前**必须先把常驻 worker 停掉**：脚本要自己起 worker，
 > 并且会断言**自己那个子进程**的 stdout（`handler_count`）。两个 worker 会抢任务，脚本会误报失败。
+> 另注：直接用工具 kill 后台作业时，**tsx 的子进程可能不跟着死**，记得确认 `node.exe` 里没有
+> `src/worker/main.ts` 残留。
 
 ---
 
@@ -73,6 +95,12 @@
    把 Client ID/Secret 写进 `.env.local`，另加 `SESSION_SECRET`（≥32 字节，生产必须）。
    **在主人给出 Client Secret 之前，不能声称"OAuth 已跑通"** —— 代码完整，但没有真往返过。
 2. 可选：`GITHUB_TOKEN`（`gh auth token` 的输出）把收录探针限额 60 → 5000 次/小时。
+3. **首个管理员必须上机指定**（站内没有提权入口，这是刻意的）：
+   ```cmd
+   node scripts/grant-admin.mjs --list
+   node scripts/grant-admin.mjs --github-login <你的 GitHub 账号>
+   ```
+   目标账号要先在站内登录过一次。`--revoke` 在会把最后一个可用管理员降级时拒绝执行。
 
 ### 3.2 明确未做（**不要当成已完成**）
 
@@ -80,20 +108,21 @@
 |---|---|
 | 目录发现 / 定时同步 | 只有"粘链接自助收录"；架构 §92—99 的发现与同步未做 |
 | 真实外部内容审核 | 内置的只是**本地确定性基础筛查**（词表+长度+刷屏），**不是审核服务**；默认还关着 |
-| 后台审核页面 | 只有 API（`/api/admin/submissions` + `.../decisions`） |
+| 站内管理员授予/撤销界面 | 只有 `scripts/grant-admin.mjs`（上机执行）。举报、纠错处理、操作记录查看都没有 |
 | 修订历史界面、搜索筛选 | 快照在库里，但没有读取界面；列表只分页 |
 | 多 patch 数组完整核验 | 契约返回单个 `bundlePath`，只核验第一条（见 §4.1） |
 | 评论编辑 | 因此评论发布**没有** `superseded` 检查（见 §4.3） |
 | Linux/Docker 构建、备份恢复演练 | 只验证了本机 Windows + Node 24 |
-| 浏览器自动化 | 无 Playwright；点击链路是**人工**点过一遍，**回归时不会自动重跑** |
+| 浏览器自动化 | 无 Playwright；点击链路是**人工**点过两轮，**回归时不会自动重跑** |
 | 图片「插入图片」按钮 | 系统文件选择器工具驱动不了，没被浏览器驱动验证过（只验了 HTTP 契约 14/14） |
+| 列表页翻页 | `/reviews` 是整表取出再逐条算可见性（没有分页也没有上限）；`/plugins` 只渲染第一页 |
 
 ### 3.3 想继续时的最短路径
 
 ```cmd
 cd /d "D:\developing\ds民间科研成果展示\插件测评网站"
 npx tsc --noEmit                 REM 期望 exit 0
-npx vitest run                   REM 期望 357 passed / 16 files
+npx vitest run                   REM 期望 361 passed / 17 files
 dev.cmd                          REM 迁移 + 自检 + 起 Web（3100）
 REM 另开窗口（要让提交自动发布才需要）：
 set DSH_REVIEW_CONTENT_SCREEN=basic
@@ -197,7 +226,8 @@ Next dev 默认把 `127.0.0.1` 视为**跨源**并拦掉 `/_next/*`
 
 - 工作目录：`D:\developing\ds民间科研成果展示\插件测评网站`
 - 远程：`origin https://github.com/furongjun-lingshu/dsh-plugin-reviews.git`（**PRIVATE**）
-- 提交历史：`5d717ab`（切片）→ `e59a71a`（README dev.cmd 说明）→ **`938f32a`（本轮收口，已推送）**
+- 提交历史：`5d717ab`（切片）→ `e59a71a`（README dev.cmd 说明）→ `938f32a`（第二轮收口）
+  → `c8c4138`（交接书）→ **`ceb7d51`（第三轮：审核闭环 / onboarding / 撤回 / 回复 / 管理员脚本，已推送）**
 - 推送方式（**未持久化到全局配置**）：
   ```
   git -c credential.helper="!gh auth git-credential" push
@@ -255,14 +285,15 @@ src/server/platform/   db / tx / time / id / digest / log / context / migrate /
                        errors-http / request-id / session-cookie / file-store / markdown
 src/server/modules/    identity · catalog · reviews · content · comments ·
                        moderation · tasks · operations · media
-src/server/workflows/  submit-review · publish-review · publish-comment（跨模块协调事务）
+src/server/workflows/  submit-review · publish-review · publish-comment ·
+                       decide-submission（人工审核决定 + 入队发布，跨模块协调事务）
 src/server/adapters/   login（真实 GitHub OAuth + 测试通道）· catalog（真实 api.github.com 探针）
-src/app/               App Router：页面 + /api 路由
+src/app/               App Router：页面 + /api 路由；页面含 /onboarding、/admin、/me/drafts/[draftId]
 src/components/        session-nav · plugin-submit-form · review-editor · comment-section ·
-                       start-draft-button · api-client
+                       start-draft-button · admin-decision-form · profile-form · withdraw-button · api-client
 src/worker/            main（独立进程）· handlers（4 处理器）· content-screen（本地基础筛查）
-tests/                 16 文件 / 357 测试（用真实临时库 + 真实迁移，**不用 `:memory:`**）
-scripts/               验收与自检脚本
+tests/                 17 文件 / 361 测试（用真实临时库 + 真实迁移，**不用 `:memory:`**）
+scripts/               验收与自检脚本；grant-admin.mjs（指定/撤销管理员）
 docs/                  设计映射、并行分组协议、模块签名契约、验收纪律、环境坑
 ```
 
@@ -281,18 +312,23 @@ docs/                  设计映射、并行分组协议、模块签名契约、
 | `POST /api/drafts/{draftId}/attachments` | 登记附件：`{originalFilename, usage}` → `{attachmentId}` |
 | `PUT /api/attachments/{id}/file` | **原始字节**，`content-type: image/png\|jpeg\|webp`，≤10MB |
 | `GET /media/{attachmentId}/{variantKey}` | `DISPLAY`（公开引用后）/`ORIGINAL`（不公开） |
-| `GET\|POST /api/content/{contentId}/comments` | 评论列表 / 发表（**不是** `/api/comments`） |
+| `GET\|POST /api/content/{contentId}/comments` | 评论列表（**仅顶层**）/ 发表（**不是** `/api/comments`；`replyToCommentId` 可选） |
+| `GET /api/content/{contentId}/comments/{commentId}/replies` | 组内回复分页（顶层列表里只有 `replyCount`，回复要单独取） |
+| `PATCH /api/me/profile` | 保存昵称（`{nickname}`）；新用户落地页用它 |
 | `GET /api/reviews/{reviewId}` | 公开详情（未公开 → 404 且不返回正文） |
 | `POST /api/reviews/{reviewId}/withdraw` | 作者撤回，需 `expectedControlVersion` + `requestKey` |
 | `GET /api/plugins` / `POST /api/plugins` | 列表 / 收录（真实探针）；不存在的仓库 → **400**，不是 503 |
 | `GET /api/admin/submissions` | 待办列表 |
-| `POST /api/admin/submissions/{submissionId}/decisions` | 人工决定 |
+| `POST /api/admin/submissions/{submissionId}/decisions` | 人工决定 `{decision:'approve'\|'needs_changes', reason, expectedStateVersion, requestKey}` → `{state, publishTaskId, publishQueued}` |
 
 **版本字段形状**：`{kind:'unknown'}` 或 `{kind:'known', value:'1.2.3'}`。
 空值不是"省略"，而是**明确选未知** —— 未知**不是**退回理由（产品规则）。
 
 **页面入口**：写评测只能从 `/plugins/{pluginId}`（插件详情页）发起 —— 评测必须绑定插件。
 `/me` 只做引导，不再建无插件的死草稿。
+
+**审核路径**：后台待办里混着**评测提交**与**评论提交**，两类都要人工决定；
+"通过"会按 `submission_type` 入队对应的 `*_publish` 任务，真正的发布由 worker 执行。
 
 ---
 
@@ -301,13 +337,19 @@ docs/                  设计映射、并行分组协议、模块签名契约、
 1. **反同义反复（anti-tautology）**：每个关键测试都要能被"破坏实现"咬红。
    项目里有 `scripts/verify-*-bite.mjs` 系列，做法是：破坏实现 → 断言测试变红 → **按字节还原** → 断言复绿。
    **"第一次就全绿"通常意味着变异脚本本身没生效**。改断言时也一样：本轮把验收脚本的收录断言改成
-   动态口径后，专门用**变异副本**（URL 换成真实插件 → 201 成功）验证了它会变红。
+   动态口径后，专门用**变异副本**（URL 换成真实插件 → 201 成功）验证了它会变红；
+   写 `decide-submission` 的测试时也做了同样的事（把入队整段删掉 → 2 条用例变红 → 逐字节还原）。
 2. **真实临时文件库 + 真实迁移**，**禁止 `:memory:`** —— 内存库测不出触发器与迁移问题。
 3. **禁止恒真断言**（如 `expect(x).toBeDefined()` 当唯一断言）。
 4. **单测测不出的东西，靠真进程**：handlers 空注册表、评论发布读在事务外、
    `runRuleCheck` 的 snapshot 不含正文 —— 这三个都是**单测全绿但真跑才暴露**的。
-5. **HTTP 验收测不出的东西，靠真的去点**：本轮第 14 条（缺绑定插件入口）就是这样咬出来的。
-6. **验收脚本必须可重复运行**，且**不假设库为空**。
+5. **HTTP 验收测不出的东西，靠真的去点**：第 14 条（缺绑定插件入口）、
+   第 16 条的子缺陷（评论提交入队错类型）都是这样咬出来的。
+6. **验收脚本不能代替真实路径**：第 16 条就是两个脚本在"通过"之后**直接调用 `publishReview`**，
+   把"通过之后没人发布"这条缝盖了整整两轮。**脚本替实现干活的地方，就是缺陷能藏身的地方。**
+7. **幂等键不能写死**：`acceptance-http.mjs` 曾用固定 `requestKey`，第二次运行就撞
+   `request_key_reused(409)` —— 幂等机制正确工作，却让"可重复运行"的验收误报失败。
+8. **验收脚本必须可重复运行**，且**不假设库为空**。
 
 ---
 
@@ -316,7 +358,7 @@ docs/                  设计映射、并行分组协议、模块签名契约、
 ```cmd
 cd /d "D:\developing\ds民间科研成果展示\插件测评网站"
 npx tsc --noEmit                 REM 期望 exit 0
-npx vitest run                   REM 期望 357 passed / 16 files
+npx vitest run                   REM 期望 361 passed / 17 files
 dev.cmd                          REM 迁移 + 自检 + 起 Web（3100）
 REM 另开窗口：
 set DSH_REVIEW_CONTENT_SCREEN=basic
