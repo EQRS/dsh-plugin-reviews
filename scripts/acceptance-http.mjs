@@ -8,6 +8,11 @@ import { join } from 'node:path';
 const BASE = 'http://127.0.0.1:3100';
 const jar = join(mkdtempSync(join(tmpdir(), 'jar-')), 'cookies.txt');
 
+// 每次运行一个唯一后缀。**幂等键不能写死**：本脚本用固定的测试身份登录
+// （gh-gate / gateuser），写死的 requestKey 第二次运行就会撞 request_key_reused(409) ——
+// 那是幂等机制正确工作的结果，却会让"可重复运行"的验收误报失败（真踩过）。
+const RUN = Date.now().toString(36);
+
 function curl(args) {
   const out = execFileSync('curl.exe', ['-s', '-b', jar, '-c', jar, ...args], { encoding: 'utf8' });
   return out;
@@ -86,7 +91,7 @@ check('GitHub 登录入口存在且如实反映配置状态', ['302', '503'].inc
 //    ⚠ 这里曾经写死 `=== '503'` —— 那是探针还是桩时的口径；接上真实探针之后，
 //    同样的请求会（正确地）返回 400，脚本会**误报失败**。过时的是断言，不是实现。
 const badRepoRaw = curl(['-X', 'POST', '-H', 'content-type: application/json',
-  '-d', JSON.stringify({ url: 'https://github.com/acme/dsh-memory', requestKey: 'k-plugin-1' }),
+  '-d', JSON.stringify({ url: 'https://github.com/acme/dsh-memory', requestKey: `k-plugin-${RUN}` }),
   '-w', '\n%{http_code}', `${BASE}/api/plugins`]);
 const badRepoLines = badRepoRaw.split('\n');
 const badRepoCode = badRepoLines[badRepoLines.length - 1].trim();

@@ -9,6 +9,7 @@ import Link from 'next/link';
 import { getDb } from '@/server/platform/db';
 import { currentContext } from '../api/_lib/context';
 import { isAdmin } from '@/server/platform/context';
+import { AdminDecisionForm } from '@/components/admin-decision-form';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,7 +34,9 @@ export default async function AdminPage() {
           {ctx.userId === null ? '未登录' : '登录账户不是管理员'}。
         </p>
         <p style={{ color: '#526174', fontSize: 14 }}>
-          首个管理员在部署时按既定规则指定；本切片未提供后台授予入口。
+          管理员由部署者指定，站内**没有**自我提权的入口（否则谁能把自己变成管理员就是漏洞）。
+          在项目根目录执行：<code>node scripts/grant-admin.mjs --github-login &lt;GitHub 账号&gt;</code>
+          —— 该账号需要先在站内登录过一次。<code>--list</code> 可查看现有用户与管理员。
         </p>
       </div>
     );
@@ -65,6 +68,7 @@ export default async function AdminPage() {
               <th style={{ padding: 8 }}>提交者</th>
               <th style={{ padding: 8 }}>阶段</th>
               <th style={{ padding: 8 }}>提交时间</th>
+              <th style={{ padding: 8 }}>决定</th>
             </tr>
           </thead>
           <tbody>
@@ -76,14 +80,34 @@ export default async function AdminPage() {
                 <td style={{ padding: 8, fontSize: 14, color: '#526174' }}>
                   {new Date(r.submitted_at).toLocaleString('zh-CN')}
                 </td>
+                <td style={{ padding: 8 }}>
+                  {/*
+                    只对 manual_review 给决定按钮：
+                     - pending / checking 还没被检查过，人工决定会**跳过规则校验**；
+                     - needs_changes 等的是作者改稿，不是管理员再决定。
+                    这两类如实说明，不摆一个点了也不对的按钮。
+                  */}
+                  {r.processing_state === 'manual_review' ? (
+                    <AdminDecisionForm submissionId={r.submission_id} stateVersion={r.state_version} />
+                  ) : (
+                    <span style={{ fontSize: 13, color: '#526174' }}>
+                      {r.processing_state === 'pending'
+                        ? '等待检查任务处理，无需人工决定。'
+                        : '等待作者修改后重新提交。'}
+                    </span>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
       <p style={{ marginTop: 16, fontSize: 14, color: '#526174' }}>
-        决定接口：<code>POST /api/admin/submissions/{'{submissionId}'}/decisions</code>，需携原因、预期提交版本与请求去重键。
-        发布动作见 <code>workflows/publish-review</code>（本切片由 worker/脚本触发）。
+        「通过并发布」会走 <code>workflows/decide-submission</code>：写决定记录 + 把状态推到
+        <code>approved</code>，**并同时入队一条发布任务**。任务类型按提交类型选 ——
+        评测提交入队 <code>review_publish</code>，评论提交入队 <code>comment_publish</code>
+        （本列表里两类混在一起，都是待人工处理）。去重键与自动检查通过时完全一致，因此不会重复发布。
+        真正的发布由 worker 执行 —— <strong>worker 没在跑，内容就不会公开</strong>。
       </p>
       <Link href="/" style={{ color: '#2456B8', fontSize: 14 }}>
         ← 返回首页

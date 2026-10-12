@@ -1,17 +1,19 @@
 'use client';
 
 /**
- * 评论框（任务 7 第 4 项）。
+ * 评论区（任务 7 第 4 项；回复功能为第三轮补全）。
  *
- * 契约（见 src/app/api/content/[contentId]/comments/route.ts）：
- *   GET  /api/content/{contentId}/comments?page=&page_size=  → PageResult<CommentView>
+ * 契约（见 src/app/api/content/[contentId]/comments/route.ts 与 .../[commentId]/replies/route.ts）：
+ *   GET  /api/content/{contentId}/comments?page=&page_size=            → PageResult<CommentView>（仅顶层）
+ *   GET  /api/content/{contentId}/comments/{commentId}/replies?...     → PageResult<CommentView>（组内回复）
  *   POST /api/content/{contentId}/comments  { body, requestKey, replyToCommentId? } → 202
  *
  * 几个真实约束（读代码得到，不是猜的）：
  *  - 接口只在**目标当前公开**时才返回/接受评论（否则 404 target_unavailable）；
  *  - `page_size` 只允许 10 / 20 / 50（PaginationDefaults.allowed_page_sizes）；
  *  - 新评论写入后处理状态是 `pending`，**尚未公开**，所以刚发完它可能不在公开列表里。
- *    这不是 bug，界面必须如实说明，不能让用户以为"发丢了"。
+ *    这不是 bug，界面必须如实说明，不能让用户以为"发丢了"；
+ *  - 回复**不随顶层列表返回**，要单独取（懒加载）—— 顶层列表里只有 `replyCount` 这个数字。
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -43,8 +45,32 @@ interface PageResult<T> {
 interface SessionData {
   authenticated: boolean;
   userId?: string;
+  githubLoginEnabled?: boolean;
   githubLoginConfigured: boolean;
   testLoginEnabled: boolean;
+}
+
+/** 展开状态：undefined = 没展开过；null = 加载中；对象 = 已加载。 */
+type ReplyState = { items: CommentView[]; total: number } | null;
+
+/** 单条评论的时间与署名行（顶层与回复共用，避免两处格式漂移）。 */
+function CommentMeta({ comment }: { comment: CommentView }) {
+  return (
+    <div style={{ fontSize: 13, color: '#526174' }}>
+      {comment.authorId}
+      {comment.firstPublishedAt === null
+        ? ' · 尚未公开'
+        : ` · ${new Date(comment.firstPublishedAt).toLocaleString('zh-CN')}`}
+    </div>
+  );
+}
+
+function CommentBody({ comment }: { comment: CommentView }) {
+  if (comment.deletedAt !== null) return <div style={{ color: '#526174' }}>该评论已删除</div>;
+  if (comment.publishedRevisionId === null) {
+    return <div style={{ color: '#526174' }}>该评论尚未公开</div>;
+  }
+  return <div style={{ whiteSpace: 'pre-wrap' }}>{comment.body}</div>;
 }
 
 export function CommentSection({ contentId }: { contentId: string }) {
@@ -57,6 +83,10 @@ export function CommentSection({ contentId }: { contentId: string }) {
   const [busy, setBusy] = useState(false);
   // 一次提交一个幂等键；失败重试复用（否则重试会变成两条评论）。
   const [pendingKey, setPendingKey] = useState<string | null>(null);
+
+  // 回复相关
+  const [expanded, setExpanded] = useState<Record<string, ReplyState>>({});
+  const [replyTo, setReplyTo] = useState<{ commentId: string; authorId: string } | null>(null);
 
   const loadSession = useCallback(async () => {
     try {
@@ -87,6 +117,40 @@ export function CommentSection({ contentId }: { contentId: string }) {
     void loadComments();
   }, [loadComments]);
 
+  /** 懒加载某个顶层讨论组的回复。 */
+  const loadReplies = useCallback(
+    async (rootCommentId: string) => {
+      setExpanded((prev) => ({ ...prev, [rootCommentId]: null }));
+      try {
+        const result = await apiFetch<PageResult<CommentView>>(
+          `/api/content/${encodeURIComponent(contentId)}/comments/${encodeURIComponent(rootCommentId)}/replies?page=1&page_size=50`,
+          { cache: 'no-store' },
+        );
+        setExpanded((prev) => ({ ...prev, [rootCommentId]: { items: result.items, total: result.total } }));
+      } catch (e) {
+        setExpanded((prev) => {
+          const next = { ...prev };
+          delete next[rootCommentId];
+          return next;
+        });
+        setError(e as ApiError);
+      }
+    },
+    [contentId],
+  );
+
+  const toggleReplies = (rootCommentId: string) => {
+    if (expanded[rootCommentId] !== undefined) {
+      setExpanded((prev) => {
+        const next = { ...prev };
+        delete next[rootCommentId];
+        return next;
+      });
+      return;
+    }
+    void loadReplies(rootCommentId);
+  };
+
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setBusy(true);
@@ -95,17 +159,26 @@ export function CommentSection({ contentId }: { contentId: string }) {
 
     const requestKey = pendingKey ?? newRequestKey();
     setPendingKey(requestKey);
+    const targetRoot = replyTo?.commentId ?? null;
 
     try {
       await apiFetch(`/api/content/${encodeURIComponent(contentId)}/comments`, {
         method: 'POST',
-        json: { body, requestKey },
+        json: { body, requestKey, replyToCommentId: targetRoot },
       });
       setPendingKey(null);
       setBody('');
-      setNotice('评论已提交，正在等待检查；通过后才会公开显示。');
+      setReplyTo(null);
+      setNotice(
+        targetRoot === null
+          ? '评论已提交，正在等待检查；通过后才会公开显示。'
+          : '回复已提交，正在等待检查；通过后才会在讨论组里显示。',
+      );
       // 发完刷新列表（新评论此时通常还不在公开列表里，这一条由上面的提示解释）。
       await loadComments();
+      if (targetRoot !== null && expanded[targetRoot] !== undefined) {
+        await loadReplies(targetRoot);
+      }
     } catch (e) {
       setError(e as ApiError);
     } finally {
@@ -126,16 +199,64 @@ export function CommentSection({ contentId }: { contentId: string }) {
         <p style={{ color: '#526174' }}>还没有评论。</p>
       ) : (
         <ul style={{ listStyle: 'none', padding: 0 }}>
-          {data.items.map((c) => (
-            <li key={c.commentId} style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 13, color: '#526174' }}>
-                {c.authorId}
-                {c.firstPublishedAt === null ? ' · 尚未公开' : ` · ${new Date(c.firstPublishedAt).toLocaleString('zh-CN')}`}
-                {c.replyCount > 0 ? ` · ${c.replyCount} 条回复` : ''}
-              </div>
-              <div>{c.deletedAt !== null ? '该评论已删除' : c.publishedRevisionId === null ? '该评论尚未公开' : c.body}</div>
-            </li>
-          ))}
+          {data.items.map((c) => {
+            const group = expanded[c.commentId];
+            const isOpen = group !== undefined;
+            return (
+              <li
+                key={c.commentId}
+                style={{
+                  marginBottom: 12,
+                  background: '#FFFFFF',
+                  border: '1px solid #DBE1EA',
+                  borderRadius: 8,
+                  padding: 12,
+                }}
+              >
+                <CommentMeta comment={c} />
+                <CommentBody comment={c} />
+
+                <div style={{ marginTop: 6, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={() => setReplyTo({ commentId: c.commentId, authorId: c.authorId })}
+                    style={{ background: 'none', border: 'none', color: '#2456B8', cursor: 'pointer', padding: 0, fontSize: 13 }}
+                  >
+                    回复
+                  </button>
+                  {c.replyCount > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => toggleReplies(c.commentId)}
+                      style={{ background: 'none', border: 'none', color: '#2456B8', cursor: 'pointer', padding: 0, fontSize: 13 }}
+                    >
+                      {isOpen ? '收起回复' : `查看 ${c.replyCount} 条回复`}
+                    </button>
+                  ) : null}
+                </div>
+
+                {isOpen ? (
+                  group === null ? (
+                    <p style={{ color: '#526174', fontSize: 13 }}>正在读取回复…</p>
+                  ) : (
+                    <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0 0', borderLeft: '2px solid #DBE1EA' }}>
+                      {group.items.map((r) => (
+                        <li key={r.commentId} style={{ marginBottom: 8, paddingLeft: 10 }}>
+                          <CommentMeta comment={r} />
+                          <CommentBody comment={r} />
+                        </li>
+                      ))}
+                      {group.total > group.items.length ? (
+                        <li style={{ paddingLeft: 10, fontSize: 13, color: '#526174' }}>
+                          （还有 {group.total - group.items.length} 条回复未显示）
+                        </li>
+                      ) : null}
+                    </ul>
+                  )
+                ) : null}
+              </li>
+            );
+          })}
         </ul>
       )}
 
@@ -167,6 +288,27 @@ export function CommentSection({ contentId }: { contentId: string }) {
         <p style={{ color: '#526174', fontSize: 14 }}>正在读取登录状态…</p>
       ) : session.authenticated ? (
         <form onSubmit={submit}>
+          {replyTo ? (
+            <div
+              style={{
+                background: '#EEF3FF',
+                border: '1px solid #C6D6F5',
+                borderRadius: 6,
+                padding: '6px 10px',
+                fontSize: 13,
+                marginBottom: 6,
+              }}
+            >
+              正在回复 <code>{replyTo.authorId}</code>
+              <button
+                type="button"
+                onClick={() => setReplyTo(null)}
+                style={{ marginLeft: 8, background: 'none', border: 'none', color: '#2456B8', cursor: 'pointer', padding: 0 }}
+              >
+                取消
+              </button>
+            </div>
+          ) : null}
           <label htmlFor={`comment-${contentId}`} style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}>
             发表评论
           </label>
@@ -181,7 +323,7 @@ export function CommentSection({ contentId }: { contentId: string }) {
           />
           <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
             <button type="submit" disabled={busy || body.trim() === ''} style={buttonStyle}>
-              {busy ? '提交中…' : pendingKey ? '重试提交' : '发表评论'}
+              {busy ? '提交中…' : pendingKey ? '重试提交' : replyTo ? '发表回复' : '发表评论'}
             </button>
             <span style={{ color: '#526174', fontSize: 13 }}>提交后需通过检查才会公开显示。</span>
           </div>

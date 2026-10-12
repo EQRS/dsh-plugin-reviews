@@ -177,7 +177,18 @@ let mod;
 try { mod = JSON.parse(modRaw); } catch { mod = { __raw: modRaw.slice(0, 300) }; }
 check('管理员人工通过', mod.ok === true && mod.data?.state === 'approved', JSON.stringify(mod.data ?? mod));
 
-// 6) 发布（workflow 直接调用，本切片未做后台发布入口）
+// 关键：人工通过**必须同时入队发布任务**。
+// 曾经只改状态不入队 —— 管理员点了"通过"，内容永远不公开；而本脚本当年在下一步
+// 直接调用 publishReview，正好把这条缝盖住（单测与验收全绿，真实路径是断的）。
+check(
+  '人工通过会入队发布任务（不是"通过完没人管"）',
+  mod.ok === true && mod.data?.publishQueued === true && typeof mod.data?.publishTaskId === 'string',
+  `publishTaskId=${mod.data?.publishTaskId}`,
+);
+
+// 6) 发布：由 worker 领走队列里的 review_publish 任务执行。
+//    本脚本**不拉起 worker**（端到端那条链负责真 worker），所以这里直接把发布做完，
+//    好让后面的"公开详情 / 撤回"等断言有真实数据。入队这一步已经由上一行断言证明了。
 const { publishReview } = await import('../src/server/workflows/publish-review.ts');
 const outcome = publishReview(subParsed.data.submissionId, db);
 // 重复执行时若已发布，publishReview 返回 already_published —— 同样算达成目标。

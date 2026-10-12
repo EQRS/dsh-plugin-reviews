@@ -16,7 +16,11 @@ import { currentContext, okJson, errorResponse, requestMeta, readJson } from '..
 
 export const runtime = 'nodejs';
 
-function parsePaging(url: URL): { page: number; pageSize: number } {
+/**
+ * 页码/每页校验。**导出**是给同级的 `.../comments/[commentId]/replies` 复用 ——
+ * 允许的每页条数是产品规则，复制两份迟早漂移。
+ */
+export function parsePaging(url: URL): { page: number; pageSize: number } {
   const page = Number(url.searchParams.get('page') ?? '1');
   const pageSize = Number(url.searchParams.get('page_size') ?? String(PaginationDefaults.default_page_size));
   if (!Number.isInteger(page) || page < 1) {

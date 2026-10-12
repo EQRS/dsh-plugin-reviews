@@ -266,6 +266,36 @@ if (comment.ok === true && comment.data?.commentId) {
   const list = json([`${BASE}/api/content/${reviewId}/comments`]);
   const ids = (list.data?.items ?? []).map((i) => i.commentId);
   check('公开评论列表包含该评论（未被错误过滤）', ids.includes(comment.data.commentId), `count=${ids.length}`);
+
+  // 11b) 回复：顶层列表里只有 replyCount 这个数字，回复要单独取
+  //      （新路由 GET /api/content/{id}/comments/{commentId}/replies）。
+  const reply = sendJson('POST', `/api/content/${reviewId}/comments`, {
+    body: '这是一条回复，用来验证讨论组内回复的提交、检查、发布与公开读取。',
+    replyToCommentId: comment.data.commentId,
+    requestKey: `reply-${RUN}`,
+  });
+  check('发回复成功（携 replyToCommentId）', reply.ok === true, JSON.stringify(reply.data ?? reply.error));
+
+  if (reply.ok === true && reply.data?.commentId) {
+    if (reply.data?.submissionId) {
+      await runWorkerUntilDrained(reply.data.submissionId);
+    }
+    const replies = json([`${BASE}/api/content/${reviewId}/comments/${comment.data.commentId}/replies`]);
+    const rIds = (replies.data?.items ?? []).map((i) => i.commentId);
+    check(
+      '回复经 worker 发布后可从「组内回复」路由读到',
+      rIds.includes(reply.data.commentId),
+      `count=${rIds.length} total=${replies.data?.total}`,
+    );
+
+    const rootsAfter = json([`${BASE}/api/content/${reviewId}/comments`]);
+    const rootRow = (rootsAfter.data?.items ?? []).find((i) => i.commentId === comment.data.commentId);
+    check('回复计入顶层评论的 replyCount', (rootRow?.replyCount ?? 0) >= 1, `replyCount=${rootRow?.replyCount}`);
+
+    // 拿一条回复的 ID 去当 root 取回复组必须被拒（顶层判断不能被绕过）
+    const badRoot = json([`${BASE}/api/content/${reviewId}/comments/${reply.data.commentId}/replies`]);
+    check('用回复的 ID 当讨论组取回复 → 明确拒绝', badRoot.ok === false, badRoot.error?.code);
+  }
 }
 
 // 12) 登出后写操作必须 401

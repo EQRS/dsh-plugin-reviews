@@ -4,12 +4,16 @@
  * POST /api/admin/submissions/{submissionId}/decisions
  *
  * 通过仍须满足结构、附件及类型发布条件；实际发布由发布流程另行核验资格。
+ *
+ * ⚠️ 「通过」会**同时入队一条 `review_publish` 任务**（走 `workflows/decide-submission`）——
+ * 否则状态改成 approved 之后没有任何东西会去发布，人工审核这条路径是断的。
+ * 返回值里的 `publishQueued` 如实报告入队是否成功，后台页面必须把它显示出来。
  */
 
 import { getDb } from '@/server/platform/db';
-import { createModerationService } from '@/server/modules/moderation';
 import { isAdmin } from '@/server/platform/context';
 import { err } from '@/packages/common/errors';
+import { decideSubmission } from '@/server/workflows/decide-submission';
 import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../../../../_lib/context';
 
 export const runtime = 'nodejs';
@@ -44,16 +48,29 @@ export async function POST(
       throw err.input('缺少请求标识。', [{ path: 'requestKey', message: '必填' }]);
     }
 
-    const moderation = createModerationService(getDb());
-    const result = await moderation.decideByAdmin(ctx, {
-      submissionId,
-      decision: body.decision,
-      reason: body.reason,
-      expectedStateVersion: body.expectedStateVersion as number,
-      requestKey: body.requestKey,
-    });
+    // 通过时**同时**入队发布任务（workflows/decide-submission）。
+    // 只改状态不入队的话，人工通过之后没有任何东西会去发布 —— 曾真的这样。
+    const result = await decideSubmission(
+      ctx,
+      {
+        submissionId,
+        decision: body.decision,
+        reason: body.reason,
+        expectedStateVersion: body.expectedStateVersion as number,
+        requestKey: body.requestKey,
+      },
+      getDb(),
+    );
 
-    return okJson(result, requestId);
+    return okJson(
+      {
+        state: result.state,
+        publishTaskId: result.publishTaskId,
+        // 通过但没能入队 = 需要人管：调用方（后台页面）必须如实提示。
+        publishQueued: result.publishTaskId !== null,
+      },
+      requestId,
+    );
   } catch (e) {
     return errorResponse(e, requestId);
   }

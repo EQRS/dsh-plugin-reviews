@@ -11,7 +11,9 @@ import { getDb } from '@/server/platform/db';
 import { resolveVisibilityInTx } from '@/server/modules/content';
 import { formatVersionLabel } from '@/packages/common/status-text';
 import { renderMarkdownToSafeHtml } from '@/server/platform/markdown';
+import { currentContext } from '@/app/api/_lib/context';
 import { CommentSection } from '@/components/comment-section';
+import { WithdrawButton } from '@/components/withdraw-button';
 import type { VersionValue } from '@/packages/common/field-rules';
 
 export const dynamic = 'force-dynamic';
@@ -25,6 +27,7 @@ interface Row {
   plugin_version: string;
   dsh_version: string;
   author_nickname: string;
+  author_id: string;
   first_published_at: number | null;
   public_updated_at: number | null;
 }
@@ -32,6 +35,9 @@ interface Row {
 export default async function ReviewDetailPage({ params }: { params: Promise<{ reviewId: string }> }) {
   const { reviewId } = await params;
   const db = getDb();
+
+  // 作者视角需要"这是不是我的文章"；服务端已经解析过会话，这里只读不多查库。
+  const ctx = await currentContext();
 
   const vis = resolveVisibilityInTx(db, reviewId);
   if (!vis.publiclyVisible) {
@@ -51,7 +57,7 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ r
   const row = db
     .prepare(
       `SELECT r.id AS review_id, r.plugin_id, r.source_kind, rev.title, rev.body_markdown,
-              rev.plugin_version, rev.dsh_version, u.nickname AS author_nickname,
+              rev.plugin_version, rev.dsh_version, u.nickname AS author_nickname, ce.author_id,
               ce.first_published_at, ce.public_updated_at
          FROM reviews r
          JOIN content_entities ce ON ce.id = r.id
@@ -125,6 +131,25 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ r
             </Link>
           ) : null}
         </div>
+
+        {/*
+          作者操作只在**作者本人**看这篇时出现。撤回资格由服务端核验（非作者一律 403），
+          这里隐藏按钮只是不摆一个点了也没用的入口，不是权限判断。
+        */}
+        {ctx.userId !== null && ctx.userId === row.author_id ? (
+          <div
+            style={{
+              background: '#FFFFFF',
+              border: '1px solid #DBE1EA',
+              borderRadius: 10,
+              padding: 16,
+              marginTop: 12,
+            }}
+          >
+            <h2 style={{ fontSize: 16, marginTop: 0 }}>作者操作</h2>
+            <WithdrawButton reviewId={row.review_id} expectedControlVersion={vis.controlVersion} />
+          </div>
+        ) : null}
       </aside>
     </div>
   );
