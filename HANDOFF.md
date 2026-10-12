@@ -11,7 +11,7 @@
 登录 → 收录插件 → **从插件页写评测** → 保存 → 提交 → **检查/人工审核** → **真 worker 发布** → 公开可读
 → 评论 → **回复** → 作者**撤回**；新用户落地页 `/onboarding` 可用。
 
-`tsc` exit 0、单测 **361/361（17 文件）**、HTTP 验收 **16 + 21 + 14**、端到端 **22/22**，
+`tsc` exit 0、单测 **367/367（18 文件）**、HTTP 验收 **16 + 21 + 14**、端到端 **22/22**，
 浏览器点击链路两轮共 22 步（§5.2 / §5.3）。
 **已提交并推送：`938f32a`（第二轮）→ `c8c4138`（交接书）→ 第三轮见 §6。**
 
@@ -64,7 +64,7 @@
 | 项目 | 结果 | 复现命令 |
 |---|---|---|
 | 类型检查 | **exit 0** | `npx tsc --noEmit` |
-| 单元/集成测试 | **361 passed / 17 files** | `npx vitest run` |
+| 单元/集成测试 | **367 passed / 18 files** | `npx vitest run` |
 | HTTP 读验收 | **16/16**（连跑两次都一样） | `node scripts/acceptance-http.mjs`（需 dev server） |
 | HTTP 写验收 | **21/21** | `npx tsx scripts/acceptance-http-write.mjs` |
 | 图片上传验收 | **14/14**（可重复运行） | `npx tsx scripts/acceptance-upload.mjs` |
@@ -92,15 +92,26 @@
 
 1. **真实 GitHub 登录生效**：在 https://github.com/settings/developers 建 OAuth App，
    callback 填 `http://127.0.0.1:3100/api/auth/github/callback`，
-   把 Client ID/Secret 写进 `.env.local`，另加 `SESSION_SECRET`（≥32 字节，生产必须）。
-   **在主人给出 Client Secret 之前，不能声称"OAuth 已跑通"** —— 代码完整，但没有真往返过。
+   把 Client ID/Secret 写进 `.env.local`。
+   三个变量 `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` / `GITHUB_REDIRECT_URI` **都必填**
+   （`redirect_uri` 没有默认值，漏了照样判"未配置"），缺任一个 `/api/session` 的
+   `githubLoginConfigured` 就是 `false`。**在主人给出 Client Secret 之前，不能声称"OAuth 已跑通"**。
+   > 2026-10-12 已把 `.env.local` 铺好：`GITHUB_REDIRECT_URI` 已填、`SESSION_SECRET` 已随机生成
+   > （43 字符 ≥ 32）、`BOOTSTRAP_ADMIN_GITHUB_ID` 已填主人账号的数字 ID（`liceses` / `121547321`），
+   > 只剩 `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` 两行等着粘贴。
+   > Next dev **会自动重载 `.env.local`**（日志出现 `Reload env: .env.local`），但稳妥起见改完重启一次。
 2. 可选：`GITHUB_TOKEN`（`gh auth token` 的输出）把收录探针限额 60 → 5000 次/小时。
-3. **首个管理员必须上机指定**（站内没有提权入口，这是刻意的）：
-   ```cmd
-   node scripts/grant-admin.mjs --list
-   node scripts/grant-admin.mjs --github-login <你的 GitHub 账号>
-   ```
-   目标账号要先在站内登录过一次。`--revoke` 在会把最后一个可用管理员降级时拒绝执行。
+3. **首个管理员**（站内没有提权入口，这是刻意的），两条路：
+   - **部署配置引导（推荐，第一次登录就生效）**：`.env.local` 里
+     `BOOTSTRAP_ADMIN_GITHUB_ID=<你的 GitHub 数字 ID>`（`gh api user --jq .id`）。
+     语义是**引导**：只有当库里**一个可用管理员都没有**时才提升 ——
+     被降过权的账号不会在下次登录时自己变回来。
+   - **上机指定/撤销**（账号得先登录过一次）：
+     ```cmd
+     node scripts/grant-admin.mjs --list
+     node scripts/grant-admin.mjs --github-login <你的 GitHub 账号>
+     ```
+     `--revoke` 在会把最后一个可用管理员降级时拒绝执行。
 
 ### 3.2 明确未做（**不要当成已完成**）
 
@@ -122,7 +133,7 @@
 ```cmd
 cd /d "D:\developing\ds民间科研成果展示\插件测评网站"
 npx tsc --noEmit                 REM 期望 exit 0
-npx vitest run                   REM 期望 361 passed / 17 files
+npx vitest run                   REM 期望 367 passed / 18 files
 dev.cmd                          REM 迁移 + 自检 + 起 Web（3100）
 REM 另开窗口（要让提交自动发布才需要）：
 set DSH_REVIEW_CONTENT_SCREEN=basic
@@ -188,6 +199,8 @@ Next dev 默认把 `127.0.0.1` 视为**跨源**并拦掉 `/_next/*`
 | 管理员决定路由无动态段 | 500 | 移到 `.../[submissionId]/decisions` |
 | `fs.cpSync` 遇 CJK | `0xC0000409` 崩溃 | 见 `docs/环境坑-cpSync-CJK崩溃.md`（本项目路径含 CJK） |
 | 验收脚本共享 cookie jar | 断言被前一步登录污染 | 每角色独立 jar |
+| 验收脚本写死幂等键 | 第二次运行撞 `request_key_reused(409)`（幂等机制是对的，脚本不可重复） | 每次运行生成唯一键（`RUN = Date.now().toString(36)`） |
+| **`.env.example` 里的变量没人读** | 部署者照填，然后什么都不会发生（`BOOTSTRAP_ADMIN_GITHUB_ID`、`SITE_ORIGIN`） | 前者已接上（§1.2 第 18 条）；后者如实标注"当前未读取"。**加配置项时同时加读者，或标注它还是空的** |
 | 登出后页面不刷新 | 点「登出」后，已渲染的服务端页面仍显示登录态操作（如插件页的「写一篇评测」） | 这是 Next 的 Router Cache；**硬刷新即正确**（刷新后显示"登录后可以在这里写评测"），且服务端照样会 401 拦住。暂未处理 |
 
 ---
@@ -219,6 +232,28 @@ Next dev 默认把 `127.0.0.1` 视为**跨源**并拦掉 `/_next/*`
 
 **操作注意**：`browser_interact` 的 `click` 只能带**一个** `target`，别把解释文字塞进同一个调用块。
 评论框这类没出现在 a11y 树里的元素，可以用 CSS 选择器（`#comment-<contentId>`）直接填。
+
+### 5.3 第三轮点击：人工审核 → 回复 → 撤回（13 步，完整表在 README §5.3）
+
+| # | 操作 | 观察到的结果 |
+|---|---|---|
+| 1 | 浏览器登录（测试通道）→ `/admin` | 提示"不是管理员"，并给出 `grant-admin.mjs` 用法 |
+| 2 | `node scripts/grant-admin.mjs --github-login local-dev` | 指定成功；导航栏随即出现「（管理员）」 |
+| 3 | 编辑器改标题 → 提交审核 | `pending`；worker（**未开筛查**）→ `manual_review` |
+| 4 | `/admin` 点「通过并发布」（**不填原因**） | `input_invalid`：请先填写处理原因 —— 必填拦截生效 |
+| 5 | 填原因 → 再点 | 「发布任务 `01a13064-…` 已入队」 |
+| 6 | 等 worker | **同一条任务 ID**：`review_publish` → 评测已发布 |
+| 7 | 刷新公开页 | 标题换成新修订，`最近更新` 变新；出现「回复」与「作者操作 → 撤回」 |
+| 8 | 点「回复」→ 填正文 → 发表回复 | 提交 `01a13065-…` → 检查后 `manual_review`（评论提交也在后台待办里） |
+| 9 | `/admin` 通过**这条评论提交** | 「发布任务 `01a13067-…` 已入队」；worker 跑的是 **`comment_publish`** → 评论已发布 |
+| 10 | 公开页点「查看 1 条回复」 | 回复以缩进出现在讨论组里（`replyCount=1`） |
+| 11 | 「撤回这篇评测」→ 填原因 → 确认 | 「已撤回…历史修订仍然保留」；刷新后页面变「作者已撤回这篇评测。」 |
+| 12 | `/onboarding?returnTo=https://evil.example/steal` | 「跳过」链接 href 是 **`/`**（开放重定向被挡） |
+| 13 | `/onboarding?returnTo=/me` 改昵称保存 | 跳到 `/me`；`grant-admin --list` 里昵称已改 |
+
+> 第 4→5 与第 8→9 两步最有价值：前者是"通过真的会入队"的正面证据，后者抓出了
+> **评论提交必须入队 `comment_publish`**（一律 `review_publish` 的话，评论会静默地永远发不出去）。
+> 浏览器点之前，这两条缝都被"验收脚本自己调 `publishReview`"盖着。
 
 ---
 
@@ -292,7 +327,7 @@ src/app/               App Router：页面 + /api 路由；页面含 /onboarding
 src/components/        session-nav · plugin-submit-form · review-editor · comment-section ·
                        start-draft-button · admin-decision-form · profile-form · withdraw-button · api-client
 src/worker/            main（独立进程）· handlers（4 处理器）· content-screen（本地基础筛查）
-tests/                 17 文件 / 361 测试（用真实临时库 + 真实迁移，**不用 `:memory:`**）
+tests/                 18 文件 / 367 测试（用真实临时库 + 真实迁移，**不用 `:memory:`**）
 scripts/               验收与自检脚本；grant-admin.mjs（指定/撤销管理员）
 docs/                  设计映射、并行分组协议、模块签名契约、验收纪律、环境坑
 ```
@@ -358,7 +393,7 @@ docs/                  设计映射、并行分组协议、模块签名契约、
 ```cmd
 cd /d "D:\developing\ds民间科研成果展示\插件测评网站"
 npx tsc --noEmit                 REM 期望 exit 0
-npx vitest run                   REM 期望 361 passed / 17 files
+npx vitest run                   REM 期望 367 passed / 18 files
 dev.cmd                          REM 迁移 + 自检 + 起 Web（3100）
 REM 另开窗口：
 set DSH_REVIEW_CONTENT_SCREEN=basic

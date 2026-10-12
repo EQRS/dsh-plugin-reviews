@@ -50,14 +50,27 @@ npm run dev             # Web：http://127.0.0.1:3100
 npm run worker          # 独立 worker 进程（**要真正发布内容就需要它**）
 npm run admin:grant -- --list                    # 看现有用户与管理员
 npm run admin:grant -- --github-login <账号>      # 指定管理员（该账号需先登录过一次）
-npm test                # 361 个测试
+npm test                # 367 个测试
 npm run typecheck       # tsc --noEmit
 ```
 
 ### 首个管理员怎么指定（**站内没有提权入口**）
 
 后台 `/admin` 只有管理员能用，而站内**没有任何**"把我变成管理员"的按钮 —— 那是刻意的：
-能自我提权才是漏洞。管理员由部署者在本机指定：
+能自我提权才是漏洞。两条路，都在部署侧：
+
+**① 部署配置里引导（推荐：第一次登录就生效）**
+
+```ini
+# .env.local
+BOOTSTRAP_ADMIN_GITHUB_ID=121547321   # 你的 GitHub 数字 ID，不是用户名
+```
+
+取值：`gh api user --jq .id`，或打开 `https://api.github.com/users/<你的用户名>` 看 `id` 字段。
+语义是**引导**而不是永久提权：只有当库里**一个可用管理员都没有**时才生效 ——
+所以被别的管理员撤销过权限的账号，不会在下次登录时自己变回管理员。
+
+**② 上机指定 / 撤销（已经登录过的账号）**
 
 ```cmd
 node scripts/grant-admin.mjs --list
@@ -66,14 +79,14 @@ node scripts/grant-admin.mjs --user-id <站内 UUID>
 node scripts/grant-admin.mjs --github-login <账号> --revoke
 ```
 
-- 目标账号必须**先在站内登录过一次**（`users` 行由首次登录建立），否则脚本会明确拒绝并让你先登录。
+- ② 的目标账号必须**先在站内登录过一次**（`users` 行由首次登录建立），否则脚本会明确拒绝并让你先登录。
 - `--revoke` 在会把**最后一个可用管理员**降级时拒绝执行（对应 idea.md 第 344 行"系统确保至少保留一个管理员"）。
 
 ### 验收脚本（真跑，不是描述）
 
 | 命令 | 做什么 | 当前结果 |
 |---|---|---|
-| `npx vitest run` | 单元 + 集成 + 端到端（含真实临时库与真实迁移） | **361 passed / 17 files** |
+| `npx vitest run` | 单元 + 集成 + 端到端（含真实临时库与真实迁移） | **367 passed / 18 files** |
 | `npx tsc --noEmit` | 类型检查 | **exit 0** |
 | `node scripts/verify-tests-bite.mjs` | **反恒真自检**：删掉盖楼触发器 → 测试必须变红 → 还原 → 必须复绿 | 通过 |
 | `node scripts/verify-comment-visibility-bite.mjs` | **反恒真自检**：去掉评论公开修订过滤 → 评论可见性测试必须变红 → 还原（逐字节核对）→ 必须复绿 | 通过 |
@@ -188,6 +201,7 @@ DSH_REVIEW_ALLOW_TEST_LOGIN=1
 | 11 | 评测**必须**绑定插件才能提交（`validateForPublish` 校验 `plugin_id`；`review_revisions.plugin_id` 是 NOT NULL 外键） | 这是产品规则，不是缺陷。所以"写评测"只能在插件页发起：凭空建的、`plugin_id` 为空的草稿**保存得了、提交不了**，是一条死路（真踩过，见 §5 第 14 条） |
 | 12 | `acceptance-http.mjs` 的收录断言曾写死 `503` | 探针还是桩时的口径；接上真实 api.github.com 后，不存在的仓库会（正确地）返回 400 → 脚本误报失败。已改为断言"明确拒绝且不假装成功"（400/503 + 错误码白名单），并用变异副本验证过它会咬（见 §5 第 15 条） |
 | 13 | **评论发布没有 `superseded` 资格检查**（评测有） | `publishReview` 用 `latest_submitted_revision_id` 挡"被新提交取代的旧快照"。评论侧**不能照抄**：评论提交路径从未写这一列，恒为 NULL，照抄会让所有评论都判 superseded、一条也发不出去（**曾经真写错过一次，被实跑测试立刻抓出**）。评论当前只有"首次提交即修订"一条路径，故该状态尚不可能出现；**将来支持编辑评论时必须同时**维护该列并加回检查 |
+| 14 | `.env.example` 里的 `SITE_ORIGIN` **当前没有任何代码读取** | 预留给将来的绝对链接 / 邮件 / 分享卡片。真正决定登录回调的是 `GITHUB_REDIRECT_URI`。已在 `.env.example` 里如实标注"当前未读取"，免得部署者以为改了它就能换域名（同类的 `BOOTSTRAP_ADMIN_GITHUB_ID` 已实现，见 §5 第 18 条） |
 
 ### 2.4 测试覆盖的真实边界（**不要高估**）
 
@@ -266,7 +280,8 @@ DSH_REVIEW_ALLOW_TEST_LOGIN=1
 | 14 | **评测根本没有"选择插件"的入口**：插件详情页（设计文档指定的入口）没挂按钮，`/me` 的「写一篇评测」却建出 `plugin_id` 为空的草稿 —— 它能保存、能显示，**点提交才报"请选择插件"**，而界面上没有任何办法补救 | **人工浏览器点击链路**（HTTP 验收与 357 个单测全绿，全都没碰到这一层：它们都从 API 直接带 `pluginId` 建草稿） | 插件详情页挂 `StartDraftButton pluginId={plugin.pluginId}`；`/me` 改成引导到插件目录；编辑器顶部显式显示"关联插件"或"未关联 → 无法提交"的告警。见 §5.2 |
 | 15 | `acceptance-http.mjs` 的收录断言**过时**：写死要求 `503` | 跑全量验收时读出 15/16。查因：探针接真实 api.github.com 之后，不存在的仓库**本就该**返回 400（`input_invalid` + 具体原因），503 只是当年探针还是桩时的口径 | 改成"明确拒绝且不假装成功"（400/503 + 错误码白名单 + `ok=false`）；再用**变异副本**把 URL 换成真实插件目录（201 成功）验证它会变红 —— 断言不是恒真的 |
 | 16 | **管理员点"通过"之后没有任何东西会去发布**：`decideByAdmin` 把状态推到 `approved` 就结束了。页面上的"审"要么没有按钮（当时），要么按了也不会公开 | 第三轮做后台审核按钮时，**读代码**发现 `moderation.decideByAdmin` 里没有任何入队动作。两个验收脚本都在"通过"之后**直接调用 `publishReview`**，正好把这条缝盖住 | 新增 `workflows/decide-submission`：决定 + **按提交类型**入队发布任务（评测 → `review_publish`，评论 → `comment_publish`）。新增 `tests/decide-submission.test.ts`（5 用例，含"评论提交必须入队 comment_publish"）；变异测试证实：把入队整段删掉 → 2 条用例变红 |
-| 17 | **一批"接口都有、页面没有"的半截功能**：① `/api/auth/github/callback` 对新用户 302 到 `/onboarding`，而**这个页面根本不存在**（真实 OAuth 新用户一登录就 404）；② `identity.updateProfile` 实现了却**没有路由**，资料确认页无从保存；③ `commentsService.listReplies` 实现了却**没有路由**，评论只能看到"3 条回复"这个数字、点不开也回不了；④ 作者撤回只有 API，页面上没有按钮 | 逐页清点"用户能点的地方"（不是读代码猜，是列清单逐条对） | 补 `/onboarding`（含 `returnTo` 开放重定向防护，只接受站内路径）+ `PATCH /api/me/profile` + `/api/content/{id}/comments/{cid}/replies`（补内容可见性与归属核对）+ 作者撤回按钮（两段确认）+ 评论回复 UI（懒加载展开）。见 §5.3 |
+| 17 | **一批"接口都有、页面没有"的半截功能**：① callback 对新用户 302 到 `/onboarding`，而**这个页面根本不存在**（真实 OAuth 新用户一登录就 404）；② `identity.updateProfile` 实现了却**没有路由**，资料确认页无从保存；③ `commentsService.listReplies` 实现了却**没有路由**，评论只能看到"3 条回复"这个数字、点不开也回不了；④ 作者撤回只有 API，页面上没有按钮 | 逐页清点"用户能点的地方"（不是读代码猜，是列清单逐条对） | 补 `/onboarding`（含 `returnTo` 开放重定向防护，只接受站内路径）+ `PATCH /api/me/profile` + `/api/content/{id}/comments/{cid}/replies`（补内容可见性与归属核对）+ 作者撤回按钮（两段确认）+ 评论回复 UI（懒加载展开）。见 §5.3 |
+| 18 | `.env.example` 里写的 `BOOTSTRAP_ADMIN_GITHUB_ID`（首个管理员的**部署配置**路径）**没有任何代码读取** —— 部署者照着填，然后什么也不会发生 | 准备给主人写"OAuth 怎么配"的步骤时顺手核了一遍 `.env.example` 的每一行，发现它和 `SITE_ORIGIN` 都是死变量 | 接上：`signInWithGithub` 在读/建用户后调用 `bootstrapAdminWithin`。语义**收紧成引导**——只有 `provider_user_id` 完全匹配、且**当前一个可用管理员都没有**时才提升（否则被降权的账号下次登录会自己变回来，"撤销"永远无效）。新增 `tests/bootstrap-admin.test.ts`（5 用例）；变异验证：删掉那道闸 → 第 3 条变红。`SITE_ORIGIN` 没实现，如实标注为"当前未读取" |
 
 > 第 13 条值得单独说明：它同时暴露了两件事——
 > ① 公开读取漏了可见性过滤（**真实漏洞**，会泄露尚未通过检查的内容）；
@@ -304,7 +319,7 @@ DSH_REVIEW_ALLOW_TEST_LOGIN=1
 
 ## 5.2 浏览器点击链路（人工，工具驱动）—— 2026-10-12
 
-**为什么必须点**：这一层是 HTTP 验收与 361 个单测**都覆盖不到**的 —— 它们一律直接从 API 带好
+**为什么必须点**：这一层是 HTTP 验收与 367 个单测**都覆盖不到**的 —— 它们一律直接从 API 带好
 `pluginId` 建草稿，于是"页面根本没有绑插件的入口"这件事，谁也咬不出来（§5 第 14 条）。
 
 一次完整的点击记录（浏览器工具；dev server `http://127.0.0.1:3100`；worker 以 `DSH_REVIEW_CONTENT_SCREEN=basic` 启动）：
@@ -374,7 +389,7 @@ src/app/               App Router：页面 + /api 路由；页面含 /onboarding
 src/components/        session-nav · plugin-submit-form · review-editor · comment-section ·
                        start-draft-button · admin-decision-form · profile-form · withdraw-button · api-client
 src/worker/            main（独立任务进程）· handlers（4 个处理器）· content-screen（本地基础筛查）
-tests/                 17 个文件 / 361 个测试（含 support/db.ts 真实临时库）
+tests/                 18 个文件 / 367 个测试（含 support/db.ts 真实临时库）
 scripts/               验收与自检脚本；grant-admin.mjs（指定/撤销管理员）
 docs/                  设计映射、并行分组协议、模块签名契约、验收纪律、环境坑
 ```
@@ -391,7 +406,7 @@ docs/                  设计映射、并行分组协议、模块签名契约、
 
 **可以说的**：
 
-- 这条垂直链路在本机真实跑通了：**361 单测** + HTTP 验收（读 **16/16**、写 **21/21**、上传 **14/14**）
+- 这条垂直链路在本机真实跑通了：**367 单测** + HTTP 验收（读 **16/16**、写 **21/21**、上传 **14/14**）
   + **端到端整条链 22/22**（含**真 worker 进程**把内容从 `pending` 推到 `published`）。
 - **页面上真的能点通**（两轮）：插件页 → 写评测 → 保存 → 提交 → worker 发布 → 公开可读 → 评论（§5.2）；
   后台 → 人工通过 → **入队发布 → worker 发布**、评论回复、作者撤回、`/onboarding` 改昵称（§5.3）。

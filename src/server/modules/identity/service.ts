@@ -38,6 +38,8 @@ export interface IdentityServiceDeps {
   db?: SqliteDatabase;
   /** 时限参数覆盖（默认取架构第 105 节初始值）。 */
   policy?: Partial<SessionPolicy>;
+  /** 部署配置视图（默认 process.env）。首个管理员的引导开关从这里读。 */
+  env?: NodeJS.ProcessEnv;
 }
 
 interface UserRow {
@@ -76,9 +78,45 @@ function deriveNickname(input: IdentifiedGithubUser): string {
   return `github-${input.providerUserId}`;
 }
 
+/**
+ * 部署时指定的**首个管理员**（`.env.example` 的 `BOOTSTRAP_ADMIN_GITHUB_ID`）。
+ *
+ * 语义刻意收紧成"引导"而不是"永久提权"：
+ *  1. 只有 `provider_user_id`（GitHub 稳定数字 ID）与该变量**完全相同**的账号才可能被提升
+ *     —— 用户名可以改，不能当身份；
+ *  2. 且**当前一个可用管理员都没有**时才生效。否则被别的管理员降过权的账号，
+ *     下次登录会自动变回管理员，"撤销"就永远无效了（idea.md：撤销权限要真的生效）；
+ *  3. 已禁用（disabled）的账户不提升。
+ *
+ * 返回是否真的提升了（仅供测试与日志；登录流程不因它失败 —— 引导不该挡住正常登录）。
+ */
+export function bootstrapAdminWithin(
+  db: SqliteDatabase,
+  input: { userId: string; providerUserId: string; now: number; env: NodeJS.ProcessEnv },
+): boolean {
+  const wanted = input.env.BOOTSTRAP_ADMIN_GITHUB_ID?.trim();
+  if (!wanted || wanted !== input.providerUserId) return false;
+
+  const admins = (
+    db.prepare(`SELECT count(*) AS c FROM users WHERE role = 'admin' AND account_status = 'active'`).get() as {
+      c: number;
+    }
+  ).c;
+  if (admins > 0) return false;
+
+  const result = db
+    .prepare(
+      `UPDATE users SET role = 'admin', management_version = management_version + 1, updated_at = ?
+        WHERE id = ? AND role = 'user' AND account_status = 'active'`,
+    )
+    .run(input.now, input.userId);
+  return result.changes === 1;
+}
+
 export function createIdentityService(deps: IdentityServiceDeps = {}): IdentityService {
   // 惰性解析：省略 deps.db 时才回退单例；显式传连接（测试）绝不触碰单例与 DSH_REVIEW_DB_PATH。
   const db: SqliteDatabase = deps.db ?? getDb();
+  const env: NodeJS.ProcessEnv = deps.env ?? process.env;
   const policy: SessionPolicy = { ...DEFAULT_SESSION_POLICY, ...(deps.policy ?? {}) };
 
   const validityMs = policy.validityDays * DAY;
@@ -137,6 +175,8 @@ export function createIdentityService(deps: IdentityServiceDeps = {}): IdentityS
               )
               .run(input.providerUsername, input.profileUrl, input.avatarUrl, now, existing.id);
             tx.db.prepare('UPDATE users SET last_login_at = ?, updated_at = ? WHERE id = ?').run(now, now, user.id);
+            // 部署时指定的首个管理员（只在"一个可用管理员都没有"时生效）。
+            bootstrapAdminWithin(tx.db, { userId: user.id, providerUserId: input.providerUserId, now, env });
             return { userId: user.id, created: false };
           }
 
@@ -164,6 +204,9 @@ export function createIdentityService(deps: IdentityServiceDeps = {}): IdentityS
               now,
               now,
             );
+
+          // 首次登录就可能在同一个事务里被提升为首个管理员。
+          bootstrapAdminWithin(tx.db, { userId, providerUserId: input.providerUserId, now, env });
 
           return { userId, created: true };
         },
