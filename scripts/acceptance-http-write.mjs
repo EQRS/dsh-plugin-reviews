@@ -48,11 +48,21 @@ function check(name, ok, detail) {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ' — ' + detail : ''}`);
 }
 
-// 登录作者
-post('/api/session', { providerUserId: `gh-w-author-${RUN}`, providerUsername: `wauthor-${RUN}` });
-const who = get('/api/session');
-check('作者登录', who.data?.authenticated === true, who.data?.userId);
-const authorId = who.data?.userId;
+// 登录作者。
+// 注意：authorId 必须**在登录这一刻**从响应里取，不能晚点再用共享 jar 去查 ——
+// 共享 jar 后面会被用来登录读者/管理员，那时再查到的就是别人的 ID。
+const authorLogin = post('/api/testing/session', {
+  providerUserId: `gh-w-author-${RUN}`,
+  providerUsername: `wauthor-${RUN}`,
+});
+check('作者登录', authorLogin.ok === true && typeof authorLogin.data?.userId === 'string', authorLogin.data?.userId);
+const authorId = authorLogin.data.userId;
+// 作者自己单独的 jar：撤回等"作者本人操作"必须用作者会话，不能借用共享 jar。
+const authorJar = join(dir, 'author-cookies.txt');
+writeFileSync(join(dir, 'author.json'), JSON.stringify({ providerUserId: `gh-w-author-${RUN}`, providerUsername: `wauthor-${RUN}` }));
+execFileSync('curl.exe', ['-s', '-b', authorJar, '-c', authorJar, '-X', 'POST',
+  '-H', 'content-type: application/json', '--data-binary', `@${join(dir, 'author.json')}`,
+  `${BASE}/api/testing/session`], { encoding: 'utf8' });
 
 // 直接在库里放一个插件（本切片未接真实 GitHub 探针，收录检查无法真跑；
 // 这条明确标注为"绕过了收录检查"，不是假装收录成功）
@@ -125,7 +135,7 @@ const adminIdentity = {
 // 先正常登录建出用户，再把该用户提权并绑定到固定 adminId（避免改动 identity 模块）
 writeFileSync(join(dir, 'a.json'), JSON.stringify(adminIdentity));
 const adminLoginRaw = execFileSync('curl.exe', ['-s', '-b', adminJar, '-c', adminJar, '-X', 'POST',
-  '-H', 'content-type: application/json', '--data-binary', `@${join(dir, 'a.json')}`, `${BASE}/api/session`],
+  '-H', 'content-type: application/json', '--data-binary', `@${join(dir, 'a.json')}`, `${BASE}/api/testing/session`],
   { encoding: 'utf8' });
 const adminLogin = JSON.parse(adminLoginRaw);
 check('管理员账户登录', adminLogin.ok === true, adminLogin.data?.userId);
@@ -187,7 +197,7 @@ check('公开列表包含该评测', list.ok === true && list.data?.total >= 1, 
 const jar2 = join(dir, 'cookies2.txt');
 writeFileSync(join(dir, 'r.json'), JSON.stringify({ providerUserId: `gh-w-reader-${RUN}`, providerUsername: `wreader-${RUN}` }));
 execFileSync('curl.exe', ['-s', '-b', jar2, '-c', jar2, '-X', 'POST', '-H', 'content-type: application/json',
-  '--data-binary', `@${join(dir, 'r.json')}`, `${BASE}/api/session`], { encoding: 'utf8' });
+  '--data-binary', `@${join(dir, 'r.json')}`, `${BASE}/api/testing/session`], { encoding: 'utf8' });
 
 writeFileSync(join(dir, 'c.json'), JSON.stringify({ body: 'HTTP 验收：请问支持 0.3 吗？', requestKey: k('w-c') }));
 const commentRaw = execFileSync('curl.exe', ['-s', '-b', jar2, '-c', jar2, '-X', 'POST', '-H', 'content-type: application/json',
@@ -221,17 +231,34 @@ check(
   JSON.stringify(pendingRow),
 );
 
-// 11) 作者撤回后不再公开
-const { contentService } = await import('../src/server/modules/content/index.ts');
+// 11) 作者撤回（走真实 HTTP，且用**作者自己的会话**）
 const { resolveVisibilityInTx } = await import('../src/server/modules/content/index.ts');
 const vis = resolveVisibilityInTx(db, reviewId);
 if (!vis.withdrawn) {
-  await contentService.withdraw(
-    { userId: authorId, role: 'user', accountStatus: 'active' },
-    { reviewId, expectedControlVersion: vis.controlVersion, reason: 'HTTP 验收撤回', requestKey: `w-withdraw-${Date.now()}` },
-    db,
+  const wf = join(dir, 'w.json');
+  writeFileSync(wf, JSON.stringify({
+    expectedControlVersion: vis.controlVersion,
+    reason: 'HTTP 验收撤回',
+    requestKey: `w-withdraw-${Date.now()}`,
+  }));
+  const withdrawRes = JSON.parse(
+    execFileSync('curl.exe', ['-s', '-b', authorJar, '-c', authorJar, '-X', 'POST',
+      '-H', 'content-type: application/json', '--data-binary', `@${wf}`,
+      `${BASE}/api/reviews/${reviewId}/withdraw`], { encoding: 'utf8' }),
   );
+  check('作者本人可撤回', withdrawRes.ok === true, JSON.stringify(withdrawRes.data ?? withdrawRes.error?.code));
 }
+
+// 11b) 读者（非作者）撤回同一篇必须被拒 —— 排除"谁都能撤回"
+const readerWithdraw = JSON.parse(
+  execFileSync('curl.exe', ['-s', '-b', jar2, '-c', jar2, '-X', 'POST',
+    '-H', 'content-type: application/json',
+    '--data-binary', `@${(() => { const f = join(dir, 'w2.json'); writeFileSync(f, JSON.stringify({ expectedControlVersion: 0, reason: 'x', requestKey: `w-withdraw-reader-${Date.now()}` })); return f; })()}`,
+    `${BASE}/api/reviews/${reviewId}/withdraw`], { encoding: 'utf8' }),
+);
+check('非作者撤回被拒（403）', readerWithdraw.ok === false && readerWithdraw.error?.code === 'forbidden',
+  JSON.stringify(readerWithdraw.error?.code ?? readerWithdraw));
+
 check('作者撤回已生效', resolveVisibilityInTx(db, reviewId).withdrawn === true, JSON.stringify(resolveVisibilityInTx(db, reviewId)));
 const afterWithdraw = get(`/api/reviews/${reviewId}`);
 check('撤回后公开详情 → 404 且不返回正文',

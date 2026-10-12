@@ -38,7 +38,7 @@ function curlCall(method, path, body, jarFile = jar) {
 const curlPost = (path, body, jarFile) => curlCall('POST', path, body, jarFile);
 
 // 作者登录 → 草稿 → 保存 → 提交
-curlPost('/api/session', { providerUserId: `gh-demo-author-${RUN}`, providerUsername: `demoauthor-${RUN}` });
+curlPost('/api/testing/session', { providerUserId: `gh-demo-author-${RUN}`, providerUsername: `demoauthor-${RUN}` });
 const draft = curlPost('/api/drafts', { pluginId, requestKey: `demo-draft-${RUN}` });
 curlCall('PUT', '/api/drafts', {
   draftId: draft.data.draftId, expectedVersion: 0, requestKey: `demo-save-${RUN}`,
@@ -60,7 +60,7 @@ const adminJar = join(dir, 'a.txt');
 const af = join(dir, 'a.json');
 writeFileSync(af, JSON.stringify({ providerUserId: `gh-demo-admin-${RUN}`, providerUsername: `demoadmin-${RUN}` }));
 const adminLogin = JSON.parse(execFileSync('curl.exe', ['-s', '-b', adminJar, '-c', adminJar, '-X', 'POST',
-  '-H', 'content-type: application/json', '--data-binary', `@${af}`, `${BASE}/api/session`], { encoding: 'utf8' }));
+  '-H', 'content-type: application/json', '--data-binary', `@${af}`, `${BASE}/api/testing/session`], { encoding: 'utf8' }));
 db.prepare(`UPDATE users SET role = 'admin' WHERE id = ?`).run(adminLogin.data.userId);
 
 const { createModerationService } = await import('../src/server/modules/moderation/index.ts');
@@ -87,7 +87,7 @@ const readerJar = join(dir, 'r.txt');
 const rf = join(dir, 'r.json');
 writeFileSync(rf, JSON.stringify({ providerUserId: `gh-demo-reader-${RUN}`, providerUsername: `demoreader-${RUN}` }));
 execFileSync('curl.exe', ['-s', '-b', readerJar, '-c', readerJar, '-X', 'POST',
-  '-H', 'content-type: application/json', '--data-binary', `@${rf}`, `${BASE}/api/session`], { encoding: 'utf8' });
+  '-H', 'content-type: application/json', '--data-binary', `@${rf}`, `${BASE}/api/testing/session`], { encoding: 'utf8' });
 const cf = join(dir, 'c.json');
 writeFileSync(cf, JSON.stringify({ body: '问一下：它支持增量索引吗？', requestKey: `demo-comment-${RUN}` }));
 const comment = JSON.parse(execFileSync('curl.exe', ['-s', '-b', readerJar, '-c', readerJar, '-X', 'POST',

@@ -36,28 +36,72 @@ check('首页 GET /', home === '200', `status=${home}`);
 const anon = json([`${BASE}/api/session`]);
 check('匿名 /api/session', anon.ok === true && anon.data?.authenticated === false, JSON.stringify(anon.data));
 
-// 3) 未登录写入被拒 —— 必须是 401，不是 500
-const unauth = curl(['-X', 'POST', '-H', 'content-type: application/json',
-  '-d', JSON.stringify({ pluginId: null, requestKey: 'k-anon' }),
-  '-o', 'NUL', '-w', '%{http_code}', `${BASE}/api/drafts`]);
+// 2b) 旧登录旁路必须已移除：/api/session 不再接受 POST
+const bypass = curl(['-X', 'POST', '-H', 'content-type: application/json',
+  '-d', JSON.stringify({ providerUserId: 'gh-attacker', providerUsername: 'attacker' }),
+  '-o', 'NUL', '-w', '%{http_code}', `${BASE}/api/session`]);
+check('旧登录旁路已移除（POST /api/session 不被接受）', bypass === '405' || bypass === '404', `status=${bypass}`);
+
+// 2c) 测试登录通道的闸门：它的可用性必须**完全由开关决定**。
+//     本脚本运行时 .env.local 已设 DSH_REVIEW_ALLOW_TEST_LOGIN=1（见 dev.cmd），
+//     所以此处应为 200；若为 404 说明开关没生效。
+const gateEnabled = anon.data?.testLoginEnabled === true;
+const testGate = curl(['-X', 'POST', '-H', 'content-type: application/json',
+  '-d', JSON.stringify({ providerUserId: 'gh-gate', providerUsername: 'gateuser' }),
+  '-o', 'NUL', '-w', '%{http_code}', `${BASE}/api/testing/session`]);
+check('测试登录通道与开关状态一致', gateEnabled ? testGate === '200' : testGate === '404',
+  `testLoginEnabled=${gateEnabled} status=${testGate}`);
+
+// 3) 未登录写入被拒 —— 必须是 401，不是 500。
+//    注意顺序：这一步必须发生在任何登录之前，否则测的是"已登录能不能写"。
+//    因此这里用一个**独立的、没有任何 cookie 的**临时 jar，避免被共享 jar 污染。
+const anonJar = join(mkdtempSync(join(tmpdir(), 'anon-')), 'none.txt');
+const unauth = execFileSync(
+  'curl.exe',
+  ['-s', '-b', anonJar, '-c', anonJar, '-X', 'POST', '-H', 'content-type: application/json',
+   '-d', JSON.stringify({ pluginId: null, requestKey: 'k-anon' }),
+   '-o', 'NUL', '-w', '%{http_code}', `${BASE}/api/drafts`],
+  { encoding: 'utf8' },
+);
 check('未登录写草稿 → 401（不是 500）', unauth === '401', `status=${unauth}`);
 
-// 4) 测试登录（开发环境通道）
-const login = json(['-X', 'POST', '-H', 'content-type: application/json',
-  '-d', JSON.stringify({ providerUserId: 'gh-live-1', providerUsername: 'liveuser', displayName: 'Live' }),
-  `${BASE}/api/session`]);
-check('测试登录 POST /api/session', login.ok === true && typeof login.data?.userId === 'string',
-  `userId=${login.data?.userId ?? 'none'} note=${login.data?.note ?? ''}`);
+// 3b) 匿名读私有附件状态也要被拒（不能只靠页面不显示）
+const anonAttach = execFileSync(
+  'curl.exe',
+  ['-s', '-b', anonJar, '-c', anonJar, '-o', 'NUL', '-w', '%{http_code}',
+   `${BASE}/api/attachments/01920000-0000-7000-8000-0000000000ff`],
+  { encoding: 'utf8' },
+);
+check('匿名查私有附件 → 401/404（不是 200）', ['401', '404'].includes(anonAttach), `status=${anonAttach}`);
 
-// 5) 登录后 /api/session 显示已认证
-const me = json([`${BASE}/api/session`]);
-check('登录后 /api/session 已认证', me.data?.authenticated === true, JSON.stringify(me.data));
+// 4) 未被选用的分支（真正的登录入口需要 GitHub 授权，浏览器里跑）：
+//    这里只确认 start 路由在未配置凭据时**明确报未配置**，而不是伪装可用。
+const startCode = curl(['-o', 'NUL', '-w', '%{http_code}', `${BASE}/api/auth/github/start`]);
+check('GitHub 登录入口存在且如实反映配置状态', ['302', '503'].includes(startCode), `status=${startCode}`);
 
-// 6) 插件收录：未接真实 GitHub 探针 → 必须明确 503 未配置（不得假装成功）
-const submitPlugin = curl(['-X', 'POST', '-H', 'content-type: application/json',
+// 6) 插件收录：**绝不假装成功**。
+//    探针未配置（离线）→ 503 `provider_not_configured`；
+//    探针已配置（真实 api.github.com）→ "不存在的仓库"是**输入问题**：400 + 具体字段原因。
+//    两者都是正确行为，共同底线是"没有真的收录成功"。
+//    ⚠ 这里曾经写死 `=== '503'` —— 那是探针还是桩时的口径；接上真实探针之后，
+//    同样的请求会（正确地）返回 400，脚本会**误报失败**。过时的是断言，不是实现。
+const badRepoRaw = curl(['-X', 'POST', '-H', 'content-type: application/json',
   '-d', JSON.stringify({ url: 'https://github.com/acme/dsh-memory', requestKey: 'k-plugin-1' }),
-  '-o', 'NUL', '-w', '%{http_code}', `${BASE}/api/plugins`]);
-check('收录插件（探针未配置）→ 503 且不假装成功', submitPlugin === '503', `status=${submitPlugin}`);
+  '-w', '\n%{http_code}', `${BASE}/api/plugins`]);
+const badRepoLines = badRepoRaw.split('\n');
+const badRepoCode = badRepoLines[badRepoLines.length - 1].trim();
+let badRepo = {};
+try {
+  badRepo = JSON.parse(badRepoLines.slice(0, -1).join('\n'));
+} catch {
+  badRepo = { __raw: badRepoLines.slice(0, -1).join('\n').slice(0, 200) };
+}
+const rejectedCatalogCodes = ['input_invalid', 'provider_not_configured', 'provider_unavailable'];
+check(
+  '收录插件：不存在的仓库被明确拒绝（400/503，不假装成功）',
+  ['400', '503'].includes(badRepoCode) && badRepo.ok === false && rejectedCatalogCodes.includes(badRepo.error?.code),
+  `status=${badRepoCode} code=${badRepo.error?.code} ${badRepo.error?.message ?? ''}`,
+);
 
 // 7) 公开列表可访问且为空
 const list = json([`${BASE}/api/reviews`]);

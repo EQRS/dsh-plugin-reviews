@@ -4,6 +4,7 @@
  * 只做"我的评测草稿 + 提交阶段"一块；收藏、通知、事项属本切片范围外。
  */
 
+import Link from 'next/link';
 import { getDb } from '@/server/platform/db';
 import { currentContext } from '../api/_lib/context';
 import { submissionStateLabels } from '@/packages/common/status-text';
@@ -64,10 +65,22 @@ export default async function MePage() {
     <div>
       <h1 style={{ fontSize: 22 }}>我的评测</h1>
 
+      {/*
+        写评测的入口在插件页（页面布局.md 第 5 节：插件详情的主要操作含"写评测"）。
+        这里**不能**凭空建草稿：不带 pluginId 的草稿在提交时会因 plugin_id 未绑定被拒
+        （见 validateForPublish 与 review_revisions.plugin_id NOT NULL），点到最后必然失败。
+      */}
+      <p style={{ marginTop: 12, fontSize: 14 }}>
+        <Link href="/plugins" style={{ color: '#2456B8' }}>
+          写一篇评测
+        </Link>
+        <span style={{ color: '#526174' }}> —— 先在插件目录选一个插件，从它的详情页进入编辑器。</span>
+      </p>
+
       <section style={{ marginTop: 16 }}>
         <h2 style={{ fontSize: 18 }}>草稿（{drafts.length}）</h2>
         {drafts.length === 0 ? (
-          <p style={{ color: '#526174' }}>暂无草稿。</p>
+          <p style={{ color: '#526174' }}>暂无草稿。到插件页点「写一篇评测」开始。</p>
         ) : (
           <ul style={{ listStyle: 'none', padding: 0 }}>
             {drafts.map((d) => (
@@ -81,7 +94,11 @@ export default async function MePage() {
                   marginBottom: 8,
                 }}
               >
-                <div style={{ fontWeight: 600 }}>{d.title ?? '(尚未填写标题)'}</div>
+                <div style={{ fontWeight: 600 }}>
+                  <Link href={`/me/drafts/${d.draft_id}`} style={{ color: '#2456B8', textDecoration: 'none' }}>
+                    {d.title && d.title.trim() !== '' ? d.title : '(尚未填写标题)'}
+                  </Link>
+                </div>
                 <div style={{ color: '#526174', fontSize: 14 }}>
                   草稿 <code>{d.draft_id}</code> · 保存版本 {d.save_version} ·{' '}
                   {new Date(d.saved_at).toLocaleString('zh-CN')}

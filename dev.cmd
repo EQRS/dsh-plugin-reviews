@@ -8,9 +8,13 @@ REM   dev.cmd web        start Web only
 REM   dev.cmd worker     start worker only
 REM   dev.cmd migrate    migrate + self-check only
 REM   dev.cmd test       typecheck + tests
-REM   dev.cmd accept     HTTP acceptance (Web must be running)
+REM   dev.cmd accept     HTTP acceptance: read/write/upload (Web must be running)
 REM   dev.cmd demo       seed a demo review (Web must be running)
 REM   dev.cmd reset      drop .data and rebuild (local dev only)
+REM
+REM To let submissions auto-publish locally, set BOTH shells before starting:
+REM   set DSH_REVIEW_CONTENT_SCREEN=basic
+REM Leave it empty for the safe default (stop at manual_review).
 REM
 REM First time:  npm install
 REM ============================================================
@@ -79,10 +83,24 @@ echo.
 echo --- write path ---
 call npx tsx scripts\acceptance-http-write.mjs
 if errorlevel 1 exit /b 1
+echo.
+echo --- upload path ---
+call npx tsx scripts\acceptance-upload.mjs
+if errorlevel 1 exit /b 1
+echo.
+echo --- end-to-end chain (real worker process) ---
+call npx tsx scripts\acceptance-e2e-chain.mjs
+if errorlevel 1 exit /b 1
 goto :eof
 
 :demo
+REM 演示要能走完「提交 -> 自动发布」，所以这里显式打开本地基础筛查。
+REM 只有 basic 才可能自动 approved；默认留空会停在 manual_review（这是刻意的保守默认）。
+if "%DSH_REVIEW_CONTENT_SCREEN%"=="" set "DSH_REVIEW_CONTENT_SCREEN=basic"
 echo seeding a demo review (requires Web running on port 3100) ...
+echo   DSH_REVIEW_CONTENT_SCREEN=%DSH_REVIEW_CONTENT_SCREEN%
+echo   NOTE: Web process must have the same DSH_REVIEW_CONTENT_SCREEN value,
+echo         otherwise submissions stop at manual_review instead of publishing.
 call npx tsx scripts\seed-demo.mjs
 goto :eof
 

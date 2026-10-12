@@ -15,6 +15,8 @@ import { newId } from '@/server/platform/id';
 import type { TaskType } from '@/packages/common/field-rules';
 import { createTasksService } from '@/server/modules/tasks/service';
 import type { ClaimedTask, TasksService } from '@/server/modules/tasks/service';
+import { createHandlers } from './handlers';
+import { basicScreenEnabled } from './content-screen';
 import {
   IDLE_SLEEP_MS,
   MAX_CONCURRENT_TASKS,
@@ -186,9 +188,18 @@ export async function main(): Promise<void> {
   const tasks = createTasksService(db);
   const workerReference = `worker-${newId()}`;
 
-  // 默认处理器注册表：本切片的审核/发布任务在 workflows 中实现；
-  // worker 只负责调度骨架，未注册的类型会被明确跳过（skipped），不会假装成功。
-  const handlers: Partial<Record<TaskType, TaskHandler>> = {};
+  // 真实处理器注册表（工作包 GT / task-6）：四条闭环
+  //   提交评测 → review_check → （通过则入队）review_publish → published
+  //   提交评论 → comment_check → （通过则入队）comment_publish → published
+  //
+  // 筛查开关由 DSH_REVIEW_CONTENT_SCREEN 控制：未设为 `basic` 时**不注入**筛查，
+  // moderation 会落 not_configured → manual_review（保守，绝不自动放行）。
+  const handlers = createHandlers({ db });
+  log.info('已装配任务处理器', {
+    worker_reference: workerReference,
+    handler_count: Object.keys(handlers).length,
+    content_screen: basicScreenEnabled() ? 'basic' : 'disabled',
+  });
 
   let running = true;
   const stop = (signal: string) => {

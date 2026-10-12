@@ -10,6 +10,8 @@ import { notFound } from 'next/navigation';
 import { getDb } from '@/server/platform/db';
 import { createCatalogService } from '@/server/modules/catalog';
 import { resolveVisibilityInTx } from '@/server/modules/content';
+import { currentContext } from '@/app/api/_lib/context';
+import { StartDraftButton } from '@/components/start-draft-button';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,6 +21,8 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ p
   const catalog = createCatalogService({ db });
   const plugin = await catalog.getPlugin(pluginId);
   if (!plugin) notFound();
+
+  const ctx = await currentContext();
 
   // 本插件下的公开评测
   const rows = db
@@ -53,6 +57,18 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ p
 
       <section style={{ marginTop: 24 }}>
         <h2 style={{ fontSize: 20 }}>本站评测</h2>
+
+        {/*
+          设计口径（页面布局.md 第 5 节、实施顺序与验收.md 创作行）是"**从插件页写评测**"。
+          这里必须带上 pluginId：评测在提交时会校验 plugin_id，而 review_revisions.plugin_id
+          是 NOT NULL —— 不带插件的草稿永远提交不出去（点完才发现，是死路）。
+        */}
+        {ctx.userId === null ? (
+          <p style={{ color: '#526174' }}>登录后可以在这里写评测（开发环境可用页面顶部的「测试登录」）。</p>
+        ) : (
+          <StartDraftButton pluginId={plugin.pluginId} />
+        )}
+
         {reviews.length === 0 ? (
           <p style={{ color: '#526174' }}>暂无评测。</p>
         ) : (

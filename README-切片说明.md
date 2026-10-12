@@ -25,9 +25,16 @@ dev.cmd
 | `dev.cmd worker` | 只启动 worker（另开一个窗口） |
 | `dev.cmd migrate` | 只跑迁移 + 自检 |
 | `dev.cmd test` | 类型检查 + 跑测试 |
-| `dev.cmd accept` | 跑 HTTP 验收（需 Web 已在运行） |
+| `dev.cmd accept` | 跑 HTTP 验收：读 / 写 / 上传 / 端到端（需 Web 已在运行） |
 | `dev.cmd demo` | 造一条演示评测（需 Web 已在运行） |
 | `dev.cmd reset` | 删掉 `.data` 重建（仅本地开发） |
+
+> **想走通"提交 → 自动发布"**：默认配置下提交会停在 `manual_review`（安全的保守默认）。
+> 本地演示时让 **Web 与 worker 两个进程**都带上：
+> ```cmd
+> set DSH_REVIEW_CONTENT_SCREEN=basic
+> ```
+> 再启动。这个变量决定"内容筛查"是否启用；细节与风险见 `.env.example` 与第 2.2 节。
 
 > 脚本用 CRLF + ASCII 输出编写，已在 `core.autocrlf=true` 的环境下**用真实 clone 验证过**检出后仍可执行
 > （见 `.gitattributes` 的 `*.cmd text eol=crlf`）。若在 Linux/macOS 上跑，直接用方式二。
@@ -36,11 +43,12 @@ dev.cmd
 
 ```bash
 npm install
-npm run db:migrate      # 建库 + 应用迁移（19 张表 + 16 个触发器）
+cp .env.example .env.local   # 按需填写 GitHub OAuth / GITHUB_TOKEN
+npm run db:migrate      # 建库 + 应用迁移（25 张表 + 18 个触发器）
 npm run db:check        # 启动自检：外键、WAL、表齐全、schema 版本
 npm run dev             # Web：http://127.0.0.1:3100
-npm run worker          # 独立 worker 进程（可选）
-npm test                # 221 个测试
+npm run worker          # 独立 worker 进程（**要真正发布内容就需要它**）
+npm test                # 357 个测试
 npm run typecheck       # tsc --noEmit
 ```
 
@@ -48,17 +56,71 @@ npm run typecheck       # tsc --noEmit
 
 | 命令 | 做什么 | 当前结果 |
 |---|---|---|
-| `npx vitest run` | 单元 + 集成 + 端到端（含真实临时库与真实迁移） | **221 passed / 9 files** |
+| `npx vitest run` | 单元 + 集成 + 端到端（含真实临时库与真实迁移） | **357 passed / 16 files** |
 | `npx tsc --noEmit` | 类型检查 | **exit 0** |
 | `node scripts/verify-tests-bite.mjs` | **反恒真自检**：删掉盖楼触发器 → 测试必须变红 → 还原 → 必须复绿 | 通过 |
 | `node scripts/verify-comment-visibility-bite.mjs` | **反恒真自检**：去掉评论公开修订过滤 → 评论可见性测试必须变红 → 还原（逐字节核对）→ 必须复绿 | 通过 |
-| `node scripts/acceptance-http.mjs` | 对**运行中的 dev server** 做 HTTP 验收（需先 `npm run dev`） | **14/14** |
-| `npx tsx scripts/acceptance-http-write.mjs` | HTTP 写入链路：登录→建草稿→保存→提交→管理员通过→发布→公开可读→评论→撤回 | **18/18** |
+| `node scripts/acceptance-http.mjs` | 对**运行中的 dev server** 做 HTTP 验收（需先 `npm run dev`） | **16/16** |
+| `npx tsx scripts/acceptance-http-write.mjs` | HTTP 写入链路：登录→建草稿→保存→提交→管理员通过→发布→公开可读→评论→撤回 | **20/20** |
+| `npx tsx scripts/acceptance-upload.mjs` | 图片上传全链路：登记→传字节→就绪→读取→权限→伪装/超限拒绝 | **14/14**（可重复运行） |
+| `npx tsx scripts/acceptance-e2e-chain.mjs` | **整条链**：登录→收录真实插件→写→提交→**真 worker 发布**→评论→登出 | **18/18** |
 | `npx tsx scripts/seed-demo.mjs` | 造一条保持公开的演示评测（用于看页面真实渲染） | 见下 |
 | `node scripts/verify-node-cpsync.mjs` | 复核本机 Node 的 `cpSync` CJK 崩溃（环境坑，与本项目功能无关） | 见 `docs/环境坑-cpSync-CJK崩溃.md` |
 
 > `acceptance-http*.mjs` 需要 dev server 在跑；它们走真实 HTTP，不是调用函数。
-> 两者都**不假设库里没有别的数据**（早先版本假设为空，被演示数据干扰过，已修）。
+> 它们都**不假设库里没有别的数据**（早先版本假设为空，被演示数据干扰过，已修），
+> 且**都可重复运行**（`acceptance-upload.mjs` 早先用写死的 UUID 造评测，第二次运行会撞
+> `UNIQUE constraint failed: content_entities.id` —— 那是脚本自身的隔离缺陷，已改为每次新建 ID）。
+>
+> 上面五个数字是 **2026-10-12 重跑**的结果（同一台机器、真 GitHub、真 worker）。
+> 其中 `acceptance-http.mjs` 当时**先读出 15/16** —— 不是实现坏了，是脚本自己的收录断言过时了
+> （探针接真实 api.github.com 之后，不存在的仓库应当返回 400 而不是桩时代的 503）。
+> 详见 §5 第 15 条。
+
+### 让"真实登录"生效，需要主人做两件事
+
+这两件事我用代码做不了（需要主人的账号与密钥），**没做之前相关功能会明确报"未配置"，不会假装可用**：
+
+**① 建 GitHub OAuth App（真实登录）**
+
+1. 打开 https://github.com/settings/developers → **New OAuth App**
+2. 填写：
+   - Application name：随意，如 `dsh-plugin-reviews-local`
+   - Homepage URL：`http://127.0.0.1:3100`
+   - Authorization callback URL：`http://127.0.0.1:3100/api/auth/github/callback`
+3. 建好后把 **Client ID** 与 **Client secret** 填进 `.env.local`：
+
+```ini
+GITHUB_CLIENT_ID=你的ClientID
+GITHUB_CLIENT_SECRET=你的ClientSecret
+GITHUB_REDIRECT_URI=http://127.0.0.1:3100/api/auth/github/callback
+SESSION_SECRET=至少32字节的随机字符串
+```
+
+4. 重启 `npm run dev`，导航栏的"用 GitHub 登录"就会真的跳到 GitHub 并回调。
+
+> `GITHUB_REDIRECT_URI` 必须与 OAuth App 里填的**完全一致**（含协议、端口、路径）。
+> 用 `127.0.0.1` 而不是 `localhost`，避免解析差异导致回调不匹配。
+> `SESSION_SECRET` 生产环境**必须**设置：否则服务端拒绝发起登录，避免明文保存 PKCE verifier。
+
+**② 配 `GITHUB_TOKEN`（收录插件，可选但强烈建议）**
+
+未认证的 api.github.com 只有 **60 次/小时**，实际会撞限流（实测撞过）。
+配一个 token（不需要任何 scope，公开仓库只读即可）可提到 5000 次/小时：
+
+```ini
+GITHUB_TOKEN=ghp_xxx   # 或 gh auth token 的输出
+```
+
+> 真机验证（2026-10-11）：配上 token 后，收录 `deepseek-ai/deepseek-harness` 的
+> `packages/bundle/base` 成功；不配时如实返回 `provider_unavailable` 并带上 GitHub 的限流说明。
+
+**本地测试登录通道**（不想建 OAuth App 时用）：
+
+```ini
+DSH_REVIEW_ALLOW_TEST_LOGIN=1
+```
+导航栏会出现"测试登录"按钮。它**只在非生产环境且显式设为 1 时可用**，生产环境即使设了也不生效。
 
 ---
 
@@ -74,12 +136,12 @@ npm run typecheck       # tsc --noEmit
 | 收藏、有帮助、举报、复核、纠错 | 需求 §13、§15、§20 | 表与接口均未建 |
 | 站内通知 | 需求 §11；架构 §41 | 表与消费逻辑均未建 |
 | 关键词搜索（FTS5 / trigram） | 架构 §9、§63 | 列表只做分页，**没有搜索框** |
-| 图片与附件上传、存储源迁移 | 需求 §6；架构 §10、§45—47 | 评测只能是纯文本 |
+| 图片与附件的**格式转换、多尺寸集、存储源迁移** | 需求 §6；架构 §10、§45—47 | 上传/校验/压缩/展示变体已做；多 CDN、迁移未做 |
 | 批量导入、集中投稿、公平队列 | 需求 §25；架构 §72、§73 | 无 `/me/batches` |
 | 备份与恢复 | 架构 §28、§54 | 无备份入口 |
-| AI 内容筛查 | 需求 §9；架构 §20 | **未配置即不自动放行**，提交停在 `manual_review`（这是刻意保留的正确行为，不是缺陷） |
-| 真实 GitHub OAuth 往返 | 架构 §11；部署 §5 | 见 2.2 |
-| 真实 GitHub 目录读取 / 同步 | 需求 §1；架构 §92—99 | 见 2.2 |
+| 真实外部 AI 内容筛查 | 需求 §9；架构 §20 | 内置的只是**本地确定性基础筛查**（词表 + 长度下限 + 刷屏检测），**不是真实审核服务**。默认关闭，关闭时提交停在 `manual_review`（正确行为） |
+| 真实 GitHub OAuth 往返 | 架构 §11；部署 §5 | **代码已完整实现**（PKCE + state + 浏览器绑定），但需要主人自建 OAuth App 填 Client ID/Secret 才生效；未配置时明确报未配置。见 2.2 |
+| GitHub **目录发现 / 定时同步** | 需求 §1；架构 §92—99 | 收录检查已接真实 api.github.com；**发现与同步未做**（只有"粘链接自助收录"） |
 | 管理员后台的完整栏目 | 需求 §23；架构 §90、§91 | 只有"待办列表 + 人工决定" |
 | 修订历史查看、旧版对比 | 需求 §10 | 快照保留在库里，但**没有读取界面** |
 | Docker / Compose / Linux 构建 | 部署 §1—3 | 只验证了本机 Windows + Node 24 |
@@ -88,9 +150,9 @@ npm run typecheck       # tsc --noEmit
 
 | 外部能力 | 当前行为 |
 |---|---|
-| GitHub OAuth | **未接入**。生产环境 `POST /api/session` 直接返回 `provider_not_configured`；开发环境提供**测试登录通道**（用身份桩建会话），响应里带 `note` 明确标注"真实 GitHub OAuth 尚未接入" |
-| GitHub 收录检查 | `CatalogProbe` 接口已定义且实现完整，但**未接真实出网调用**。`POST /api/plugins` 返回 `provider_not_configured`，**绝不放行收录** |
-| 内容筛查 | 未配置 → 提交转 `manual_review`，**绝不自动放行、也不认定违规** |
+| GitHub OAuth | **代码已完整实现**（`/api/auth/github/start` → GitHub → `/callback`，S256 PKCE + state 摘要 + 浏览器绑定 Cookie + 一次性消费）。**需要主人做一件事**：在 https://github.com/settings/developers 建 OAuth App，callback 填 `http://127.0.0.1:3100/api/auth/github/callback`，把 Client ID/Secret 写进 `.env.local`。没配时按钮**明说未配置**，不会让用户点了才撞 503 |
+| GitHub 收录检查 | **已接真实 api.github.com**（真机验证：收录 `deepseek-ai/deepseek-harness` 的 `packages/bundle/base` 成功；仓库根无 `dsh.bundle` → 400；不存在的仓库 → 400 且不泄露存在性）。匿名 60 次/小时，建议配 `GITHUB_TOKEN` |
+| 内容筛查 | 默认（未设 `DSH_REVIEW_CONTENT_SCREEN`）→ 提交转 `manual_review`，**绝不自动放行、也不认定违规**。设 `=basic` 启用本地基础筛查，通过则自动发布 —— 仅用于本地/演示，**不是真实审核** |
 
 ### 2.3 已知的实现偏离（有意的）
 
@@ -101,11 +163,14 @@ npm run typecheck       # tsc --noEmit
 | 3 | 业务参数写成**模块内常量**，未接配置服务 | `site_settings` / `configuration_revisions` 表已建但仅留位。文档（需求 §24、架构 §12/§50）要求后台可调 + 版本快照 + 审计 |
 | 4 | **评论入队在业务事务之后**（架构 §78.1 要求"同一事务"） | `withTransaction` 回调必须同步，而 tasks 加载是异步的。评论已建但入队失败会**显式抛错**让调用方重试，不静默吞 |
 | 5 | `hide` / `unhide` / `withdraw` **未写 `operation_records` 去重** | 幂等目前只覆盖：草稿保存、提交、插件收录三处 |
-| 6 | worker 的 **handlers 注册表为空** | `review_check` / `review_publish` 的真实处理器应在 workflows 层装配，尚未接。未注册类型记为 `skipped` + `no_handler`，**不假装成功**。**直接后果**：① 评论创建后停在 `pending`，不会自动出现在公开列表（HTTP 验收里按这个真实契约断言）；② 评测发布由 `workflows/publish-review.ts` 提供，但**没有自动触发者**（验收脚本里是显式调用） |
+| 6 | ~~worker 的 handlers 注册表为空~~ **已修**：注册了 `review_check` / `review_publish` / `comment_check` / `comment_publish` 四个处理器 | 曾导致提交后永远停在 `pending`、评论创建后不公开。现：检查通过 → 转 `approved` → **再入队一个 `*_publish` 任务**（职责分离、可重试），由 `workflows/publish-review.ts` / `publish-comment.ts` 发布。未注册类型仍记 `skipped` + `no_handler`，**不假装成功** |
 | 7 | 会话 Cookie 在**开发环境不带 `__Host-` 前缀** | `__Host-` 强制要求 `Secure`，http 下浏览器/curl 会直接丢弃 → 表现为"登录 200 但立刻匿名"。生产环境仍用 `__Host-dsh_session`，见 `platform/session-cookie.ts` |
 | 8 | `parseSubmissionUrl` 对 `branch` 含 `/` 有**固有歧义** | 按"第一段为分支、其余为路径"处理，注释已写明；建议用 40 位 commit SHA 永久链接 |
 | 9 | **公开列表/详情页没有关键词搜索与筛选** | 需求 §16—18 要求搜索、分类筛选、排序；本切片只做分页 + 公开资格过滤 |
-| 10 | 页面**没有登录入口与编辑器表单** | `/me` 提示可用 `POST /api/session`；写评测目前走 API（验收脚本就是这么跑的）。页面是"链路看得见"的载体，不是完整交互 |
+| 10 | ~~页面没有登录入口与编辑器表单~~ **已修**：`session-nav`（GitHub/测试登录 + 登出）、`plugin-submit-form`、`review-editor`（Markdown + 图片插入 + 保存/提交）、`comment-section` | 仍缺：后台审核页面（只有 API）、修订历史界面、搜索。**写评测的入口在插件详情页**（评测必须绑定插件），`/me` 只做引导 |
+| 11 | 评测**必须**绑定插件才能提交（`validateForPublish` 校验 `plugin_id`；`review_revisions.plugin_id` 是 NOT NULL 外键） | 这是产品规则，不是缺陷。所以"写评测"只能在插件页发起：凭空建的、`plugin_id` 为空的草稿**保存得了、提交不了**，是一条死路（真踩过，见 §5 第 14 条） |
+| 12 | `acceptance-http.mjs` 的收录断言曾写死 `503` | 探针还是桩时的口径；接上真实 api.github.com 后，不存在的仓库会（正确地）返回 400 → 脚本误报失败。已改为断言"明确拒绝且不假装成功"（400/503 + 错误码白名单），并用变异副本验证过它会咬（见 §5 第 15 条） |
+| 13 | **评论发布没有 `superseded` 资格检查**（评测有） | `publishReview` 用 `latest_submitted_revision_id` 挡"被新提交取代的旧快照"。评论侧**不能照抄**：评论提交路径从未写这一列，恒为 NULL，照抄会让所有评论都判 superseded、一条也发不出去（**曾经真写错过一次，被实跑测试立刻抓出**）。评论当前只有"首次提交即修订"一条路径，故该状态尚不可能出现；**将来支持编辑评论时必须同时**维护该列并加回检查 |
 
 ### 2.4 测试覆盖的真实边界（**不要高估**）
 
@@ -113,7 +178,14 @@ npm run typecheck       # tsc --noEmit
   **没有**为了让测试覆盖而放宽表约束——约束是防线，价值高于覆盖率数字。
 - 跨**进程**并发抢任务未实测：单测在同连接上用 `Promise.all`，依赖 `UPDATE` 的原子 WHERE 条件。
 - `MAX_CONCURRENT_TASKS=4` 的"同时运行"语义只断言了"一轮最多领 4 条"，未做真实并发压测。
-- 未做浏览器交互验收（无 Playwright）；页面只做了 HTTP 200 与真实数据渲染检查。
+- **"点按钮"这一层仍然没有自动化脚本**（没引入 Playwright）。现有的是「人工用浏览器工具点一遍」
+  （§5.2，有 id 与时间戳）＋ HTTP 链路验收。人工点击**可复现、但不会自动重跑** —— 回归时它会漏。
+- 图片「插入图片」按钮**没有被浏览器驱动验证过**：它弹出的系统文件选择器工具操作不了。
+  图片链路只验到 HTTP 契约层（`acceptance-upload.mjs` 14/14，含真字节、权限、伪装与超限拒绝）。
+- **真 GitHub OAuth 往返未实测**：代码完整，但需要主人自建 OAuth App 才能验证。
+  我没有 OAuth App 的 Client Secret，**不能声称它已跑通**。
+- 收录探针的**多 patch 数组**只核验第一条（见 `docs/最小切片-设计映射.md` §3.1）。
+- 跨**进程**并发抢任务未实测（单进程 + 真 worker 已实测）。
 
 ---
 
@@ -174,28 +246,82 @@ npm run typecheck       # tsc --noEmit
 | 11 | `POST /api/drafts` 同时承担"新建"和"保存" → 保存请求被当新建、**静默返回未保存的草稿** | HTTP 写入验收 | 方法语义拆开：POST 新建 / PUT 保存 / PATCH 提交 |
 | 12 | 人工决定路由**没有动态段**却解构 `submissionId` → 500 | HTTP 验收 + 读 dev server 日志拿到真实堆栈 | 拆到 `.../{submissionId}/decisions` |
 | 13 | **未公开的评论会出现在公开列表**（`listRootComments` / `listReplies` / `countReplies` 都缺 `published_revision_id IS NOT NULL` 过滤） | 页面证据检查发现"评论已提交但详情页看不到" → 读库确认 `published_revision_id` 为 null → 但 API 却把它返回了 | 三处都补上公开修订过滤；新增 `tests/comments-visibility.test.ts`（3 用例）+ `scripts/verify-comment-visibility-bite.mjs` 反恒真自检 |
+| 14 | **评测根本没有"选择插件"的入口**：插件详情页（设计文档指定的入口）没挂按钮，`/me` 的「写一篇评测」却建出 `plugin_id` 为空的草稿 —— 它能保存、能显示，**点提交才报"请选择插件"**，而界面上没有任何办法补救 | **人工浏览器点击链路**（HTTP 验收与 357 个单测全绿，全都没碰到这一层：它们都从 API 直接带 `pluginId` 建草稿） | 插件详情页挂 `StartDraftButton pluginId={plugin.pluginId}`；`/me` 改成引导到插件目录；编辑器顶部显式显示"关联插件"或"未关联 → 无法提交"的告警。见 §5.2 |
+| 15 | `acceptance-http.mjs` 的收录断言**过时**：写死要求 `503` | 跑全量验收时读出 15/16。查因：探针接真实 api.github.com 之后，不存在的仓库**本就该**返回 400（`input_invalid` + 具体原因），503 只是当年探针还是桩时的口径 | 改成"明确拒绝且不假装成功"（400/503 + 错误码白名单 + `ok=false`）；再用**变异副本**把 URL 换成真实插件目录（201 成功）验证它会变红 —— 断言不是恒真的 |
 
 > 第 13 条值得单独说明：它同时暴露了两件事——
 > ① 公开读取漏了可见性过滤（**真实漏洞**，会泄露尚未通过检查的内容）；
-> ② 评论创建后**没有任何东西把它发布**（本切片只做了 `comment_check` 入队，没有评论发布处理器，
-> 因为 worker 的 handlers 注册表是空的，见 §2.3 第 6 条）。
-> 所以现在评论创建后停在 `pending`，公开列表里看不到 —— **这是"未实现"，不是"坏了"**。
+> ② 评论创建后**没有任何东西把它发布**（当时只做了 `comment_check` 入队，
+> 没有评论发布处理器，因为 worker 的 handlers 注册表是空的）。
 > 修好过滤后，行为从"错误地可见"变成"正确地不可见"，两者不能混为一谈。
+>
+> **这两条现在都已修**：worker 注册了 4 个处理器（§2.3 第 6 条），评论会真的走到 `published`；
+> 过滤也保留着。端到端验收（`scripts/acceptance-e2e-chain.mjs`）里有一条专门断言
+> "评论经 worker 发布并公开且出现在公开列表" —— 它同时守住"能发布"和"过滤没写坏"。
+
+---
+
+## 5.1 端到端链路验收（新增）
+
+`scripts/acceptance-e2e-chain.mjs` 与三个单段验收脚本的分工：单段脚本验证读/写/上传各自能通；
+本脚本验证**整条链真的走到底**，且由**独立 worker 进程**处理任务（不是测试桩）。
+
+实测（2026-10-11，真 GitHub + 真 worker + 真 SQLite）：
+
+```
+登录 → 会话接口如实报告 GitHub 是否已配置 → 收录真实插件（api.github.com）
+→ 建草稿 → 保存（saveVersion 递增）→ 过期版本保存被拒（version_conflict）
+→ 提交（pending，不假装已发布）→ 真 worker 处理 → published
+→ 公开修订指针切换 → 匿名可读 → 发评论 → worker 发布 → 出现在公开列表
+→ 登出 → 登出后写操作 401
+==== 端到端链路验收：18/18 通过 ====
+```
+
+**为什么这个脚本值得存在**：handlers 注册表为空时，所有单测与单段验收**都是绿的** ——
+只有真进程能暴露"提交后永远没人处理"。同类问题（评论发布读在事务外）也是靠真跑才发现的。
+
+---
+
+## 5.2 浏览器点击链路（人工，工具驱动）—— 2026-10-12
+
+**为什么必须点**：这一层是 HTTP 验收与 357 个单测**都覆盖不到**的 —— 它们一律直接从 API 带好
+`pluginId` 建草稿，于是"页面根本没有绑插件的入口"这件事，谁也咬不出来（§5 第 14 条）。
+
+一次完整的点击记录（浏览器工具；dev server `http://127.0.0.1:3100`；worker 以 `DSH_REVIEW_CONTENT_SCREEN=basic` 启动）：
+
+| # | 操作 | 观察到的结果 |
+|---|---|---|
+| 1 | 插件目录 → `deepseek-ai/deepseek-harness / packages/bundle/base` | 详情页出现「写一篇评测」 |
+| 2 | 点「写一篇评测」 | 新草稿 `01a12f6a-fe61-7fa9-a29b-8fe7c8f027de`，保存版本 0，顶部显示「关联插件：`01a12ac1-0250-7446-987f-05df4cbca276`」 |
+| 3 | 填标题与正文 → 点「保存」 | 保存版本 0 → 1，页面提示「已保存，保存版本 1。」 |
+| 4 | 点「提交审核」 | 先自动保存（1 → 2）再提交：`01a12f6b-2e08-7c7f-869e-68ff779ec299`，状态 `pending`（未假装已发布） |
+| 5 | 不干预，等 worker | worker 日志：`review_check` → `approved` → 入队 `review_publish` → **评测已发布** |
+| 6 | 打开 `/me` | 提交记录中该条显示**已发布**（17:21:55） |
+| 7 | 打开公开页 `/reviews/01a12f6a-fe60-7e51-8048-daa5985c610f` | 正文渲染（Markdown 加粗/列表）、结构化版本栏、评论框可用 |
+| 8 | 输入评论 → 点「发表评论」 | 提示"评论已提交，正在等待检查"；worker 随后 `comment_check` → `comment_publish` → **评论已发布** |
+| 9 | 刷新公开页 | 「评论（1）」出现该评论，时间戳 17:22:39 |
+
+**没点到的**：图片「插入图片」—— 弹的是系统文件选择器，浏览器工具驱动不了（见 §2.4）。
 
 ---
 
 ## 6. 代码地图
 
 ```
-migrations/            0001_baseline.sql（19 表）/ 0002_triggers.sql（16 触发器）—— 权威结构
+migrations/            0001_baseline.sql / 0002_triggers.sql / 0003_auth_media.sql
+                       —— 25 表 / 18 触发器，权威结构
 src/packages/common/   错误码、结果与分页、字段规则、状态文案（浏览器可用）
-src/server/platform/   db / tx / time / id / digest / log / context / migrate / errors-http / request-id / session-cookie
-src/server/modules/    identity · catalog · reviews · content · comments · moderation · tasks · operations
-src/server/workflows/  submit-review · publish-review（跨模块协调事务）
-src/server/adapters/   login（GitHub 骨架 + 测试通道）
+src/server/platform/   db / tx / time / id / digest / log / context / migrate /
+                       errors-http / request-id / session-cookie / file-store / markdown
+src/server/modules/    identity · catalog · reviews · content · comments ·
+                       moderation · tasks · operations · media
+src/server/workflows/  submit-review · publish-review · publish-comment（跨模块协调事务）
+src/server/adapters/   login（真实 GitHub OAuth + 测试通道）· catalog（真实 api.github.com 探针）
 src/app/               App Router：页面 + /api 路由
-src/worker/main.ts     独立任务进程
-tests/                 218 个测试（含 support/db.ts 真实临时库）
+src/components/        session-nav · plugin-submit-form · review-editor · comment-section ·
+                       start-draft-button · api-client
+src/worker/            main（独立任务进程）· handlers（4 个处理器）· content-screen（本地基础筛查）
+tests/                 16 个文件 / 357 个测试（含 support/db.ts 真实临时库）
 scripts/               验收与自检脚本
 docs/                  设计映射、并行分组协议、模块签名契约、验收纪律、环境坑
 ```
@@ -210,9 +336,23 @@ docs/                  设计映射、并行分组协议、模块签名契约、
 
 ## 7. 结论口径
 
-**可以说的**：这条垂直链路在本机真实跑通了（218 单测 + 14 项 HTTP 读验收 + 17 项 HTTP 写验收），核心不变量有真实约束与反恒真测试兜底。
+**可以说的**：
+
+- 这条垂直链路在本机真实跑通了：**357 单测** + HTTP 验收（读 **16/16**、写 **20/20**、上传 **14/14**）
+  + **端到端整条链 18/18**（含**真 worker 进程**把内容从 `pending` 推到 `published`）。
+- **页面上真的能点通**：「插件页 → 写评测 → 保存 → 提交 → worker 发布 → 公开可读 → 评论」逐步点过并留了
+  id 与时间戳（§5.2）。**这一层咬出过一个 HTTP 验收咬不到的缺陷**（§5 第 14 条）。
+- **收录插件已接真实 api.github.com 并真机验证**：真实组合包目录收录成功、仓库根无 `dsh.bundle`
+  被正确拒绝、不存在的仓库返回干净 400 且不泄露存在性。
+- **GitHub OAuth 代码完整**（PKCE + state + 浏览器绑定 + 一次性消费），只差主人填 Client ID/Secret。
+- 核心不变量有真实数据库约束与**反恒真自检**兜底（破坏实现 → 测试必须变红 → 按字节还原）。
 
 **不能说的**：
-- 不能说"P0 已实现"——上面第 2 节列的都是没做的。
-- 不能说"已可上线"——没有 Linux/Docker 构建、没有真实 OAuth、没有真实 GitHub 收录、没有备份恢复演练。
-- 不能说"外部审核已接入"——未配置时走人工，这**不是**"自动审核已完成"。
+
+- 不能说"P0 已实现"——第 2 节列的都是没做的。
+- 不能说"已可上线"——没有 Linux/Docker 构建、**没有跑过真实 OAuth 往返**（我没有 Client Secret）、
+  没有目录定时同步与发现、没有备份恢复演练。
+- 不能说"外部审核已接入"——内置的只是**本地基础筛查**（默认还关着）；默认走人工，
+  这**不是**"自动审核已完成"。
+- 不能说"浏览器交互已自动化验收"——没有 Playwright；点过一遍的是**人工**，回归时不会自动重跑，
+  且图片「插入图片」（系统文件选择器）始终没被浏览器驱动验证过。

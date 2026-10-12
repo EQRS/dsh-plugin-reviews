@@ -4,12 +4,14 @@
  * GET  /api/plugins          公开列表（分页）
  * POST /api/plugins          收录一个插件（需登录；收录检查经 GitHub 探针）
  *
- * 收录检查探针：本切片未接真实 GitHub 出网调用（见「未按文档实现」清单），
- * 因此**未配置探针时明确返回 provider_not_configured，不假装收录成功**。
+ * 收录检查探针：`@/server/adapters/catalog/github-probe` 的真实 api.github.com 实现。
+ * 需要离线/CI 时设 `DSH_REVIEW_CATALOG_OFFLINE=1`，探针会抛 provider_not_configured（→503），
+ * **绝不假装收录成功**。
  */
 
 import { getDb } from '@/server/platform/db';
 import { createCatalogService } from '@/server/modules/catalog';
+import { createGithubCatalogProbe } from '@/server/adapters/catalog/github-probe';
 import { err } from '@/packages/common/errors';
 import { PaginationDefaults } from '@/packages/common/result';
 import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../_lib/context';
@@ -53,10 +55,18 @@ export async function POST(request: Request): Promise<Response> {
       ]);
     }
 
-    // 未接入真实 GitHub 出网探针 → 明确报未配置（绝不放行收录）。
-    throw err.notConfigured(
-      '本切片未接入真实 GitHub 探针，无法完成「仓库可访问 + package.json 声明 dsh.bundle」的收录检查。',
+    // 真实 GitHub 探针：仓库可访问 + package.json 声明 dsh.bundle + 引用文件存在，三项都过才收录。
+    // 探针在事务外调用（better-sqlite3 是同步驱动，事务内出网会长时间持锁）。
+    const probe = createGithubCatalogProbe();
+    const catalog = createCatalogService({ db: getDb() });
+    const result = await catalog.acceptPluginSubmission(
+      ctx,
+      { url: body.url, requestKey: body.requestKey },
+      { probe },
     );
+
+    // 201：本次收录请求已成功处理（created=false 表示命中既有记录，同样算成功而不是 200/409）。
+    return okJson(result, requestId, 201);
   } catch (e) {
     return errorResponse(e, requestId);
   }

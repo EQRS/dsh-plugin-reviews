@@ -79,7 +79,10 @@ describe('迁移与启动自检', () => {
     const c = setup();
     const again = migrate({ db: c.db, file: c.file });
     expect(again.applied).toEqual([]);
-    expect(again.alreadyApplied.length).toBe(2);
+    // 断言"全部迁移都已应用"，而不是写死个数 —— 否则每加一个迁移都要改测试。
+    expect(again.alreadyApplied.length).toBeGreaterThanOrEqual(3);
+    expect(again.alreadyApplied).toContain('0001_baseline.sql');
+    expect(again.alreadyApplied).toContain('0002_triggers.sql');
   });
 });
 

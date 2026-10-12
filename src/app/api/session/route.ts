@@ -1,65 +1,45 @@
 /**
- * 登录（最小切片：测试登录通道）。
+ * 会话查询与退出。
  *
- * ⚠️ 边界说明（见 README-切片说明.md「未按文档实现」）：
- *  - 真实 GitHub OAuth 往返（state + S256 PKCE + 挑战表）**未实现**；
- *  - 本路由只在 `NODE_ENV !== 'production'` 下提供，用传入的 GitHub 身份桩直接建会话，
- *    用于本地演示与验收；生产环境直接拒绝，**不伪装成已接入 OAuth**。
+ * GET    /api/session   当前登录者
+ * DELETE /api/session   退出登录（撤销会话并清 Cookie）
+ *
+ * ⚠️ 这里**没有**登录 POST。
+ * 早先版本在这条路由上提供了"接受请求体身份"的测试登录通道，
+ * 那等于一个任何人都能声明自己是某 GitHub 用户的旁路。
+ * 现在登录只有一条真实路径：`GET /api/auth/github/start` → GitHub → 回调。
+ * 测试需要建会话时，直接调用 identity 服务，不经过 HTTP 旁路。
  */
 
 import { getDb } from '@/server/platform/db';
 import { createIdentityService } from '@/server/modules/identity';
-import { writeSessionCookie, clearSessionCookie, readSessionToken } from '@/server/platform/session-cookie';
-import { err } from '@/packages/common/errors';
-import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../_lib/context';
+import { clearSessionCookie, readSessionToken } from '@/server/platform/session-cookie';
+import { createGithubLoginAdapter } from '@/server/adapters/login';
+import { currentContext, okJson, errorResponse, requestMeta } from '../_lib/context';
+import { testLoginAllowed } from '../testing/session/route';
 
 export const runtime = 'nodejs';
 
-export async function POST(request: Request): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
-    if (process.env.NODE_ENV === 'production') {
-      throw err.notConfigured(
-        'GitHub OAuth 尚未接入本站，生产环境不提供测试登录通道。',
-      );
-    }
-
-    const body = (await readJson(request)) as {
-      providerUserId?: unknown;
-      providerUsername?: unknown;
-      displayName?: unknown;
-    };
-
-    const providerUserId = typeof body.providerUserId === 'string' ? body.providerUserId : '';
-    const providerUsername = typeof body.providerUsername === 'string' ? body.providerUsername : '';
-    if (providerUserId.trim() === '' || providerUsername.trim() === '') {
-      throw err.input('缺少 GitHub 身份标识。', [
-        { path: 'providerUserId', message: '必填' },
-        { path: 'providerUsername', message: '必填' },
-      ]);
-    }
-
-    const identity = createIdentityService({ db: getDb() });
-    const signIn = await identity.signInWithGithub(
-      {
-        providerUserId,
-        providerUsername,
-        profileUrl: `https://github.com/${providerUsername}`,
-        avatarUrl: null,
-        displayName: typeof body.displayName === 'string' ? body.displayName : providerUsername,
-      },
-      Date.now(),
-    );
-    const session = await identity.createSession(signIn.userId, Date.now());
-    await writeSessionCookie(session.token);
+    const ctx = await currentContext();
+    // 让前端知道"GitHub 登录是否已配置"，从而显示真实状态而不是点了才报错。
+    const githubConfigured = createGithubLoginAdapter().isConfigured();
 
     return okJson(
       {
-        userId: signIn.userId,
-        created: signIn.created,
-        expiresAt: new Date(session.expiresAt).toISOString(),
-        /** 明确标注这不是真实 OAuth 登录，避免被当成已接入。 */
-        note: '测试登录通道：真实 GitHub OAuth 尚未接入。',
+        ...(ctx.userId === null
+          ? { authenticated: false as const }
+          : {
+              authenticated: true as const,
+              userId: ctx.userId,
+              role: ctx.role,
+              accountStatus: ctx.accountStatus,
+            }),
+        githubLoginConfigured: githubConfigured,
+        // 诊断字段：让本地能一眼看出测试通道开关是否生效（不含任何秘密）。
+        testLoginEnabled: testLoginAllowed(),
       },
       requestId,
     );
@@ -68,7 +48,6 @@ export async function POST(request: Request): Promise<Response> {
   }
 }
 
-/** 退出登录：撤销当前会话并清 Cookie。 */
 export async function DELETE(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
@@ -80,22 +59,6 @@ export async function DELETE(request: Request): Promise<Response> {
     }
     await clearSessionCookie();
     return okJson({ signedOut: true }, requestId);
-  } catch (e) {
-    return errorResponse(e, requestId);
-  }
-}
-
-/** 当前登录者。 */
-export async function GET(request: Request): Promise<Response> {
-  const { requestId } = requestMeta(request);
-  try {
-    const ctx = await currentContext();
-    return okJson(
-      ctx.userId === null
-        ? { authenticated: false as const }
-        : { authenticated: true as const, userId: ctx.userId, role: ctx.role, accountStatus: ctx.accountStatus },
-      requestId,
-    );
   } catch (e) {
     return errorResponse(e, requestId);
   }

@@ -9,8 +9,9 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getDb } from '@/server/platform/db';
 import { resolveVisibilityInTx } from '@/server/modules/content';
-import { commentsService } from '@/server/modules/comments';
 import { formatVersionLabel } from '@/packages/common/status-text';
+import { renderMarkdownToSafeHtml } from '@/server/platform/markdown';
+import { CommentSection } from '@/components/comment-section';
 import type { VersionValue } from '@/packages/common/field-rules';
 
 export const dynamic = 'force-dynamic';
@@ -61,10 +62,12 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ r
     .get(reviewId) as Row | undefined;
   if (!row) notFound();
 
-  const comments = await commentsService.listRootComments(reviewId, { page: 1, page_size: 20 }, db);
-
   const pluginVersion = JSON.parse(row.plugin_version) as VersionValue;
   const dshVersion = JSON.parse(row.dsh_version) as VersionValue;
+
+  // 正文经统一管线渲染并**净化**（架构第 25 节）。HTML 是可重建的展示结果，
+  // Markdown 原文才是权威内容；这里只做展示，不回写任何数据。
+  const safeBodyHtml = renderMarkdownToSafeHtml(row.body_markdown);
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 280px', gap: 24 }}>
@@ -83,34 +86,22 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ r
           </span>
           {formatVersionLabel('插件', pluginVersion)} · {formatVersionLabel('DSH', dshVersion)} · {row.author_nickname}
         </p>
-        <div style={{ whiteSpace: 'pre-wrap', maxWidth: 800 }}>{row.body_markdown}</div>
+        {/*
+          渲染后的正文。内容已经过 rehype-sanitize，脚本/事件属性/危险协议都被清除；
+          这里刻意不使用 whiteSpace:pre-wrap（那样会把 Markdown 标记原样显示）。
+        */}
+        <div
+          className="review-body"
+          style={{ maxWidth: 800, lineHeight: 1.75 }}
+          dangerouslySetInnerHTML={{ __html: safeBodyHtml }}
+        />
 
-        <section style={{ marginTop: 32, borderTop: '1px solid #DBE1EA', paddingTop: 16 }}>
-          <h2 style={{ fontSize: 18 }}>评论（{comments.total}）</h2>
-          {comments.items.length === 0 ? (
-            <p style={{ color: '#526174' }}>还没有评论。</p>
-          ) : (
-            <ul style={{ listStyle: 'none', padding: 0 }}>
-              {comments.items.map((c) => (
-                <li key={c.commentId} style={{ marginBottom: 12 }}>
-                  <div style={{ fontSize: 14, color: '#526174' }}>
-                    {c.authorId}
-                    {c.firstPublishedAt === null
-                      ? ' · 尚未公开'
-                      : ` · ${new Date(c.firstPublishedAt).toLocaleString('zh-CN')}`}
-                    {c.replyCount > 0 ? ` · ${c.replyCount} 条回复` : ''}
-                  </div>
-                  <div>
-                    {c.deletedAt !== null ? '该评论已删除' : c.publishedRevisionId === null ? '该评论尚未公开' : c.body}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-          <p style={{ color: '#526174', fontSize: 14 }}>
-            提交评论需登录；接口见 <code>POST /api/content/{reviewId}/comments</code>。
-          </p>
-        </section>
+        {/*
+          评论区改为客户端组件：列表照旧读公开讨论组，但登录态与"发表评论"
+          必须走真实接口（GET/POST /api/content/{id}/comments）。
+          服务端不再预取列表 —— 否则发完评论要整页刷新才能看到。
+        */}
+        <CommentSection contentId={reviewId} />
       </article>
 
       <aside>
