@@ -89,6 +89,7 @@
 | **访问日志（每请求一行，含状态码与耗时）** | **通过**：生产下打出 `http_request` 行（200/404/400 都验过），`/api/health` 与 `/_next/*` 静音；`request_id` 与响应头/响应体**同一个号** | `server.mjs` + `tests`… 见 §4.5 相关坑 |
 | **未捕获异常链路（digest 闭环）** | **通过**：故意抛异常的页面 → HTTP 500 → `request_error` 日志含 `path`/`digest`/`stack`，用户错误页上显示**同一个** digest（浏览器实测） | `src/instrumentation*.ts`、`src/app/error.tsx` |
 | **中文 404 / 错误页** | **通过**：404 页含中文说明、三个入口与本次 `request_id`；错误页含 digest、重试、回首页 | `src/app/not-found.tsx`、`error.tsx`、`global-error.tsx` |
+| **线上已带可观测性** | **通过（2026-10-13 21:22 重启后实测）**：线上 `/api/health` 200 `schema 0004`、访问日志 `http_request` 有行、启动自检有行、worker 心跳 3 秒前、中文 404 生效、无 error 级日志 | `deploy/README.md` §当前线上状态 |
 
 端到端脚本覆盖：登录 → 会话接口 → 收录真实插件 → 建草稿 → 保存 → **过期版本被拒** → 提交(pending)
 → **真 worker 进程** → `published` → 公开修订指针切换 → 匿名可读 → 发评论 → worker 发布

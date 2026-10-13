@@ -2,7 +2,7 @@
 
 > 2026-10-13 首次真实部署。**本文只写做过的、验证过的步骤**，没验证的地方会明说。
 
-## 当前线上状态（2026-10-13 20:16 实测）
+## 当前线上状态（2026-10-13 21:22 实测）
 
 | 项 | 值 |
 |---|---|
@@ -10,8 +10,11 @@
 | 线上 OAuth App | `dsh-plugin-review-test`（**注意名字里是 test，但它就是线上那个**）；本地那个叫 `dsh-plugin-review-dev` |
 | 回调 | `http://5.231.26.36/api/auth/github/callback` |
 | 首个管理员 | `icelily` / `01a13531-b77f-7162-8c1f-2f796c2ccab1`（GitHub `liceses` / `121547321`） |
-| 数据库 | 全新空库；实测登录后 `users=1`、`external_identities=1`、`role=admin` |
+| 数据库 | 空库；实测登录后 `users=1`、`external_identities=1`、`role=admin`；schema 已到 **0004** |
 | 状态 | web + worker 都 active，`enable` 过（重启自动起） |
+| Web 入口 | **`node server.mjs`**（自定义 server，2026-10-13 21:22 起）—— 带访问日志；`PORT=80`、`DSH_REVIEW_HOST=0.0.0.0` 由单元里的 `Environment=` 给 |
+| 健康检查 | `GET /api/health` → 200 `status:ok`；`?worker=1` 也 200（worker 心跳新鲜） |
+| 可观测性 | 访问日志 `http_request`（状态码/耗时/request_id）、启动自检、worker 心跳、中文错误页与 404 **均已生效** |
 
 **已验证的真实往返**：浏览器点「用 GitHub 登录」→ GitHub 授权页（`dsh-plugin-review-test` wants to access your `liceses` account，仅 read-only）→ 回调落在 `/onboarding?returnTo=/` → 保存昵称 → 导航栏显示「（管理员）」→ `/admin` 可用。
 
