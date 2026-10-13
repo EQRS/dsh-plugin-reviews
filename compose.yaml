@@ -1,0 +1,83 @@
+# DSH 插件测评站 · compose 编排（web / worker / migrate）
+#
+# 三个角色与 systemd 那套一一对应：
+#   migrate  一次性：把库升到最新结构（**唯一维护进程**，web/worker 不抢）
+#   web      常驻：Next 服务（容器内 3000）
+#   worker   常驻：任务与发布（跑 TS；自带 HEALTHCHECK 看心跳）
+#
+# 数据落在宿主机 `./.data`（与 systemd 部署同一目录），所以两套可以互相接管：
+# 停掉 systemd → compose 起 → 数据照旧；想退回也反过来。
+#
+# 用法（在仓库根目录，`.env.local` 必须在）：
+#   DSH_REVIEW_WEB_PORT=8081 docker compose up -d --build
+#   docker compose ps
+#   curl -fsS http://127.0.0.1:8081/api/health
+#
+# ⚠️ 首次启动前必须让宿主机上的 `.data` 属于容器内的 UID/GID（10001:10001），
+#    否则容器里的 dsh 用户写不进库。见 deploy/README.md「容器」一节。
+
+name: dsh-plugin-review
+
+services:
+  # 迁移：跑完即退。web/worker 都要等它成功，避免"两个进程同时迁移"。
+  migrate:
+    build:
+      context: .
+      target: runner
+    image: dsh-plugin-review:local
+    command: ['npx', 'tsx', 'src/server/platform/migrate-cli.ts']
+    env_file: ['.env.local']
+    environment:
+      # 容器内路径由这里统一给定，宿主机的 .env.local 怎么写的都不影响
+      DSH_REVIEW_DB_PATH: /app/.data/app.sqlite
+    volumes:
+      - '${DSH_REVIEW_DATA_DIR:-./.data}:/app/.data'
+    restart: 'no'
+
+  web:
+    image: dsh-plugin-review:local
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    env_file: ['.env.local']
+    environment:
+      DSH_REVIEW_DB_PATH: /app/.data/app.sqlite
+      DSH_REVIEW_MEDIA_ROOT: /app/.data/media
+    ports:
+      # 默认 8081：先在新端口上验，验完再把 DSH_REVIEW_WEB_PORT 改成 80 切过去
+      - '${DSH_REVIEW_WEB_PORT:-8081}:3000'
+    volumes:
+      - '${DSH_REVIEW_DATA_DIR:-./.data}:/app/.data'
+    restart: unless-stopped
+    # 容器里的日志要有上限，不能无限长（journald 会自动轮转，json-file 不会）
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+  worker:
+    image: dsh-plugin-review:local
+    command: ['npx', 'tsx', 'src/worker/main.ts']
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    env_file: ['.env.local']
+    environment:
+      DSH_REVIEW_DB_PATH: /app/.data/app.sqlite
+      DSH_REVIEW_MEDIA_ROOT: /app/.data/media
+    volumes:
+      - '${DSH_REVIEW_DATA_DIR:-./.data}:/app/.data'
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+    # worker 不提供 HTTP，所以直接查它自己写的心跳：静默死亡必须能被编排发现
+    healthcheck:
+      test: ['CMD', 'node', 'scripts/worker-healthcheck.mjs']
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3

@@ -12,6 +12,12 @@ import { getDb, closeDb } from '@/server/platform/db';
 import { nowMs } from '@/server/platform/time';
 import { log } from '@/server/platform/log';
 import { newId } from '@/server/platform/id';
+import {
+  WORKER_BEAT_INTERVAL_MS,
+  WORKER_HEARTBEAT_NAME,
+  WORKER_STALE_MS,
+  startHeartbeat,
+} from '@/server/platform/heartbeat';
 import type { TaskType } from '@/packages/common/field-rules';
 import { createTasksService } from '@/server/modules/tasks/service';
 import type { ClaimedTask, TasksService } from '@/server/modules/tasks/service';
@@ -46,6 +52,8 @@ export interface WorkerOptions {
   shouldContinue?: () => boolean;
   /** 任务模块（测试可注入；默认用进程单例）。 */
   tasks?: TasksService;
+  /** 每轮循环开头的回调（真实入口用它写运行时心跳；测试可不传）。 */
+  onTick?: () => void;
 }
 
 const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -141,6 +149,7 @@ export function createWorker(options: WorkerOptions) {
 
   /** 跑一轮：到期恢复 + 领一批任务并执行。返回本轮执行的任务数。 */
   async function runOnce(): Promise<number> {
+    options.onTick?.();
     const now = nowMs();
     const recovered = await tasks.recoverExpired(now);
     if (recovered > 0) log.info('回收到期租约', { count: recovered });
@@ -210,16 +219,29 @@ export async function main(): Promise<void> {
   process.on('SIGTERM', () => stop('SIGTERM'));
   process.on('SIGINT', () => stop('SIGINT'));
 
+  // 运行时心跳：**固定间隔**写（不能只靠每轮循环写 —— 一个跑很久的任务会让心跳
+  // 在任务期间变旧，那会把"正在干活"误判成"卡死"）。
+  const heartbeat = startHeartbeat(db, WORKER_HEARTBEAT_NAME, {
+    detail: () => ({ worker_reference: workerReference, pid: process.pid }),
+  });
+  log.info('已开始写运行时心跳', {
+    worker_reference: workerReference,
+    interval_ms: WORKER_BEAT_INTERVAL_MS,
+    stale_ms: WORKER_STALE_MS,
+  });
+
   const worker = createWorker({
     workerReference,
     handlers,
     tasks,
     shouldContinue: () => running,
+    onTick: () => heartbeat.beatNow(),
   });
 
   try {
     await worker.run();
   } finally {
+    heartbeat.stop();
     closeDb();
   }
 }

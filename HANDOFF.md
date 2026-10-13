@@ -11,7 +11,7 @@
 登录 → 收录插件 → **从插件页写评测** → 保存 → 提交 → **检查/人工审核** → **真 worker 发布** → 公开可读
 → 评论 → **回复** → 作者**撤回**；新用户落地页 `/onboarding` 可用。
 
-`tsc` exit 0、单测 **367/367（18 文件）**、HTTP 验收 **16 + 21 + 14**、端到端 **22/22**，
+`tsc` exit 0、单测 **388/388（20 文件）**、HTTP 验收 **16 + 21 + 14**、端到端 **22/22**，
 浏览器点击链路两轮共 22 步（§5.2 / §5.3）。
 **已提交并推送：`938f32a`（第二轮）→ `c8c4138`（交接书）→ 第三轮见 §6。**
 
@@ -72,7 +72,7 @@
 | 项目 | 结果 | 复现命令 |
 |---|---|---|
 | 类型检查 | **exit 0** | `npx tsc --noEmit` |
-| 单元/集成测试 | **367 passed / 18 files** | `npx vitest run` |
+| 单元/集成测试 | **388 passed / 20 files** | `npx vitest run` |
 | HTTP 读验收 | **16/16**（连跑两次都一样） | `node scripts/acceptance-http.mjs`（需 dev server） |
 | HTTP 写验收 | **21/21** | `npx tsx scripts/acceptance-http-write.mjs` |
 | 图片上传验收 | **14/14**（可重复运行） | `npx tsx scripts/acceptance-upload.mjs` |
@@ -84,6 +84,8 @@
 | **真实 GitHub OAuth 往返** | **通过**（真账号 `liceses` → 授权 → 回调建号 → onboarding → 提为管理员） | 见 §5.4 |
 | **线上部署（Linux VPS）** | **通过**：http://5.231.26.36 ，web+worker 双 systemd，真机登录后 `users=1 role=admin` | 见 [deploy/README.md](deploy/README.md) |
 | 凭据预检（假 code 换 token） | `bad_verification_code`（= 凭据配对正确） | 见 §5.4 第 3 步 |
+| **健康检查 `/api/health`** | **通过**（16 条新测试）：结构坏了 503、公网 body 不含逐项检查、`?worker=1` 才把 worker 算进结论 | `tests/health.test.ts` |
+| **worker 运行时心跳** | **通过（正反两向真跑）**：worker 起来后心跳新鲜、`diagnose` 显示 ok；停掉且阈值压到 1 秒 → 判 dead、退出码 1 | `migrations/0004`、`scripts/worker-healthcheck.mjs` |
 
 端到端脚本覆盖：登录 → 会话接口 → 收录真实插件 → 建草稿 → 保存 → **过期版本被拒** → 提交(pending)
 → **真 worker 进程** → `published` → 公开修订指针切换 → 匿名可读 → 发评论 → worker 发布
@@ -151,7 +153,7 @@
 ```cmd
 cd /d "D:\developing\ds民间科研成果展示\插件测评网站"
 npx tsc --noEmit                 REM 期望 exit 0
-npx vitest run                   REM 期望 367 passed / 18 files
+npx vitest run                   REM 期望 388 passed / 20 files
 dev.cmd                          REM 迁移 + 自检 + 起 Web（3100）
 REM 另开窗口（要让提交自动发布才需要）：
 set DSH_REVIEW_CONTENT_SCREEN=basic
@@ -222,6 +224,10 @@ Next dev 默认把 `127.0.0.1` 视为**跨源**并拦掉 `/_next/*`
 | **生产构建跑在 http 上 → 会话立刻丢失** | 生产用 `__Host-` + `Secure`，浏览器只在 HTTPS 下收；表现为"登录 200，下一次请求变匿名"。OAuth 的浏览器绑定 Cookie 同样会丢（回调时报绑定失败） | 新增 `DSH_REVIEW_INSECURE_COOKIES=1` 显式降级（`resolveCookieMode` 纯函数，两条写 Cookie 的地方共用一个 `cookieSecure()`），启动打警告。上 HTTPS 后必须删掉 |
 | **Client ID 抄错一个字符，GitHub 只回 404** | `POST /login/oauth/access_token` → `HTTP 404 {"error":"Not Found"}`（不是 `incorrect_client_credentials`）。把截图里的 `…TSkl` 看成了 `…TSk1`（小写 L / 数字 1） | 用 `node scripts/check-github-oauth.mjs` 判定：`bad_verification_code` = 凭据与回调都对；`Not Found` = 这个 client_id 它不认识。**抄 id/secret 一律用复制按钮，不要看图打** |
 | 登出后页面不刷新 | 点「登出」后，已渲染的服务端页面仍显示登录态操作（如插件页的「写一篇评测」） | 这是 Next 的 Router Cache；**硬刷新即正确**（刷新后显示"登录后可以在这里写评测"），且服务端照样会 401 拦住。暂未处理 |
+| **`npm ci` 在 `NODE_ENV=production` 下不装 devDependencies** | 容器构建时 `tsx`（worker 运行时）与 `typescript`（构建）都在 dev 里 → 构建失败或 worker 起不来 | Dockerfile 里显式 `npm ci --include=dev`，并在注释里写清为什么 |
+| **测试里 `getDb()` 单例占着临时库，Windows 删不掉目录** | 用例全绿但**文件级**失败：`EPERM ... dsh-review-test-xxxx`，很容易被"Tests 388 passed"那行糊过去 | 该 describe 的 `afterAll` 里先 `closeDb()` 再 `cleanup()` |
+| **`Start-Process npx` 在 Windows 起不来** | 报"不是有效的 Win32 应用程序"（npx 是 .cmd 垫片） | 后台跑用 `cmd /c npx ...`，或直接用作业层 |
+| **诊断脚本查任务队列用了想当然的列名** | 我按 `status` / `error_code` 写，真表是 `processing_state` / `last_error_code`；更糟的是 `try/catch` 把错误吞了，输出只留一个 `运行中 ?` | 列名一律回迁移里核对；诊断脚本自己也要把"读失败"打出来（已改：`out.tasks.error` 会进结论） |
 
 ---
 
@@ -363,7 +369,7 @@ src/app/               App Router：页面 + /api 路由；页面含 /onboarding
 src/components/        session-nav · plugin-submit-form · review-editor · comment-section ·
                        start-draft-button · admin-decision-form · profile-form · withdraw-button · api-client
 src/worker/            main（独立进程）· handlers（4 处理器）· content-screen（本地基础筛查）
-tests/                 18 文件 / 367 测试（用真实临时库 + 真实迁移，**不用 `:memory:`**）
+tests/                 20 文件 / 388 测试（用真实临时库 + 真实迁移，**不用 `:memory:`**）
 scripts/               验收与自检脚本；grant-admin.mjs（指定/撤销管理员）；check-github-oauth.mjs（凭据体检）
 docs/                  设计映射、并行分组协议、模块签名契约、验收纪律、环境坑
 ```
@@ -429,7 +435,7 @@ docs/                  设计映射、并行分组协议、模块签名契约、
 ```cmd
 cd /d "D:\developing\ds民间科研成果展示\插件测评网站"
 npx tsc --noEmit                 REM 期望 exit 0
-npx vitest run                   REM 期望 367 passed / 18 files
+npx vitest run                   REM 期望 388 passed / 20 files
 dev.cmd                          REM 迁移 + 自检 + 起 Web（3100）
 REM 另开窗口：
 set DSH_REVIEW_CONTENT_SCREEN=basic

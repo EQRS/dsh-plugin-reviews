@@ -1,0 +1,34 @@
+# 构建上下文要小、要干净：镜像里只该有能跑起来的内容。
+# 尤其注意 .env* 与 .data：前者是秘密，后者是主人的真实数据 —— 都不进镜像。
+
+.git
+.github
+node_modules
+.next
+.data
+.data-*
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+.env
+.env.local
+.env.*.local
+
+# 文档与设计稿不进镜像（要查文档请直接看仓库）
+*.md
+docs
+deploy
+参考草案
+design-system
+design-system/**
+
+# 测试与本地工具不进镜像
+tests
+coverage
+vitest.config.ts
+tsconfig.tsbuildinfo
+next-env.d.ts
+*.log
+*.bak
+*mutation*

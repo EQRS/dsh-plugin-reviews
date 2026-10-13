@@ -18,6 +18,16 @@
 # （在 Windows 上 clone 再传到服务器时真会踩到 —— core.autocrlf=true）。
 *.service text eol=lf
 
+# 容器相关同理：Dockerfile 里的续行与 heredoc 被塞进 \r 会构建出莫名其妙的结果；
+# compose.yaml 已是 *.yml 覆盖，这里再显式列一次，免得有人只改这一处。
+Dockerfile    text eol=lf
+*.dockerfile  text eol=lf
+.dockerignore text eol=lf
+compose.yaml  text eol=lf
+
+# 可执行脚本（Linux 上直接跑）
+*.sh text eol=lf
+
 # 二进制：不要做任何行尾转换。
 *.png  binary
 *.jpg  binary

@@ -115,6 +115,8 @@ export const REQUIRED_TABLES = [
   'operation_records',
   'configuration_revisions',
   'site_settings',
+  // 0004：运行时心跳（健康检查与容器 HEALTHCHECK 的判据；不是业务表）
+  'runtime_heartbeats',
 ] as const;
 
 export function selfCheck(db: SqliteDatabase): SelfCheckResult {

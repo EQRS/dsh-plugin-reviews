@@ -152,10 +152,76 @@ systemctl restart dsh-review-web dsh-review-worker
 
 | 未做 | 说明 |
 |---|---|
+| **容器还没在真机上跑过** | `Dockerfile` / `compose.yaml` / 两个健康检查脚本已就绪，**本机没有 Docker**，线上也还没装 —— 下一步就是在 VPS 上 `docker compose up --build` 并验证 |
 | HTTPS / 域名 / nginx | 现在只有 `http://<IP>` 直连，会话凭证明文过网（靠 `DSH_REVIEW_INSECURE_COOKIES=1` 才可用）。上 TLS 后**必须**删掉那个变量。证书签发要求域名先指向本机（HTTP-01 走 80），**顺序不能反** |
 | 备份 | `.data/app.sqlite` 没有定时备份；SQLite 在线备份要用 `sqlite3 .backup` 或停服复制（含 `-wal`/`-shm`） |
 | 防火墙 / SSH 加固 | 机器上 ufw 未装；root 密码登录开着（主人明确说先不动）；应用跑在 `dsh` 用户下，这一层是好的 |
 | 迁移到 Postgres | SQLite 单文件够这个切片用；并发写不是它的强项 |
+
+## 容器（Docker Compose）
+
+评审把"真实 Linux 容器构建"列为**必须先验的三个外部假设之一**，所以这一步不能只写 Dockerfile 就完事。
+
+### 形态
+
+- **一个镜像两用**：`web` 与 `worker` 共用同一镜像、同一份业务代码、同一个库，靠 compose 换 `command` 区分进程 —— 与 systemd 那套分工完全一致。
+  > 刻意**不做** standalone 瘦身：worker 跑的是 TS（`tsx`），需要 `node_modules` 与源码。拆成两个镜像会让"两边是同一份代码"这个前提难以核对，而收益只是镜像小几百 MB。
+- **`migrate` 是一次性服务**：跑完即退，`web`/`worker` 用 `depends_on: service_completed_successfully` 等它 —— 对应"迁移由唯一维护进程执行，web/worker 不抢"这条铁律。
+- **容器内固定 UID/GID 10001，绝不用 root 跑业务**；`tini` 做 1 号进程，SIGTERM 才能真的传到 node（worker 的优雅退出依赖它）。
+- **日志有上限**：`json-file` + `10m × 3`（journald 会自动轮转，容器默认不会）。
+
+### 健康检查（这一层是"出问题能不能看准"的关键）
+
+| 谁 | 怎么判 | 判据 |
+|---|---|---|
+| `web` 容器 | `HEALTHCHECK` 打 `/api/health` | 库能查 + 外键开启 + 必需表齐全 → 200；结构坏了 → 503 |
+| `worker` 容器 | `node scripts/worker-healthcheck.mjs` | 读 worker 自己写的心跳，超过阈值没更新 → 退出码 1 |
+| 人 | `node scripts/diagnose.mjs` | 一屏看全：配置配没配、库结构/大小、数据量、任务队列与最近失败、worker 心跳、磁盘、媒体目录 |
+
+> `/api/health` **刻意不含** worker 心跳：worker 是另一个容器，它挂了不该让 web 被重启。
+> 要问 worker 就显式加 `?worker=1`（那时返回 503）。公网可见的响应里只有状态与 schema 版本；
+> 逐项检查要 `?detail=1` **且** `x-health-token` 等于 `DSH_REVIEW_HEALTH_TOKEN`。
+
+### 首跑前必须做的一步
+
+宿主机上的 `.data` 必须属于容器内的 UID/GID，否则容器里的 `dsh` 用户写不进库：
+
+```bash
+cd /srv/dsh-plugin-review
+mkdir -p .data
+chown -R 10001:10001 .data        # 容器内的 dsh 用户
+```
+
+### 命令
+
+```bash
+cd /srv/dsh-plugin-review
+git pull                                     # 或 rsync 同步代码
+
+# 第一次先在新端口验，别直接顶替 80
+DSH_REVIEW_WEB_PORT=8081 docker compose up -d --build
+docker compose ps                            # web 应为 healthy；worker 应为 healthy
+curl -fsS http://127.0.0.1:8081/api/health   # 期望 {"ok":true,...,"status":"ok"}
+
+# 验完切到 80：停 systemd（两套不能同时占 80），再
+DSH_REVIEW_WEB_PORT=80 docker compose up -d
+```
+
+**与 systemd 的关系**：两套共用 `./.data`，所以可以互相接管。切换时**务必先停一边**再起另一边 ——
+同一台机器上两个进程同时开同一个 SQLite 库，轻则 WAL 冲突，重则锁死。
+
+```bash
+systemctl stop dsh-review-web dsh-review-worker     # 切到容器
+systemctl disable dsh-review-web dsh-review-worker
+docker compose up -d
+# 想退回：
+docker compose down && systemctl enable --now dsh-review-web dsh-review-worker
+```
+
+### 踩过的坑
+
+- `npm ci` 在 `NODE_ENV=production` 下**默认不装 devDependencies**，而本项目的 `tsx`（worker 运行时）与 `typescript`（构建）都在 dev 里 —— 不写 `--include=dev` 会构建失败、worker 起不来。
+- 别用 `Start-Process npx`（Windows 上是 .cmd 垫片，报"不是有效的 Win32 应用程序"）；要后台跑就用 `cmd /c npx ...` 或作业层。
 
 ## HTTPS 路线（域名一旦指向本机就能做）
 
