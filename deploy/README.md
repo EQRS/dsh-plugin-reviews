@@ -2,6 +2,51 @@
 
 > 2026-10-13 首次真实部署。**本文只写做过的、验证过的步骤**，没验证的地方会明说。
 
+## 当前线上状态（2026-10-13 20:16 实测）
+
+| 项 | 值 |
+|---|---|
+| 地址 | **http://5.231.26.36**（德国 · GHOSTnet，Debian 13，4C/12G/118G） |
+| 线上 OAuth App | `dsh-plugin-review-test`（**注意名字里是 test，但它就是线上那个**）；本地那个叫 `dsh-plugin-review-dev` |
+| 回调 | `http://5.231.26.36/api/auth/github/callback` |
+| 首个管理员 | `icelily` / `01a13531-b77f-7162-8c1f-2f796c2ccab1`（GitHub `liceses` / `121547321`） |
+| 数据库 | 全新空库；实测登录后 `users=1`、`external_identities=1`、`role=admin` |
+| 状态 | web + worker 都 active，`enable` 过（重启自动起） |
+
+**已验证的真实往返**：浏览器点「用 GitHub 登录」→ GitHub 授权页（`dsh-plugin-review-test` wants to access your `liceses` account，仅 read-only）→ 回调落在 `/onboarding?returnTo=/` → 保存昵称 → 导航栏显示「（管理员）」→ `/admin` 可用。
+
+> ✅ 顺带证明了两件事：**全新空库时 `BOOTSTRAP_ADMIN_GITHUB_ID` 真的会生效**（第一次登录即管理员）；
+> **生产下测试登录确实关闭**（`testLoginEnabled:false`，导航栏没有那个按钮）。
+
+### 踩到的坑：Client ID 的 `l` 与 `1`
+
+第一次把 client_id 从截图里抄成了 `…TSk1`（数字一），实际是 `…TSkl`（小写 L）。症状很好认：
+
+```
+POST https://github.com/login/oauth/access_token  ->  HTTP 404 {"error":"Not Found"}
+```
+
+**GitHub 对不认识的 client_id 一律回 404，而不是报错说明**。排查手法：
+`node scripts/check-github-oauth.mjs` 拿假 code 去换 token，
+回 `bad_verification_code` = 凭据 + 回调**都对**；回 `Not Found` = 这个 client_id 它根本不认识（抄错了/建错了）。
+> 抄 client_id / secret 一律**用复制按钮**，不要看图打。
+
+### 观察到的两件事（还不是问题，但要知道）
+
+- **首屏慢**：从国内访问，单个请求 0.7–2.6 秒（SSR + 长距离链路）。可接受但不好看。
+- **偶发 chunk 截断**：浏览器控制台出现过一次
+  `/_next/static/chunks/…js  net::ERR_INCOMPLETE_CHUNKED_ENCODING`，表现为导航栏一直停在「正在读取登录状态…」；
+  硬刷新即恢复。同一文件用 curl 连取 8 次字节数完全一致，说明**不是服务端问题**。
+  上 HTTPS 时顺手在前面加一层 nginx/Caddy（`sendfile` + keepalive + gzip）是正解。
+
+## DNS 现状（`lingshulab.com`）
+
+- 根域**没有 A 记录**（NS 在华为云 DNS）；`www` 不存在。
+- `review.lingshulab.com` **权威解析指向 `152.175.13.175`（香港 · Sakura）**，不是这台。
+  那台 80/443 全关、且同一套 root 口令**认证失败**（进不去）。
+- 结论：**域名暂时没用上**，线上先用 IP 访问。以后要上域名，改华为云的 A 记录指到这台，
+  再按下面的"HTTPS"章节走一遍。
+
 ## 目标形态
 
 ```
@@ -107,7 +152,15 @@ systemctl restart dsh-review-web dsh-review-worker
 
 | 未做 | 说明 |
 |---|---|
-| HTTPS / 域名 / nginx | 现在只有 `http://<IP>` 直连，会话凭证明文过网（靠 `DSH_REVIEW_INSECURE_COOKIES=1` 才可用）。上 TLS 后**必须**删掉那个变量 |
+| HTTPS / 域名 / nginx | 现在只有 `http://<IP>` 直连，会话凭证明文过网（靠 `DSH_REVIEW_INSECURE_COOKIES=1` 才可用）。上 TLS 后**必须**删掉那个变量。证书签发要求域名先指向本机（HTTP-01 走 80），**顺序不能反** |
 | 备份 | `.data/app.sqlite` 没有定时备份；SQLite 在线备份要用 `sqlite3 .backup` 或停服复制（含 `-wal`/`-shm`） |
-| 防火墙 / SSH 加固 | 机器上 ufw 未装；root 密码登录开着；应用跑在 `dsh` 用户下，这一层是好的 |
+| 防火墙 / SSH 加固 | 机器上 ufw 未装；root 密码登录开着（主人明确说先不动）；应用跑在 `dsh` 用户下，这一层是好的 |
 | 迁移到 Postgres | SQLite 单文件够这个切片用；并发写不是它的强项 |
+
+## HTTPS 路线（域名一旦指向本机就能做）
+
+1. 装 **Caddy**（自动申请 + 续签 Let's Encrypt，比 nginx+certbot 少一半配置）
+2. Web 退到 `127.0.0.1:3000`，Caddy 占 80/443 反代；顺手把单元里的 `CAP_NET_BIND_SERVICE` 删掉
+3. **删掉 `.env.local` 里的 `DSH_REVIEW_INSECURE_COOKIES=1`** —— 会话 Cookie 回到 `__Host-` + `Secure`
+4. OAuth 回调改成 `https://<域名>/api/auth/github/callback`（在对应的 App 页面改，或再建一个）
+5. 验证：证书链、`__Host-dsh_session` 是否真的落下、完整登录 → onboarding → 管理员

@@ -18,6 +18,11 @@
 **真实 GitHub 登录已跑通一次完整往返**（2026-10-12 晚，真账号 `liceses`、真 OAuth App、真授权页）——
 在此之前它只验到"未配置时明确 503"。见 §5.4。**主人自己的账号 `icelily` / `01a130c1-…` 已是管理员。**
 
+**已部署到一台 Linux VPS 并在线上又跑通一次真实登录**（2026-10-13）：
+**http://5.231.26.36** —— web + worker 双 systemd 常驻、跑在 `dsh` 用户下、全新空库
+（因此 `BOOTSTRAP_ADMIN_GITHUB_ID` 真的生效，第一次登录即管理员）。步骤与坑见
+[deploy/README.md](deploy/README.md)。**仍是 HTTP、没有备份、没上域名**。
+
 **第三轮补掉的是"页面上的洞"**（§1.2 第 16、17 条）：后台审核按钮、作者撤回按钮、评论回复、
 `/onboarding`、首个管理员指定方式 —— 以及一个真正的断点：**人工通过之后没有任何东西去发布**。
 
@@ -77,6 +82,7 @@
 | 真实 GitHub 收录 | 成功收录 `packages/bundle/base` | 见 §5.1 |
 | 浏览器真登录（测试通道） | 导航栏变为真实用户 ID + 登出 | 见 §5.2 |
 | **真实 GitHub OAuth 往返** | **通过**（真账号 `liceses` → 授权 → 回调建号 → onboarding → 提为管理员） | 见 §5.4 |
+| **线上部署（Linux VPS）** | **通过**：http://5.231.26.36 ，web+worker 双 systemd，真机登录后 `users=1 role=admin` | 见 [deploy/README.md](deploy/README.md) |
 | 凭据预检（假 code 换 token） | `bad_verification_code`（= 凭据配对正确） | 见 §5.4 第 3 步 |
 
 端到端脚本覆盖：登录 → 会话接口 → 收录真实插件 → 建草稿 → 保存 → **过期版本被拒** → 提交(pending)
@@ -214,6 +220,7 @@ Next dev 默认把 `127.0.0.1` 视为**跨源**并拦掉 `/_next/*`
 | 验收脚本写死幂等键 | 第二次运行撞 `request_key_reused(409)`（幂等机制是对的，脚本不可重复） | 每次运行生成唯一键（`RUN = Date.now().toString(36)`） |
 | **`.env.example` 里的变量没人读** | 部署者照填，然后什么都不会发生（`BOOTSTRAP_ADMIN_GITHUB_ID`、`SITE_ORIGIN`） | 前者已接上（§1.2 第 18 条）；后者如实标注"当前未读取"。**加配置项时同时加读者，或标注它还是空的** |
 | **生产构建跑在 http 上 → 会话立刻丢失** | 生产用 `__Host-` + `Secure`，浏览器只在 HTTPS 下收；表现为"登录 200，下一次请求变匿名"。OAuth 的浏览器绑定 Cookie 同样会丢（回调时报绑定失败） | 新增 `DSH_REVIEW_INSECURE_COOKIES=1` 显式降级（`resolveCookieMode` 纯函数，两条写 Cookie 的地方共用一个 `cookieSecure()`），启动打警告。上 HTTPS 后必须删掉 |
+| **Client ID 抄错一个字符，GitHub 只回 404** | `POST /login/oauth/access_token` → `HTTP 404 {"error":"Not Found"}`（不是 `incorrect_client_credentials`）。把截图里的 `…TSkl` 看成了 `…TSk1`（小写 L / 数字 1） | 用 `node scripts/check-github-oauth.mjs` 判定：`bad_verification_code` = 凭据与回调都对；`Not Found` = 这个 client_id 它不认识。**抄 id/secret 一律用复制按钮，不要看图打** |
 | 登出后页面不刷新 | 点「登出」后，已渲染的服务端页面仍显示登录态操作（如插件页的「写一篇评测」） | 这是 Next 的 Router Cache；**硬刷新即正确**（刷新后显示"登录后可以在这里写评测"），且服务端照样会 401 拦住。暂未处理 |
 
 ---
