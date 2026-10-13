@@ -14,6 +14,10 @@
 *.html text eol=lf
 *.yml  text eol=lf
 
+# systemd 单元文件**必须**是 LF：CRLF 会让 systemd 解析出带 \r 的值
+# （在 Windows 上 clone 再传到服务器时真会踩到 —— core.autocrlf=true）。
+*.service text eol=lf
+
 # 二进制：不要做任何行尾转换。
 *.png  binary
 *.jpg  binary
