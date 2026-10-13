@@ -13,8 +13,10 @@
 #   docker compose ps
 #   curl -fsS http://127.0.0.1:8081/api/health
 #
-# ⚠️ 首次启动前必须让宿主机上的 `.data` 属于容器内的 UID/GID（10001:10001），
-#    否则容器里的 dsh 用户写不进库。见 deploy/README.md「容器」一节。
+# ⚠️ 数据目录属主与容器内 UID 必须对得上，否则容器里的 dsh 用户写不进库。
+#    镜像里固定是 10001:10001；**但宿主目录的属主往往是别的号**（本机线上是 989:989），
+#    所以三个服务都接受 `DSH_REVIEW_UID` / `DSH_REVIEW_GID` 覆盖 —— 这样"换部署方式"
+#    不必去动主人的数据属主，systemd 与 compose 随时可以互相接管。见 deploy/README.md。
 
 name: dsh-plugin-review
 
@@ -27,6 +29,8 @@ services:
     image: dsh-plugin-review:local
     command: ['npx', 'tsx', 'src/server/platform/migrate-cli.ts']
     env_file: ['.env.local']
+    # 与宿主数据目录属主对齐；不改属主也能跑（见文件头说明）
+    user: '${DSH_REVIEW_UID:-10001}:${DSH_REVIEW_GID:-10001}'
     environment:
       # 容器内路径由这里统一给定，宿主机的 .env.local 怎么写的都不影响
       DSH_REVIEW_DB_PATH: /app/.data/app.sqlite
@@ -40,6 +44,8 @@ services:
       migrate:
         condition: service_completed_successfully
     env_file: ['.env.local']
+    # 与宿主数据目录属主对齐；不改属主也能跑（见文件头说明）
+    user: '${DSH_REVIEW_UID:-10001}:${DSH_REVIEW_GID:-10001}'
     environment:
       DSH_REVIEW_DB_PATH: /app/.data/app.sqlite
       DSH_REVIEW_MEDIA_ROOT: /app/.data/media
@@ -63,6 +69,8 @@ services:
       migrate:
         condition: service_completed_successfully
     env_file: ['.env.local']
+    # 与宿主数据目录属主对齐；不改属主也能跑（见文件头说明）
+    user: '${DSH_REVIEW_UID:-10001}:${DSH_REVIEW_GID:-10001}'
     environment:
       DSH_REVIEW_DB_PATH: /app/.data/app.sqlite
       DSH_REVIEW_MEDIA_ROOT: /app/.data/media

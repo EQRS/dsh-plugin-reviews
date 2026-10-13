@@ -1,6 +1,8 @@
 node_modules/
 .next/
 .data/
+# 容器验证用的独立数据目录（.data-container 之类）同样不进版本库
+.data-*/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm

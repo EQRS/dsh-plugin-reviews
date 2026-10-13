@@ -182,46 +182,66 @@ systemctl restart dsh-review-web dsh-review-worker
 > 要问 worker 就显式加 `?worker=1`（那时返回 503）。公网可见的响应里只有状态与 schema 版本；
 > 逐项检查要 `?detail=1` **且** `x-health-token` 等于 `DSH_REVIEW_HEALTH_TOKEN`。
 
-### 首跑前必须做的一步
+### 真机验证结果（2026-10-13，5.231.26.36）
 
-宿主机上的 `.data` 必须属于容器内的 UID/GID，否则容器里的 `dsh` 用户写不进库：
+| 项 | 结果 |
+|---|---|
+| Docker / Compose | `29.9.0` / `v5.6.0`（Docker 官方 Debian trixie 源装上，`systemctl is-active docker` = active） |
+| 镜像 | `dsh-plugin-review:local`，**1.3 GB**（全量依赖，含 worker 需要的 tsx） |
+| 构建 | 一次成功：apt → `npm ci --include=dev` → `next build` |
+| 容器 | `web` **healthy**（`0.0.0.0:8081->3000`）、`worker` **healthy**、`migrate` 跑完即退 |
+| 迁移 | 在容器的**全新库**上跑了全部 4 个（`alreadyApplied: []`），最后停在 `0004_runtime_heartbeats.sql` |
+| 行为 | `/api/health` 200 `status:ok`；`?worker=1` 也 200（worker 活着）；`/` `/plugins` `/reviews` `/admin` `/onboarding` 全 200 |
+| 心跳 | 容器内 worker 日志：`已开始写运行时心跳 interval_ms:5000 stale_ms:30000`，库里 `runtime_heartbeats` 有行（含 `worker_reference` 与 `pid`） |
+| 身份 | 容器内 `uid=10001(dsh) gid=10001(dsh)`，数据文件属主一致 |
+| 诊断脚本 | 在容器里能跑，正确报出配置（只报长度）、库结构、数据量、心跳 |
+
+### 数据目录属主：这条最容易卡住
+
+镜像里固定 `10001:10001`，**但宿主目录的属主常常是别的号** —— 本机线上 `dsh` 是 **989:989**。
+实测：以 10001 跑容器，对线上 `.data` **写不进去**（`Permission denied`）；以 989 跑则正常。
+所以 compose 三个服务都接受 `DSH_REVIEW_UID` / `DSH_REVIEW_GID` 覆盖：
 
 ```bash
-cd /srv/dsh-plugin-review
-mkdir -p .data
-chown -R 10001:10001 .data        # 容器内的 dsh 用户
+# 只读看线上真库（不触发迁移，安全）
+DSH_REVIEW_DATA_DIR=./.data DSH_REVIEW_UID=989 DSH_REVIEW_GID=989 \
+  docker compose run --rm --no-deps web node scripts/diagnose.mjs
 ```
 
-### 命令
+**两条路，选一条**：① 让容器跟宿主属主走（`DSH_REVIEW_UID=989 DSH_REVIEW_GID=989`，**不动主人的数据**，systemd 随时能接管）；
+② 把 `.data` `chown -R 10001:10001`（更符合"固定 UID"的本意，但 systemd 那套就写不进去了，等于单向门）。
+
+> 上面那次只读验证顺带证明了诊断脚本的价值：它一眼指出**线上库还停在 `0003_auth_media.sql`、缺 `runtime_heartbeats`**。
+
+### 切到 80（把线上换成容器）
 
 ```bash
 cd /srv/dsh-plugin-review
-git pull                                     # 或 rsync 同步代码
 
-# 第一次先在新端口验，别直接顶替 80
+# 1) 先在新端口起一遍，确认 healthy（已做过）
 DSH_REVIEW_WEB_PORT=8081 docker compose up -d --build
-docker compose ps                            # web 应为 healthy；worker 应为 healthy
-curl -fsS http://127.0.0.1:8081/api/health   # 期望 {"ok":true,...,"status":"ok"}
 
-# 验完切到 80：停 systemd（两套不能同时占 80），再
-DSH_REVIEW_WEB_PORT=80 docker compose up -d
-```
+# 2) 停 systemd（两套不能同时占 80），再换成 80 端口
+systemctl disable --now dsh-review-web dsh-review-worker
+DSH_REVIEW_UID=989 DSH_REVIEW_GID=989 DSH_REVIEW_WEB_PORT=80 docker compose up -d
 
-**与 systemd 的关系**：两套共用 `./.data`，所以可以互相接管。切换时**务必先停一边**再起另一边 ——
-同一台机器上两个进程同时开同一个 SQLite 库，轻则 WAL 冲突，重则锁死。
+# 3) 复核
+docker compose ps
+curl -fsS 'http://127.0.0.1/api/health?worker=1'
+node scripts/diagnose.mjs
 
-```bash
-systemctl stop dsh-review-web dsh-review-worker     # 切到容器
-systemctl disable dsh-review-web dsh-review-worker
-docker compose up -d
-# 想退回：
+# 想退回 systemd（先停容器再起服务）
 docker compose down && systemctl enable --now dsh-review-web dsh-review-worker
 ```
+
+> ⚠️ 切过去时容器里的 `migrate` 会把线上库升到 `0004`。那是个**只加一张表**的迁移，旧代码不受影响；
+> 但"升上去之后再退回旧 systemd 代码"会留下这张多余的表 —— 无害，知道就行。
 
 ### 踩过的坑
 
 - `npm ci` 在 `NODE_ENV=production` 下**默认不装 devDependencies**，而本项目的 `tsx`（worker 运行时）与 `typescript`（构建）都在 dev 里 —— 不写 `--include=dev` 会构建失败、worker 起不来。
 - 别用 `Start-Process npx`（Windows 上是 .cmd 垫片，报"不是有效的 Win32 应用程序"）；要后台跑就用 `cmd /c npx ...` 或作业层。
+- 镜像 1.3 GB：worker 跑 TS 就要全量依赖。要瘦身得先给 worker 做编译产物，那是另一片的事。
 
 ## HTTPS 路线（域名一旦指向本机就能做）
 
