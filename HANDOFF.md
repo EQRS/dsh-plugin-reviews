@@ -236,6 +236,8 @@ Next dev 默认把 `127.0.0.1` 视为**跨源**并拦掉 `/_next/*`
 | **访问行的 request_id 与响应体里的对不上** | 自定义 server 自己生成一个 id 放进响应头，业务层 `requestIdFromHeaders` 又生成另一个 → 用户报的编号 grep 不到那一行 | server 里把 id **注入入站请求头**（`req.headers['x-request-id']`），业务层就会沿用；实测三处同一个号，且外部带 id 进来也会沿用 |
 | **`_` 前缀的 App Router 目录不参与路由** | 临时验证页放在 `src/app/__boom/`，请求它得到 404（Next 把 `_` 前缀当私有文件夹） | 验证类页面别用下划线前缀（改成 `boom-verify` 后立即命中 500） |
 | **`instrumentation.ts` 会被同时编到 Edge 运行时** | 在同文件里动态 import 业务模块 → 构建打出 7 条 "A Node.js API is used ... not supported in the Edge Runtime" 警告（`process.stderr`、`process.pid`、better-sqlite3） | 拆成 `instrumentation.ts`（只留正条件判断 + 动态引入）+ `instrumentation-node.ts`（真正实现），警告清零 |
+| **`sharp` 被直接 import，却只靠 Next 的可选依赖活着** | `media/service.ts` 直接 `import sharp`，而它原先只是 `next` 的 `optionalDependencies`；换 pnpm（严格 node_modules）或 `npm ci --omit=optional` 会让**图片上传直接炸** | 在 `dependencies` 里显式声明 `sharp`（精确固定版本）；Next 的默认外置清单本来就含 sharp，实测 Turbopack 构建照过 |
+| **声明了却零引用的依赖会误导后来人** | `zod` 与 `drizzle-orm` 在 `src/`、`tests/`、`scripts/` **全仓 0 引用**，但留在依赖里会让人以为存在校验层 / ORM 层 | 已 `npm uninstall`；选型结论与复核命令写进 [docs/技术选型-基础功能用库还是自己写.md](docs/技术选型-基础功能用库还是自己写.md) |
 
 ---
 
