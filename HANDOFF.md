@@ -213,6 +213,7 @@ Next dev 默认把 `127.0.0.1` 视为**跨源**并拦掉 `/_next/*`
 | 验收脚本共享 cookie jar | 断言被前一步登录污染 | 每角色独立 jar |
 | 验收脚本写死幂等键 | 第二次运行撞 `request_key_reused(409)`（幂等机制是对的，脚本不可重复） | 每次运行生成唯一键（`RUN = Date.now().toString(36)`） |
 | **`.env.example` 里的变量没人读** | 部署者照填，然后什么都不会发生（`BOOTSTRAP_ADMIN_GITHUB_ID`、`SITE_ORIGIN`） | 前者已接上（§1.2 第 18 条）；后者如实标注"当前未读取"。**加配置项时同时加读者，或标注它还是空的** |
+| **生产构建跑在 http 上 → 会话立刻丢失** | 生产用 `__Host-` + `Secure`，浏览器只在 HTTPS 下收；表现为"登录 200，下一次请求变匿名"。OAuth 的浏览器绑定 Cookie 同样会丢（回调时报绑定失败） | 新增 `DSH_REVIEW_INSECURE_COOKIES=1` 显式降级（`resolveCookieMode` 纯函数，两条写 Cookie 的地方共用一个 `cookieSecure()`），启动打警告。上 HTTPS 后必须删掉 |
 | 登出后页面不刷新 | 点「登出」后，已渲染的服务端页面仍显示登录态操作（如插件页的「写一篇评测」） | 这是 Next 的 Router Cache；**硬刷新即正确**（刷新后显示"登录后可以在这里写评测"），且服务端照样会 401 拦住。暂未处理 |
 
 ---

@@ -15,6 +15,7 @@ import {
   BROWSER_BINDING_COOKIE,
   normalizeReturnPath,
 } from '@/server/modules/identity/oauth-challenges';
+import { cookieSecure } from '@/server/platform/session-cookie';
 import { errorResponse, requestMeta } from '../../../_lib/context';
 
 export const runtime = 'nodejs';
@@ -30,10 +31,12 @@ export async function GET(request: Request): Promise<Response> {
     const created = challenges.create({ returnPath: returnTo });
 
     // 绑定 cookie：只用于"这次回调是否来自同一个浏览器"，**不代表已登录**。
+    // Secure 标志与会话 Cookie 用同一个判断（`cookieSecure()`）—— 分开写就会在
+    // "生产但没有 TLS"的部署里漏掉一处，表现为回调时绑定校验失败。
     const store = await cookies();
     store.set(BROWSER_BINDING_COOKIE, created.browserBinding, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: cookieSecure(),
       sameSite: 'lax',
       path: '/',
       // 与挑战有效期同寿命，避免长期留存临时绑定
