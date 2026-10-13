@@ -120,6 +120,7 @@
 | **目录卡片真实资料（迁移 0005）** | **通过（真 GitHub）**：回填 `deepseek-ai/deepseek-harness / packages/bundle/base` 后，库里真有 `display_name=@deepseek-ai/dsh-base`、`manifest_version=0.2.1-alpha.2`、`topics=["ai-agents","cordis","dsh","dsh-plugin"]`、owner 头像 URL、仓库更新时间 | `npx tsx scripts/backfill-plugin-info.mjs --apply`，结果见 README §验收脚本 |
 | **时区修正** | **通过**：全站时间改用固定 `Asia/Shanghai` 格式化（原先用 `toLocaleString('zh-CN')` = 服务器本地时区，线上 UTC 会**整体差 8 小时**） | `src/packages/common/time.ts`，7 处调用点已替换 |
 | **请求频控（迁移 0006）** | **通过**：评论变更 5/分/用户（合并计数）、插件提交 10/时/用户；超限 **429 + `retry_after_seconds`**；**同键同内容重放不占额度且返回原结果**；同键换正文给 409；并发 20 次恰好放过 5 次 | `tests/rate-limit.test.ts`（13 条）+ `npx tsx scripts/acceptance-rate-limit.mjs`（**12/12**，真 HTTP） |
+| **频控已上线上（2026-10-13 22:29）** | **通过（能验的部分）**：`/api/health` → `schema_version 0006_rate_limiter.sql`；`selfcheck` → `missingTables: []`、`problems: []`；三个页面 200；近 200 行日志 **0 条 error**。**未验**："打满 6 次拿 429" 需真人登录（生产关掉了测试登录通道）| `deploy/README.md` §当前线上状态 |
 
 端到端脚本覆盖：登录 → 会话接口 → 收录真实插件 → 建草稿 → 保存 → **过期版本被拒** → 提交(pending)
 → **真 worker 进程** → `published` → 公开修订指针切换 → 匿名可读 → 发评论 → worker 发布

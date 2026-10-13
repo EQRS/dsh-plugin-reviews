@@ -16,7 +16,7 @@
 | 健康检查 | `GET /api/health` → 200 `status:ok`，`schema_version 0006_rate_limiter.sql`；`?worker=1` 也 200（worker 心跳新鲜） |
 | 可观测性 | 访问日志 `http_request`（状态码/耗时/request_id）、启动自检、worker 心跳、中文错误页与 404 **均已生效** |
 | 插件目录 | 搜索 / 用途标签 / 是否有评测 / 排序 / 分页 / 两种空状态 **已上线**；空库时显示"目录当前为空"与「提交插件」入口 |
-| 请求频控 | 评论变更 **5 次/分/用户**（合并计数）、插件提交检查 **10 次/时/用户**；超限 429 + `retry_after_seconds`；幂等重放不占额度。**线上只验到"迁移到位 + 表存在"**：线上生产环境关掉了测试登录通道，跑不了那条"打满 6 次拿 429"的 HTTP 验收（本机 dev 上 12/12） |
+| 请求频控 | 评论变更 **5 次/分/用户**（合并计数）、插件提交检查 **10 次/时/用户**；超限 429 + `retry_after_seconds`；幂等重放不占额度。线上核验：`selfcheck` → `missingTables: []`、`problems: []`、`schemaVersion 0006`，三个页面 200，近 200 行日志 **0 条 error**。**"打满 6 次拿 429"那条 HTTP 验收没在线上跑**：生产关掉了测试登录通道，需要真人登录才能触发（本机 dev 上 12/12）|
 | 依赖 | 显式声明了 `sharp`（原先只靠 `next` 的可选依赖活着）；删掉了零引用的 `zod` / `drizzle-orm` —— 线上 `npm install` 后确认 `require('sharp')` 在 Linux 上可加载 |
 
 **外部验收（从本机对公网地址发真请求）**：`DSH_ACCEPTANCE_BASE=http://5.231.26.36 node scripts/acceptance-catalog-browse.mjs`
