@@ -9,6 +9,7 @@ import { getDb } from '@/server/platform/db';
 import { currentContext } from '../api/_lib/context';
 import { submissionStateLabels } from '@/packages/common/status-text';
 import type { SubmissionState } from '@/packages/common/field-rules';
+import { formatDateTime } from '@/packages/common/time';
 
 export const dynamic = 'force-dynamic';
 
@@ -101,7 +102,7 @@ export default async function MePage() {
                 </div>
                 <div style={{ color: '#526174', fontSize: 14 }}>
                   草稿 <code>{d.draft_id}</code> · 保存版本 {d.save_version} ·{' '}
-                  {new Date(d.saved_at).toLocaleString('zh-CN')}
+                  {formatDateTime(d.saved_at)}
                 </div>
               </li>
             ))}
@@ -118,7 +119,7 @@ export default async function MePage() {
             {subs.map((s) => (
               <li key={s.submission_id} style={{ marginBottom: 8 }}>
                 <code>{s.submission_id}</code> · {submissionStateLabels[s.processing_state]} ·{' '}
-                {new Date(s.submitted_at).toLocaleString('zh-CN')}
+                {formatDateTime(s.submitted_at)}
               </li>
             ))}
           </ul>

@@ -34,12 +34,91 @@ import type {
   CallerContextLike,
   CatalogProbe,
   CatalogService,
+  PluginDirectoryQuery,
   PluginSummary,
+  PluginTagSummary,
   PluginView,
 } from './types';
 
 /** operation_records.action_type：收录动作的固定动作名。 */
 export const ACCEPT_PLUGIN_ACTION = 'catalog.accept_plugin_submission';
+
+/** 目录筛选里"未分类"的固定标签值（URL 里也用它，前端与后端共用这一个常量）。 */
+export const UNCLASSIFIED_TAG = '__none__';
+
+/**
+ * **公开评测计数**：目录里唯一的判据来源（筛选、排序、卡片数字都用它）。
+ *
+ * ⚠️ 必须与 `resolveVisibilityInTx`（`src/server/modules/content/index.ts`）**逐条一致**：
+ *   存在已发布修订（且修订确实属于该评测）+ **未撤回** + **未隐藏**。
+ * 两处判据一旦分叉，就会出现"卡片显示有 2 篇评测，筛选'已有评测'却查不到它"这种自相矛盾。
+ * `tests/catalog-browse.test.ts` 用"撤回一篇评测"的用例把这条一致性钉住。
+ *
+ * 用相关子查询而不是 JOIN + GROUP BY：目录页同时还要按条件过滤与排序，
+ * 子查询能在 SELECT / WHERE / ORDER BY 三处复用同一个表达式，避免三份手写 SQL 漂移。
+ */
+const PUBLIC_REVIEW_COUNT_SQL = `(
+  SELECT COUNT(*)
+    FROM reviews r
+    JOIN review_revisions rev ON rev.id = r.published_revision_id
+    JOIN content_entities ce ON ce.id = r.id
+   WHERE r.plugin_id = p.id
+     AND r.published_revision_id IS NOT NULL
+     AND rev.review_id = r.id
+     AND ce.withdrawn_at IS NULL
+     AND ce.hidden_at IS NULL
+)`;
+
+/**
+ * 转义 `LIKE` 的通配符。
+ *
+ * 不转义的后果很具体：用户在搜索框里输入一个 `%`，`LIKE '%%%'` 会匹配**全表**，
+ * 看起来像"搜索失效"；输入 `_` 会匹配任意单字符。这里把 `\` `%` `_` 都加上反斜杠前缀，
+ * SQL 侧统一用 `ESCAPE '\'`。
+ */
+export function escapeLikePattern(input: string): string {
+  return input.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
+/** topics 列（JSON 数组文本）→ 字符串数组；坏数据一律按"没有标签"处理，绝不抛错。 */
+export function parseTopics(raw: string | null): string[] {
+  if (raw === null) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
+  } catch {
+    return [];
+  }
+}
+
+/** 由浏览条件拼出 WHERE 子句与参数（计数与取列表**共用**，保证 total 与 items 口径一致）。 */
+export function buildDirectoryWhere(req: PluginDirectoryQuery): { clause: string; params: unknown[] } {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  const keyword = req.q?.trim();
+  if (keyword) {
+    const like = `%${escapeLikePattern(keyword)}%`;
+    conditions.push(
+      `(p.display_name LIKE ? ESCAPE '\\' OR r.full_name LIKE ? ESCAPE '\\' OR COALESCE(p.description, r.description) LIKE ? ESCAPE '\\')`,
+    );
+    params.push(like, like, like);
+  }
+
+  if (req.tag === UNCLASSIFIED_TAG) {
+    conditions.push('r.topics IS NULL');
+  } else if (req.tag) {
+    conditions.push('EXISTS (SELECT 1 FROM json_each(r.topics) je WHERE je.value = ?)');
+    params.push(req.tag);
+  }
+
+  if (req.hasReviews === 'yes') conditions.push(`${PUBLIC_REVIEW_COUNT_SQL} > 0`);
+  if (req.hasReviews === 'no') conditions.push(`${PUBLIC_REVIEW_COUNT_SQL} = 0`);
+
+  const clause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  return { clause, params };
+}
 
 export interface CatalogServiceDeps {
   /** 显式连接（测试用真实临时库）。省略时回退平台单例。 */
@@ -177,12 +256,15 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
             .get(repoInfo.githubRepositoryId) as { id: string } | undefined;
 
           let repositoryId: string;
+          // 展示字段（迁移 0005）：空数组按"没有标签"存 NULL，避免 '[]' 与"有标签但都非法"混为一谈。
+          const topicsJson = repoInfo.topics.length > 0 ? JSON.stringify(repoInfo.topics) : null;
           if (existingRepo) {
             repositoryId = existingRepo.id;
             tx.db
               .prepare(
                 `UPDATE repositories
                     SET full_name = ?, html_url = ?, is_archived = ?,
+                        description = ?, topics = ?, owner_login = ?, owner_avatar_url = ?, repo_updated_at = ?,
                         availability_state = 'available', last_checked_at = ?, last_successful_check_at = ?, updated_at = ?
                   WHERE id = ?`,
               )
@@ -190,6 +272,11 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
                 repoInfo.fullName,
                 repoInfo.htmlUrl,
                 repoInfo.isArchived ? 1 : 0,
+                repoInfo.description,
+                topicsJson,
+                repoInfo.ownerLogin,
+                repoInfo.ownerAvatarUrl,
+                repoInfo.repoUpdatedAt,
                 now,
                 now,
                 now,
@@ -201,8 +288,9 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
               .prepare(
                 `INSERT INTO repositories
                    (id, github_repository_id, full_name, html_url, is_archived, availability_state,
+                    description, topics, owner_login, owner_avatar_url, repo_updated_at,
                     last_checked_at, last_successful_check_at, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, 'available', ?, ?, ?, ?)`,
+                 VALUES (?, ?, ?, ?, ?, 'available', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               )
               .run(
                 repositoryId,
@@ -210,6 +298,11 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
                 repoInfo.fullName,
                 repoInfo.htmlUrl,
                 repoInfo.isArchived ? 1 : 0,
+                repoInfo.description,
+                topicsJson,
+                repoInfo.ownerLogin,
+                repoInfo.ownerAvatarUrl,
+                repoInfo.repoUpdatedAt,
                 now,
                 now,
                 now,
@@ -228,13 +321,46 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
           if (existingPlugin) {
             pluginId = existingPlugin.id;
             created = false;
-            tx.db.prepare('UPDATE plugins SET updated_at = ? WHERE id = ?').run(now, pluginId);
+            // 命中既有条目 = 一次"资料刷新"：展示字段一起更新，并推进 info_updated_at
+            // （页面上的"资料更新时间"以它为准，而不是每次随便 touch 的 updated_at）。
+            tx.db
+              .prepare(
+                `UPDATE plugins
+                    SET updated_at = ?, display_name = ?, description = ?, author_login = ?,
+                        manifest_version = ?, info_updated_at = ?
+                  WHERE id = ?`,
+              )
+              .run(
+                now,
+                manifest.name,
+                manifest.description,
+                manifest.author,
+                manifest.version,
+                now,
+                pluginId,
+              );
           } else {
             pluginId = newId(now);
             created = true;
             tx.db
-              .prepare('INSERT INTO plugins (id, repository_id, plugin_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
-              .run(pluginId, repositoryId, pluginPath, now, now);
+              .prepare(
+                `INSERT INTO plugins
+                   (id, repository_id, plugin_path, created_at, updated_at,
+                    display_name, description, author_login, manifest_version, info_updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              )
+              .run(
+                pluginId,
+                repositoryId,
+                pluginPath,
+                now,
+                now,
+                manifest.name,
+                manifest.description,
+                manifest.author,
+                manifest.version,
+                now,
+              );
           }
 
           // 回执：target_type 携带 repositoryId 以便重放还原；
@@ -276,7 +402,9 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
         const row = conn
           .prepare(
             `SELECT p.id AS plugin_id, p.plugin_path, p.created_at AS plugin_created_at, p.updated_at AS plugin_updated_at,
+                    p.display_name, p.description AS plugin_description, p.author_login, p.manifest_version, p.info_updated_at,
                     r.id AS repository_id, r.github_repository_id, r.full_name, r.html_url, r.is_archived,
+                    r.description AS repo_description, r.topics, r.owner_login, r.owner_avatar_url, r.repo_updated_at,
                     r.availability_state, r.last_checked_at, r.last_successful_check_at
                FROM plugins p
                JOIN repositories r ON r.id = p.repository_id
@@ -288,11 +416,21 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
               plugin_path: string;
               plugin_created_at: number;
               plugin_updated_at: number;
+              display_name: string | null;
+              plugin_description: string | null;
+              author_login: string | null;
+              manifest_version: string | null;
+              info_updated_at: number | null;
               repository_id: string;
               github_repository_id: string;
               full_name: string;
               html_url: string;
               is_archived: number;
+              repo_description: string | null;
+              topics: string | null;
+              owner_login: string | null;
+              owner_avatar_url: string | null;
+              repo_updated_at: number | null;
               availability_state: 'unknown' | 'available' | 'unavailable';
               last_checked_at: number | null;
               last_successful_check_at: number | null;
@@ -304,6 +442,15 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
           pluginPath: row.plugin_path,
           createdAt: row.plugin_created_at,
           updatedAt: row.plugin_updated_at,
+          displayName: row.display_name,
+          description: row.plugin_description ?? row.repo_description,
+          authorLogin: row.author_login,
+          manifestVersion: row.manifest_version,
+          infoUpdatedAt: row.info_updated_at,
+          topics: parseTopics(row.topics),
+          ownerLogin: row.owner_login,
+          ownerAvatarUrl: row.owner_avatar_url,
+          repoUpdatedAt: row.repo_updated_at,
           repository: {
             repositoryId: row.repository_id,
             githubRepositoryId: row.github_repository_id,
@@ -318,26 +465,50 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
       }, db);
     },
 
-    async listPlugins(req: PageRequest): Promise<PageResult<PluginSummary>> {
+    async listPlugins(req: PluginDirectoryQuery): Promise<PageResult<PluginSummary>> {
       return withRead((conn) => {
-        const total = conn.prepare('SELECT COUNT(*) AS c FROM plugins').get() as { c: number };
-        // 分页纪律：固定排序键（updated_at DESC, id），否则翻页会重复/漏项。
+        const { clause, params } = buildDirectoryWhere(req);
+
+        const total = conn.prepare(`SELECT COUNT(*) AS c FROM plugins p JOIN repositories r ON r.id = p.repository_id ${clause}`).get(...params) as { c: number };
+
+        // 分页纪律：排序键**必须唯一**（都带 p.id 兜底），否则同 updated_at 的条目翻页会重漏。
+        const orderBy =
+          req.sort === 'reviews'
+            ? `${PUBLIC_REVIEW_COUNT_SQL} DESC, p.id ASC`
+            : 'p.updated_at DESC, p.id ASC';
+
         const rows = conn
           .prepare(
-            `SELECT p.id AS plugin_id, p.plugin_path, p.updated_at,
-                    r.full_name, r.html_url, r.is_archived
+            `SELECT p.id AS plugin_id, p.plugin_path, p.updated_at, p.info_updated_at,
+                    p.display_name, p.description AS plugin_description, p.author_login, p.manifest_version,
+                    r.full_name, r.html_url, r.is_archived, r.availability_state,
+                    r.description AS repo_description, r.topics, r.owner_login, r.owner_avatar_url, r.repo_updated_at,
+                    ${PUBLIC_REVIEW_COUNT_SQL} AS public_review_count
                FROM plugins p
                JOIN repositories r ON r.id = p.repository_id
-              ORDER BY p.updated_at DESC, p.id ASC
+               ${clause}
+              ORDER BY ${orderBy}
               LIMIT ? OFFSET ?`,
           )
-          .all(req.page_size, (req.page - 1) * req.page_size) as {
+          .all(...params, req.page_size, (req.page - 1) * req.page_size) as {
           plugin_id: string;
           plugin_path: string;
           updated_at: number;
+          info_updated_at: number | null;
+          display_name: string | null;
+          plugin_description: string | null;
+          author_login: string | null;
+          manifest_version: string | null;
           full_name: string;
           html_url: string;
           is_archived: number;
+          availability_state: 'unknown' | 'available' | 'unavailable';
+          repo_description: string | null;
+          topics: string | null;
+          owner_login: string | null;
+          owner_avatar_url: string | null;
+          repo_updated_at: number | null;
+          public_review_count: number;
         }[];
 
         const items: PluginSummary[] = rows.map((r) => ({
@@ -347,9 +518,55 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
           repositoryHtmlUrl: r.html_url,
           isArchived: r.is_archived === 1,
           updatedAt: r.updated_at,
+          displayName: r.display_name,
+          // 插件清单的简介优先；没有才回退仓库简介（**不拼接、不编**）。
+          description: r.plugin_description ?? r.repo_description,
+          ownerLogin: r.owner_login,
+          ownerAvatarUrl: r.owner_avatar_url,
+          topics: parseTopics(r.topics),
+          authorLogin: r.author_login,
+          manifestVersion: r.manifest_version,
+          infoUpdatedAt: r.info_updated_at,
+          repoUpdatedAt: r.repo_updated_at,
+          publicReviewCount: Number(r.public_review_count ?? 0),
+          availabilityState: r.availability_state,
         }));
 
         return buildPage(items, total.c, req);
+      }, db);
+    },
+
+    /**
+     * 用途标签聚合（筛选 chip 行）。
+     *
+     * 口径：**直接拿 GitHub topics 当标签**，本切片没有中文分类字典（见
+     * docs/线上实现-对规划-差距盘点.md 的"未做"清单）；没有 topics 的条目归到 `__none__`。
+     */
+    async listPluginTags(): Promise<PluginTagSummary[]> {
+      return withRead((conn) => {
+        const rows = conn
+          .prepare(
+            `SELECT je.value AS tag, COUNT(*) AS c
+               FROM plugins p
+               JOIN repositories r ON r.id = p.repository_id,
+                    json_each(r.topics) je
+              WHERE r.topics IS NOT NULL
+              GROUP BY je.value
+              ORDER BY c DESC, tag ASC`,
+          )
+          .all() as { tag: string; c: number }[];
+
+        const none = conn
+          .prepare(
+            `SELECT COUNT(*) AS c FROM plugins p
+               JOIN repositories r ON r.id = p.repository_id
+              WHERE r.topics IS NULL`,
+          )
+          .get() as { c: number };
+
+        const out: PluginTagSummary[] = rows.map((r) => ({ tag: r.tag, pluginCount: r.c }));
+        if (none.c > 0) out.push({ tag: UNCLASSIFIED_TAG, pluginCount: none.c });
+        return out;
       }, db);
     },
   };

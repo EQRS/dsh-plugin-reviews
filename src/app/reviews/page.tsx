@@ -5,6 +5,7 @@
 import Link from 'next/link';
 import { getDb } from '@/server/platform/db';
 import { resolveVisibilityInTx } from '@/server/modules/content';
+import { formatDateTime } from '@/packages/common/time';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,7 +49,7 @@ export default function ReviewsPage() {
               </Link>
               <div style={{ color: '#526174', fontSize: 14 }}>
                 {r.source_kind === 'site' ? '站点评测' : '社区评测'} · {r.author_nickname} ·{' '}
-                {r.public_updated_at === null ? '时间未知' : new Date(r.public_updated_at).toLocaleString('zh-CN')}
+                {r.public_updated_at === null ? '时间未知' : formatDateTime(r.public_updated_at)}
               </div>
             </li>
           ))}

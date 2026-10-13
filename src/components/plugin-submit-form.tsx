@@ -5,11 +5,14 @@
  *
  * `POST /api/plugins` 的契约（见 src/app/api/plugins/route.ts）：
  *   请求 `{ url: string, requestKey: string }`
- *   成功 → 该路由尚未返回 pluginId（当前实现一律抛 provider_not_configured）
+ *   成功 → `{ pluginId, repositoryId, created, status: 'accepted' }`
  *
- * ⚠️ 已知真实情况：`POST /api/plugins` 目前**固定返回 `provider_not_configured`**
- * （GF 正在接入真实 GitHub 探针）。所以这里不假装成功、也不隐藏这条错误 ——
- * 把后端 message 原样展示，等探针接上后本表单无需改动即可工作。
+ * **三态必须区分清楚**（这是这个表单唯一的难点）：
+ *   1. 未收录 → 检查通过后建条目，`created: true`；
+ *   2. **已收录** → 命中既有条目，`created: false`，后端返回**原插件 ID** ——
+ *      这时不能说"收录成功"（听起来像新建了一条），而要说"已在目录里，为你打开"；
+ *   3. 检查未通过 → 后端给具体原因（仓库不存在 / 没声明 dsh.bundle / 配置文件不存在），
+ *      就地展示、**不建任何条目**，用户改完链接可以重试。
  *
  * requestKey 语义：一次提交生成一个键；**失败后重试复用同一个键**，
  * 这样后端按幂等键判定时不会把重试当成新收录。
@@ -45,14 +48,19 @@ export function PluginSubmitForm() {
     setPendingKey(requestKey);
 
     try {
-      const created = await apiFetch<AcceptedPlugin>('/api/plugins', {
+      const accepted = await apiFetch<AcceptedPlugin>('/api/plugins', {
         method: 'POST',
         json: { url, requestKey },
       });
       // 成功后清掉幂等键：下一次收录是不同的用户操作。
       setPendingKey(null);
-      setNotice('收录成功，正在打开插件页…');
-      if (created?.pluginId) router.push(`/plugins/${created.pluginId}`);
+      // 三态措辞：created=false 是"命中既有条目"，不是"刚收录成功"。
+      setNotice(
+        accepted?.created === false
+          ? '这个插件已经在目录里了，正在打开它的页面…'
+          : '收录成功，正在打开插件页…',
+      );
+      if (accepted?.pluginId) router.push(`/plugins/${accepted.pluginId}`);
     } catch (e) {
       // 保留 pendingKey → 用户再点一次就是"重试同一请求"。
       setError(e as ApiError);
@@ -77,6 +85,8 @@ export function PluginSubmitForm() {
       />
       <p style={{ color: '#526174', fontSize: 13 }}>
         收录检查要求：仓库可访问、对应 <code>package.json</code> 声明了 <code>dsh.bundle</code>、且引用的配置文件存在。
+        任一条不满足都会被拒绝，**不会在目录里留下条目**；已经在目录里的插件再提交一次，
+        只会刷新它的资料，不会产生第二条。
       </p>
 
       {error ? <ErrorNotice error={error} onDismiss={() => setError(null)} /> : null}

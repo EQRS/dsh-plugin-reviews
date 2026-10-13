@@ -16,11 +16,26 @@ export interface CatalogProbe {
     fullName: string;
     htmlUrl: string;
     isArchived: boolean;
+    /**
+     * 以下展示字段**全部来自同一个响应体**（迁移 0005）：拿不到就是 null / 空数组，
+     * **不猜、不补默认值、不为此新增任何外部请求**。
+     */
+    description: string | null;
+    topics: string[];
+    ownerLogin: string | null;
+    ownerAvatarUrl: string | null;
+    /** GitHub 仓库 updated_at（UTC 毫秒）；用于展示"仓库更新于"，**不参与排序口径**。 */
+    repoUpdatedAt: number | null;
   }>;
   /** 读取插件子目录 package.json 的 dsh.bundle 声明；不存在或未声明返回 null。 */
   fetchPluginManifest(input: { owner: string; repo: string; pluginPath: string }): Promise<{
     bundlePath: string;
     bundleExists: boolean;
+    /** 清单里的展示字段（同一个已被完整解析的 package.json，同样不新增请求）。 */
+    name: string | null;
+    description: string | null;
+    author: string | null;
+    version: string | null;
   } | null>;
 }
 
@@ -43,6 +58,17 @@ export interface PluginView {
   /** 收录时间。 */
   createdAt: number;
   updatedAt: number;
+  /** 展示字段（迁移 0005）：缺就是 null / 空数组，页面显示"暂无"。 */
+  displayName: string | null;
+  /** 已归一：插件简介优先，缺则回退仓库简介。 */
+  description: string | null;
+  authorLogin: string | null;
+  manifestVersion: string | null;
+  infoUpdatedAt: number | null;
+  topics: string[];
+  ownerLogin: string | null;
+  ownerAvatarUrl: string | null;
+  repoUpdatedAt: number | null;
   repository: {
     repositoryId: string;
     githubRepositoryId: string;
@@ -62,6 +88,38 @@ export interface PluginSummary {
   repositoryHtmlUrl: string;
   isArchived: boolean;
   updatedAt: number;
+  /** 展示字段（迁移 0005）：缺就是 null / 空数组，页面显示"暂无"，不用空串冒充。 */
+  displayName: string | null;
+  /** 已归一：插件简介优先，缺则回退仓库简介。 */
+  description: string | null;
+  ownerLogin: string | null;
+  ownerAvatarUrl: string | null;
+  topics: string[];
+  authorLogin: string | null;
+  manifestVersion: string | null;
+  infoUpdatedAt: number | null;
+  repoUpdatedAt: number | null;
+  /** 当前**公开**评测数（判据与内容可见性解析完全一致，见 service 内注释）。 */
+  publicReviewCount: number;
+  availabilityState: 'unknown' | 'available' | 'unavailable';
+}
+
+/** 目录浏览的筛选条件（全部可选；缺省即"不筛"）。 */
+export interface PluginDirectoryQuery extends PageRequest {
+  /** 关键词：匹配展示名 / 仓库全名 / 简介（中文子串可用，`%` `_` 会被转义）。 */
+  q?: string;
+  /** 用途标签：命中 repositories.topics 里的任意一个；`__none__` 表示"未分类"。 */
+  tag?: string;
+  hasReviews?: 'all' | 'yes' | 'no';
+  /** info = 资料更新时间（默认）；reviews = 公开评测数。 */
+  sort?: 'info' | 'reviews';
+}
+
+/** 标签聚合项（用于筛选 chip 行）。 */
+export interface PluginTagSummary {
+  /** `__none__` = 未分类（topics 为空或全是非法值）。 */
+  tag: string;
+  pluginCount: number;
 }
 
 export interface CatalogService {
@@ -72,7 +130,8 @@ export interface CatalogService {
     deps: { probe: CatalogProbe },
   ): Promise<AcceptPluginSubmissionResult>;
   getPlugin(pluginId: string): Promise<PluginView | null>;
-  listPlugins(req: PageRequest): Promise<PageResult<PluginSummary>>;
+  listPlugins(req: PluginDirectoryQuery): Promise<PageResult<PluginSummary>>;
+  listPluginTags(): Promise<PluginTagSummary[]>;
 }
 
 /** 仅需 userId 的最小上下文形状；避免 catalog 依赖不必要的字段。 */

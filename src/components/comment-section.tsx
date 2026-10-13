@@ -18,6 +18,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, ErrorNotice, apiFetch, buttonStyle, inputStyle, newRequestKey } from './api-client';
+import { formatDateTime } from '@/packages/common/time';
 
 interface CommentView {
   commentId: string;
@@ -60,7 +61,7 @@ function CommentMeta({ comment }: { comment: CommentView }) {
       {comment.authorId}
       {comment.firstPublishedAt === null
         ? ' · 尚未公开'
-        : ` · ${new Date(comment.firstPublishedAt).toLocaleString('zh-CN')}`}
+        : ` · ${formatDateTime(comment.firstPublishedAt)}`}
     </div>
   );
 }

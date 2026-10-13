@@ -11,7 +11,7 @@
 登录 → 收录插件 → **从插件页写评测** → 保存 → 提交 → **检查/人工审核** → **真 worker 发布** → 公开可读
 → 评论 → **回复** → 作者**撤回**；新用户落地页 `/onboarding` 可用。
 
-`tsc` exit 0、单测 **388/388（20 文件）**、HTTP 验收 **16 + 21 + 14**、端到端 **22/22**，
+`tsc` exit 0、单测 **404/404（21 文件）**、HTTP 验收 **16 + 21 + 14**、端到端 **22/22**，
 浏览器点击链路两轮共 22 步（§5.2 / §5.3）。
 **已提交并推送：`938f32a`（第二轮）→ `c8c4138`（交接书）→ 第三轮见 §6。**
 
@@ -65,6 +65,20 @@
 | `scripts/grant-admin.mjs` | 指定/撤销管理员（首个管理员没有界面入口，见 §3.1） |
 | `tests/decide-submission.test.ts` | 5 个用例：人工通过必须入队、评论提交必须入队 `comment_publish`、needs_changes 不入队、非管理员被拒 |
 
+### 1.4 第四轮：插件目录补全 + 选型调查（`docs/技术选型-基础功能用库还是自己写.md`）
+
+| 文件 | 作用 |
+|---|---|
+| `migrations/0005_plugin_directory_info.sql` | 给 `repositories` / `plugins` 补展示列（简介、topics、owner、头像、仓库更新时间、清单名/作者/版本、`info_updated_at`）+ 浏览序索引 |
+| `src/packages/common/time.ts` | 固定 `Asia/Shanghai` 的时间格式化（修掉线上差 8 小时） |
+| `src/app/plugins/page.tsx`（重写） | 搜索框、标签 chip、是否有评测、排序、分页、**两种空状态**、越界页、提交入口 |
+| `src/app/page.tsx`（重写） | 首页三块齐全：搜索入口 + 最新评测（带插件名）+ **近期更新插件**；删掉"搜索见插件目录"的空话 |
+| `src/server/modules/catalog/service.ts` | `listPlugins` 支持 q/tag/hasReviews/sort 与**真实总数**；`listPluginTags`；公开评测计数与可见性判据**共用同一段 SQL** |
+| `tests/catalog-browse.test.ts` | 12 条：搜索（含 `%`/`_` 转义）、标签、评测三态、**撤回后计数与筛选同步**、分页同 `updated_at` 不重不漏、标签聚合、坏数据 |
+| `tests/support/probe.ts` | 探针桩构造器（契约加字段后，测试不必每个桩手写一堆 null） |
+| `scripts/backfill-plugin-info.mjs` | 存量条目回填（幂等重跑收录检查；默认 dry-run） |
+| `scripts/acceptance-catalog-browse.mjs` | 目录浏览 HTTP 验收（10 条，不假设库里数据量） |
+
 ---
 
 ## 2. 验证状态（**都是真跑出来的数字，附复现命令**）
@@ -72,7 +86,7 @@
 | 项目 | 结果 | 复现命令 |
 |---|---|---|
 | 类型检查 | **exit 0** | `npx tsc --noEmit` |
-| 单元/集成测试 | **388 passed / 20 files** | `npx vitest run` |
+| 单元/集成测试 | **404 passed / 21 files** | `npx vitest run` |
 | HTTP 读验收 | **16/16**（连跑两次都一样） | `node scripts/acceptance-http.mjs`（需 dev server） |
 | HTTP 写验收 | **21/21** | `npx tsx scripts/acceptance-http-write.mjs` |
 | 图片上传验收 | **14/14**（可重复运行） | `npx tsx scripts/acceptance-upload.mjs` |
@@ -90,6 +104,9 @@
 | **未捕获异常链路（digest 闭环）** | **通过**：故意抛异常的页面 → HTTP 500 → `request_error` 日志含 `path`/`digest`/`stack`，用户错误页上显示**同一个** digest（浏览器实测） | `src/instrumentation*.ts`、`src/app/error.tsx` |
 | **中文 404 / 错误页** | **通过**：404 页含中文说明、三个入口与本次 `request_id`；错误页含 digest、重试、回首页 | `src/app/not-found.tsx`、`error.tsx`、`global-error.tsx` |
 | **线上已带可观测性** | **通过（2026-10-13 21:22 重启后实测）**：线上 `/api/health` 200 `schema 0004`、访问日志 `http_request` 有行、启动自检有行、worker 心跳 3 秒前、中文 404 生效、无 error 级日志 | `deploy/README.md` §当前线上状态 |
+| **插件目录：搜索 / 筛选 / 排序 / 分页** | **通过**：搜索命中名称·仓库·简介三字段；`q=%` 与 `q=_` 得 **0 条**（转义生效，不匹配全表）；标签筛选、`has_reviews` 三态、两种空状态文案不同、越界页单独提示、未知 id → 404 | `tests/catalog-browse.test.ts`（12 条）+ `node scripts/acceptance-catalog-browse.mjs`（**10/10**，对运行中的服务发真请求） |
+| **目录卡片真实资料（迁移 0005）** | **通过（真 GitHub）**：回填 `deepseek-ai/deepseek-harness / packages/bundle/base` 后，库里真有 `display_name=@deepseek-ai/dsh-base`、`manifest_version=0.2.1-alpha.2`、`topics=["ai-agents","cordis","dsh","dsh-plugin"]`、owner 头像 URL、仓库更新时间 | `npx tsx scripts/backfill-plugin-info.mjs --apply`，结果见 README §验收脚本 |
+| **时区修正** | **通过**：全站时间改用固定 `Asia/Shanghai` 格式化（原先用 `toLocaleString('zh-CN')` = 服务器本地时区，线上 UTC 会**整体差 8 小时**） | `src/packages/common/time.ts`，7 处调用点已替换 |
 
 端到端脚本覆盖：登录 → 会话接口 → 收录真实插件 → 建草稿 → 保存 → **过期版本被拒** → 提交(pending)
 → **真 worker 进程** → `published` → 公开修订指针切换 → 匿名可读 → 发评论 → worker 发布
@@ -157,7 +174,7 @@
 ```cmd
 cd /d "D:\developing\ds民间科研成果展示\插件测评网站"
 npx tsc --noEmit                 REM 期望 exit 0
-npx vitest run                   REM 期望 388 passed / 20 files
+npx vitest run                   REM 期望 404 passed / 21 files
 dev.cmd                          REM 迁移 + 自检 + 起 Web（3100）
 REM 另开窗口（要让提交自动发布才需要）：
 set DSH_REVIEW_CONTENT_SCREEN=basic
@@ -229,7 +246,7 @@ Next dev 默认把 `127.0.0.1` 视为**跨源**并拦掉 `/_next/*`
 | **Client ID 抄错一个字符，GitHub 只回 404** | `POST /login/oauth/access_token` → `HTTP 404 {"error":"Not Found"}`（不是 `incorrect_client_credentials`）。把截图里的 `…TSkl` 看成了 `…TSk1`（小写 L / 数字 1） | 用 `node scripts/check-github-oauth.mjs` 判定：`bad_verification_code` = 凭据与回调都对；`Not Found` = 这个 client_id 它不认识。**抄 id/secret 一律用复制按钮，不要看图打** |
 | 登出后页面不刷新 | 点「登出」后，已渲染的服务端页面仍显示登录态操作（如插件页的「写一篇评测」） | 这是 Next 的 Router Cache；**硬刷新即正确**（刷新后显示"登录后可以在这里写评测"），且服务端照样会 401 拦住。暂未处理 |
 | **`npm ci` 在 `NODE_ENV=production` 下不装 devDependencies** | 容器构建时 `tsx`（worker 运行时）与 `typescript`（构建）都在 dev 里 → 构建失败或 worker 起不来 | Dockerfile 里显式 `npm ci --include=dev`，并在注释里写清为什么 |
-| **测试里 `getDb()` 单例占着临时库，Windows 删不掉目录** | 用例全绿但**文件级**失败：`EPERM ... dsh-review-test-xxxx`，很容易被"Tests 388 passed"那行糊过去 | 该 describe 的 `afterAll` 里先 `closeDb()` 再 `cleanup()` |
+| **测试里 `getDb()` 单例占着临时库，Windows 删不掉目录** | 用例全绿但**文件级**失败：`EPERM ... dsh-review-test-xxxx`，很容易被"Tests 404 passed"那行糊过去 | 该 describe 的 `afterAll` 里先 `closeDb()` 再 `cleanup()` |
 | **`Start-Process npx` 在 Windows 起不来** | 报"不是有效的 Win32 应用程序"（npx 是 .cmd 垫片） | 后台跑用 `cmd /c npx ...`，或直接用作业层 |
 | **诊断脚本查任务队列用了想当然的列名** | 我按 `status` / `error_code` 写，真表是 `processing_state` / `last_error_code`；更糟的是 `try/catch` 把错误吞了，输出只留一个 `运行中 ?` | 列名一律回迁移里核对；诊断脚本自己也要把"读失败"打出来（已改：`out.tasks.error` 会进结论） |
 | **Next 自带的访问日志在生产下不生效** | `logging.incomingRequests` 只在 dev 打；中间件又拿不到最终状态码 → 生产日志里"哪个接口 500、哪个页面慢"完全看不见 | 用自定义 server（`server.mjs`）包一层，打 `http_request` 行；`npm start` 与容器 CMD、systemd 单元都指向它 |
@@ -238,6 +255,10 @@ Next dev 默认把 `127.0.0.1` 视为**跨源**并拦掉 `/_next/*`
 | **`instrumentation.ts` 会被同时编到 Edge 运行时** | 在同文件里动态 import 业务模块 → 构建打出 7 条 "A Node.js API is used ... not supported in the Edge Runtime" 警告（`process.stderr`、`process.pid`、better-sqlite3） | 拆成 `instrumentation.ts`（只留正条件判断 + 动态引入）+ `instrumentation-node.ts`（真正实现），警告清零 |
 | **`sharp` 被直接 import，却只靠 Next 的可选依赖活着** | `media/service.ts` 直接 `import sharp`，而它原先只是 `next` 的 `optionalDependencies`；换 pnpm（严格 node_modules）或 `npm ci --omit=optional` 会让**图片上传直接炸** | 在 `dependencies` 里显式声明 `sharp`（精确固定版本）；Next 的默认外置清单本来就含 sharp，实测 Turbopack 构建照过 |
 | **声明了却零引用的依赖会误导后来人** | `zod` 与 `drizzle-orm` 在 `src/`、`tests/`、`scripts/` **全仓 0 引用**，但留在依赖里会让人以为存在校验层 / ORM 层 | 已 `npm uninstall`；选型结论与复核命令写进 [docs/技术选型-基础功能用库还是自己写.md](docs/技术选型-基础功能用库还是自己写.md) |
+| **验证时打到了上一轮遗留的旧服务器** | 端口 3200 被上一轮的 `next start` 占着（我这轮的 `node server.mjs` 报 `EADDRINUSE` **被我忽略**），于是所有"页面验证"其实验的是**旧构建**：新加的空状态逻辑一个都没生效，差点被当成"实现有问题" | 验证前先确认端口上是谁：`Get-NetTCPConnection -LocalPort N` + `Get-CimInstance Win32_Process` 看命令行；确认是自己的旧实例再停掉，换端口用**本次构建**重跑 |
+| **SSR 输出在插值处插了 `<!-- -->`** | 用 HTML 文本做断言时，`共 {total} 个条目` 实际渲染成 `共 <!-- -->4<!-- --> 个条目`，正则匹配不到 → 会误判成"页面没渲染" | 断言前先 `html.replace(/<!-- -->/g, '')`；验收脚本里统一走这个 normalize |
+| **测试里硬写 schema 版本号** | 每加一个迁移，`health.test.ts` 就有 2 条用例变红（"期望 0004、实际 0005"）—— 改一次忘一次，那是噪音不是覆盖 | 改成从 `migrations/` **现取最新文件名**再断言（仍咬住"健康检查报的版本 == 库里实际最新迁移"） |
+| **回填脚本不能用 `userId: null` 冒充系统身份** | `acceptPluginSubmission` 对匿名直接抛"收录插件需要先登录"（这是**故意的**安全约束）；我第一次就是这么写的，4 条全被拒 | 借库里一个活跃账号（优先管理员）并**打印用的是谁**（操作会写进 `operation_records`，事后可查）；没有账号则明确拒绝回填 |
 
 ---
 
@@ -379,7 +400,7 @@ src/app/               App Router：页面 + /api 路由；页面含 /onboarding
 src/components/        session-nav · plugin-submit-form · review-editor · comment-section ·
                        start-draft-button · admin-decision-form · profile-form · withdraw-button · api-client
 src/worker/            main（独立进程）· handlers（4 处理器）· content-screen（本地基础筛查）
-tests/                 20 文件 / 388 测试（用真实临时库 + 真实迁移，**不用 `:memory:`**）
+tests/                 21 文件 / 404 测试（用真实临时库 + 真实迁移，**不用 `:memory:`**）
 scripts/               验收与自检脚本；grant-admin.mjs（指定/撤销管理员）；check-github-oauth.mjs（凭据体检）
 docs/                  设计映射、并行分组协议、模块签名契约、验收纪律、环境坑
 ```
@@ -445,7 +466,7 @@ docs/                  设计映射、并行分组协议、模块签名契约、
 ```cmd
 cd /d "D:\developing\ds民间科研成果展示\插件测评网站"
 npx tsc --noEmit                 REM 期望 exit 0
-npx vitest run                   REM 期望 388 passed / 20 files
+npx vitest run                   REM 期望 404 passed / 21 files
 dev.cmd                          REM 迁移 + 自检 + 起 Web（3100）
 REM 另开窗口：
 set DSH_REVIEW_CONTENT_SCREEN=basic

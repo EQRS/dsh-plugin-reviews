@@ -102,6 +102,51 @@ export function decodeBase64Utf8(content: string): string {
 }
 
 /**
+ * 展示字段的安全提取（迁移 0005）。
+ *
+ * 三条纪律，都是踩过坑的做法：
+ *  1) **类型不符就返回 null**，不做 `String(v)` 强转 —— 强转会把 `{}` 变成 `"[object Object]"` 存进库；
+ *  2) **超长截断**，避免上游把整篇 README 塞进 description 撑爆页面与库；
+ *  3) **空串当没有**，不让空字符串冒充"有值"（页面要靠 null 显示"暂无"）。
+ */
+function asTextOrNull(v: unknown, maxLength = 2000): string | null {
+  if (typeof v !== 'string') return null;
+  const trimmed = v.trim();
+  if (trimmed.length === 0) return null;
+  return trimmed.length > maxLength ? trimmed.slice(0, maxLength) : trimmed;
+}
+
+/** 只接受"非空字符串组成的数组"，其余（对象/数字/嵌套）一律按空处理，避免脏值进 JSON 列。 */
+function asTopicList(v: unknown, max = 50): string[] {
+  if (!Array.isArray(v)) return [];
+  const out: string[] = [];
+  for (const item of v) {
+    if (typeof item !== 'string') continue;
+    const t = item.trim().toLowerCase();
+    if (t.length === 0 || t.length > 64) continue;
+    if (!out.includes(t)) out.push(t);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+/** GitHub 的 ISO 时间串 → UTC 毫秒；解析不了返回 null（**不用 0 冒充**）。 */
+function asUtcMsOrNull(v: unknown): number | null {
+  if (typeof v !== 'string') return null;
+  const ms = Date.parse(v);
+  return Number.isFinite(ms) && ms >= 0 ? ms : null;
+}
+
+/** package.json 的 author 归一：字符串直接用，对象取 `name`，其它形态按"无"处理。 */
+function asAuthorOrNull(v: unknown): string | null {
+  if (typeof v === 'string') return asTextOrNull(v, 200);
+  if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+    return asTextOrNull((v as { name?: unknown }).name, 200);
+  }
+  return null;
+}
+
+/**
  * 从 `dsh.bundle` 声明里提取 patch 路径。
  *
  * 支持上游的两种形态：对象 `{ patch: string | string[] }` 与宽松的字符串直给。
@@ -247,6 +292,11 @@ export function createGithubCatalogProbe(deps: GithubCatalogProbeDeps = {}): Cat
         full_name?: unknown;
         html_url?: unknown;
         archived?: unknown;
+        // 以下都是**同一个响应体**里已有的字段（迁移 0005），不额外发请求
+        description?: unknown;
+        topics?: unknown;
+        owner?: unknown;
+        updated_at?: unknown;
       };
 
       // id 必须是数字（GitHub 稳定仓库 ID）；缺失说明响应形状异常，不能拿名字兜底当身份。
@@ -267,6 +317,20 @@ export function createGithubCatalogProbe(deps: GithubCatalogProbeDeps = {}): Cat
         // 上游一定返回该字段，缺失说明响应异常；这里严格取布尔，非 true 即 false，
         // 因为"缺字段"已在上面的必要字段校验中被拦住的只有 id/name/url。
         isArchived: body.archived === true,
+
+        // 展示字段：能取就取，取不到留 null / 空数组（**不猜**）。这些不参与收录判定，
+        // 所以缺了不影响"能不能收录"，只影响卡片显示得全不全。
+        description: asTextOrNull(body.description, 2000),
+        topics: asTopicList(body.topics),
+        ownerLogin:
+          body.owner !== null && typeof body.owner === 'object' && !Array.isArray(body.owner)
+            ? asTextOrNull((body.owner as { login?: unknown }).login, 200)
+            : null,
+        ownerAvatarUrl:
+          body.owner !== null && typeof body.owner === 'object' && !Array.isArray(body.owner)
+            ? asTextOrNull((body.owner as { avatar_url?: unknown }).avatar_url, 1000)
+            : null,
+        repoUpdatedAt: asUtcMsOrNull(body.updated_at),
       };
     },
 
@@ -306,6 +370,21 @@ export function createGithubCatalogProbe(deps: GithubCatalogProbeDeps = {}): Cat
       }
 
       if (manifest === null || typeof manifest !== 'object') return null;
+
+      // 清单里的展示字段（迁移 0005）：**同一个已经解析好的对象**，不额外发请求。
+      const manifestFields = manifest as {
+        name?: unknown;
+        description?: unknown;
+        author?: unknown;
+        version?: unknown;
+      };
+      const display = {
+        name: asTextOrNull(manifestFields.name, 200),
+        description: asTextOrNull(manifestFields.description, 2000),
+        author: asAuthorOrNull(manifestFields.author),
+        version: asTextOrNull(manifestFields.version, 100),
+      };
+
       const dsh = (manifest as { dsh?: unknown }).dsh;
       if (dsh === null || typeof dsh !== 'object') return null;
       const bundleDecl = (dsh as { bundle?: unknown }).bundle;
@@ -314,10 +393,10 @@ export function createGithubCatalogProbe(deps: GithubCatalogProbeDeps = {}): Cat
       const patchPath = extractBundlePatchPath(bundleDecl);
       // 声明了 dsh.bundle 但没有可用的 patch 路径 → 声明为空，交由业务报错（返回非 null，
       // 让 service 的"dsh.bundle 声明为空"分支命中，而不是笼统地说"没声明"）。
-      if (patchPath === null) return { bundlePath: '', bundleExists: false };
+      if (patchPath === null) return { bundlePath: '', bundleExists: false, ...display };
 
       const repoPath = resolveBundleRepoPath(dir.length > 0 ? dir : '.', patchPath);
-      if (repoPath.length === 0) return { bundlePath: '', bundleExists: false };
+      if (repoPath.length === 0) return { bundlePath: '', bundleExists: false, ...display };
 
       const bundleResponse = await get(
         `/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/contents/${encodeContentPath(repoPath)}`,
@@ -325,7 +404,7 @@ export function createGithubCatalogProbe(deps: GithubCatalogProbeDeps = {}): Cat
 
       if (bundleResponse.status === 404) {
         // 明确"声明了但文件不存在"：返回路径 + false，让 business 层给出可展示的原因。
-        return { bundlePath: repoPath, bundleExists: false };
+        return { bundlePath: repoPath, bundleExists: false, ...display };
       }
       if (bundleResponse.status === 403 || bundleResponse.status === 429) {
         await throwProviderDown('GitHub 拒绝了本次请求（可能已触发限流）', bundleResponse);
@@ -336,9 +415,9 @@ export function createGithubCatalogProbe(deps: GithubCatalogProbeDeps = {}): Cat
 
       // 路径指向目录（数组响应）= 不是配置文件 → 视为不存在（patch 必须是文件）。
       const bundleBody = (await bundleResponse.json()) as ContentsResponse | ContentsResponse[];
-      if (Array.isArray(bundleBody)) return { bundlePath: repoPath, bundleExists: false };
+      if (Array.isArray(bundleBody)) return { bundlePath: repoPath, bundleExists: false, ...display };
 
-      return { bundlePath: repoPath, bundleExists: true };
+      return { bundlePath: repoPath, bundleExists: true, ...display };
     },
   };
 }

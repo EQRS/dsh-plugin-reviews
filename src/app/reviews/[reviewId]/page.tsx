@@ -15,6 +15,7 @@ import { currentContext } from '@/app/api/_lib/context';
 import { CommentSection } from '@/components/comment-section';
 import { WithdrawButton } from '@/components/withdraw-button';
 import type { VersionValue } from '@/packages/common/field-rules';
+import { formatDateTime } from '@/packages/common/time';
 
 export const dynamic = 'force-dynamic';
 
@@ -119,10 +120,10 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ r
             被测 DSH 版本：{formatVersionLabel('DSH', dshVersion)}
             <br />
             首次发布：
-            {row.first_published_at === null ? '未知' : new Date(row.first_published_at).toLocaleString('zh-CN')}
+            {row.first_published_at === null ? '未知' : formatDateTime(row.first_published_at)}
             <br />
             最近更新：
-            {row.public_updated_at === null ? '未知' : new Date(row.public_updated_at).toLocaleString('zh-CN')}
+            {row.public_updated_at === null ? '未知' : formatDateTime(row.public_updated_at)}
           </p>
           <p style={{ fontSize: 13, color: '#526174' }}>版本标签只表示作者记录的被测对象，不是兼容性承诺。</p>
           {row.plugin_id ? (

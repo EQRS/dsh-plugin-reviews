@@ -10,6 +10,7 @@
 
 import { describe, expect, it, afterEach, beforeEach } from 'vitest';
 import { createTestDb, type TestDb } from './support/db';
+import { manifestStub, repoInfoStub } from './support/probe';
 import { createIdentityService } from '../src/server/modules/identity';
 import { createCatalogService, type CatalogProbe } from '../src/server/modules/catalog';
 import { reviewsService } from '../src/server/modules/reviews';
@@ -45,15 +46,14 @@ function callerFor(userId: string): CallerContext {
 function healthyProbe(): CatalogProbe {
   return {
     async fetchRepository() {
-      return {
+      return repoInfoStub({
         githubRepositoryId: 'gh-1001',
         fullName: 'acme/dsh-memory',
         htmlUrl: 'https://github.com/acme/dsh-memory',
-        isArchived: false,
-      };
+      });
     },
     async fetchPluginManifest() {
-      return { bundlePath: './dsh.bundle.json', bundleExists: true };
+      return manifestStub({ bundlePath: './dsh.bundle.json' });
     },
   };
 }

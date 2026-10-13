@@ -50,7 +50,7 @@ npm run dev             # Web：http://127.0.0.1:3100
 npm run worker          # 独立 worker 进程（**要真正发布内容就需要它**）
 npm run admin:grant -- --list                    # 看现有用户与管理员
 npm run admin:grant -- --github-login <账号>      # 指定管理员（该账号需先登录过一次）
-npm test                # 388 个测试
+npm test                # 404 个测试
 npm run typecheck       # tsc --noEmit
 ```
 
@@ -86,7 +86,7 @@ node scripts/grant-admin.mjs --github-login <账号> --revoke
 
 | 命令 | 做什么 | 当前结果 |
 |---|---|---|
-| `npx vitest run` | 单元 + 集成 + 端到端（含真实临时库与真实迁移） | **388 passed / 20 files** |
+| `npx vitest run` | 单元 + 集成 + 端到端（含真实临时库与真实迁移） | **404 passed / 21 files** |
 | `npx tsc --noEmit` | 类型检查 | **exit 0** |
 | `node scripts/verify-tests-bite.mjs` | **反恒真自检**：删掉盖楼触发器 → 测试必须变红 → 还原 → 必须复绿 | 通过 |
 | `node scripts/verify-comment-visibility-bite.mjs` | **反恒真自检**：去掉评论公开修订过滤 → 评论可见性测试必须变红 → 还原（逐字节核对）→ 必须复绿 | 通过 |
@@ -102,6 +102,8 @@ node scripts/grant-admin.mjs --github-login <账号> --revoke
 | `/api/health`（HTTP） | 存活/就绪检查：结构坏了 503；公网 body 不含逐项检查；`?worker=1` 才把 worker 算进结论 | 见 `tests/health.test.ts`（16 条） |
 | `npm start`（= `node server.mjs`） | **访问日志**：每请求一行 JSON（`request_id`/方法/路径/状态码/耗时/是否慢），`/api/health` 与 `/_next/*` 静音 | 生产构建下实测：200/404/400 都出行，`request_id` 与响应头/响应体同一个号 |
 | 故意抛异常的页面 | **未捕获异常链路**：HTTP 500 + 日志 `request_error`（含 path/digest/stack）+ 错误页显示同一个 digest | 浏览器实测：用户看到「这个页面出错了」与编号 `2387506696`，日志里是同一个值 |
+| `node scripts/acceptance-catalog-browse.mjs` | **插件目录浏览验收**：搜索 / 通配符转义 / 标签筛选 / 是否有评测 / 排序 / 越界页 / 首页入口 / 未知 id → 404（对**运行中**的服务发真请求，不假设库里有几条数据） | **10/10** |
+| `npx tsx scripts/backfill-plugin-info.mjs` | **存量条目回填展示资料**（迁移 0005 之后的补数据）：对缺 `info_updated_at` 的条目重跑收录检查，幂等、失败只跳过；默认 dry-run，`--apply` 才写 | dry-run 列出 4 条；`--apply` → **成功 1 条**（真实仓库的简介/topics/头像/版本真写进库）、跳过 3 条（本地测试造的假仓库，报"仓库不存在"） |
 
 > `acceptance-http*.mjs` 需要 dev server 在跑；它们走真实 HTTP，不是调用函数。
 > 它们都**不假设库里没有别的数据**（早先版本假设为空，被演示数据干扰过，已修），
@@ -325,7 +327,7 @@ DSH_REVIEW_ALLOW_TEST_LOGIN=1
 
 ## 5.2 浏览器点击链路（人工，工具驱动）—— 2026-10-12
 
-**为什么必须点**：这一层是 HTTP 验收与 388 个单测**都覆盖不到**的 —— 它们一律直接从 API 带好
+**为什么必须点**：这一层是 HTTP 验收与 404 个单测**都覆盖不到**的 —— 它们一律直接从 API 带好
 `pluginId` 建草稿，于是"页面根本没有绑插件的入口"这件事，谁也咬不出来（§5 第 14 条）。
 
 一次完整的点击记录（浏览器工具；dev server `http://127.0.0.1:3100`；worker 以 `DSH_REVIEW_CONTENT_SCREEN=basic` 启动）：
@@ -421,7 +423,7 @@ src/app/               App Router：页面 + /api 路由；页面含 /onboarding
 src/components/        session-nav · plugin-submit-form · review-editor · comment-section ·
                        start-draft-button · admin-decision-form · profile-form · withdraw-button · api-client
 src/worker/            main（独立任务进程）· handlers（4 个处理器）· content-screen（本地基础筛查）
-tests/                 20 个文件 / 388 个测试（含 support/db.ts 真实临时库）
+tests/                 21 个文件 / 404 个测试（含 support/db.ts 真实临时库）
 scripts/               验收与自检脚本；grant-admin.mjs（指定/撤销管理员）
 docs/                  设计映射、并行分组协议、模块签名契约、验收纪律、环境坑
 ```
@@ -438,7 +440,7 @@ docs/                  设计映射、并行分组协议、模块签名契约、
 
 **可以说的**：
 
-- 这条垂直链路在本机真实跑通了：**388 单测** + HTTP 验收（读 **16/16**、写 **21/21**、上传 **14/14**）
+- 这条垂直链路在本机真实跑通了：**404 单测** + HTTP 验收（读 **16/16**、写 **21/21**、上传 **14/14**）
   + **端到端整条链 22/22**（含**真 worker 进程**把内容从 `pending` 推到 `published`）。
 - **页面上真的能点通**（两轮）：插件页 → 写评测 → 保存 → 提交 → worker 发布 → 公开可读 → 评论（§5.2）；
   后台 → 人工通过 → **入队发布 → worker 发布**、评论回复、作者撤回、`/onboarding` 改昵称（§5.3）。

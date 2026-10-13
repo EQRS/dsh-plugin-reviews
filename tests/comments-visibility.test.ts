@@ -11,6 +11,7 @@
 
 import { describe, expect, it, afterEach, beforeEach } from 'vitest';
 import { createTestDb, insertRootComment, type TestDb } from './support/db';
+import { manifestStub, repoInfoStub } from './support/probe';
 import { commentsService } from '../src/server/modules/comments';
 import { createIdentityService } from '../src/server/modules/identity';
 import { reviewsService } from '../src/server/modules/reviews';
@@ -38,10 +39,10 @@ function caller(userId: string): CallerContext {
 function probe(): CatalogProbe {
   return {
     async fetchRepository() {
-      return { githubRepositoryId: 'gh-1', fullName: 'a/b', htmlUrl: 'https://github.com/a/b', isArchived: false };
+      return repoInfoStub({ githubRepositoryId: 'gh-1', fullName: 'a/b', htmlUrl: 'https://github.com/a/b' });
     },
     async fetchPluginManifest() {
-      return { bundlePath: './x.json', bundleExists: true };
+      return manifestStub({ bundlePath: './x.json' });
     },
   };
 }

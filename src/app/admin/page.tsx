@@ -10,6 +10,7 @@ import { getDb } from '@/server/platform/db';
 import { currentContext } from '../api/_lib/context';
 import { isAdmin } from '@/server/platform/context';
 import { AdminDecisionForm } from '@/components/admin-decision-form';
+import { formatDateTime } from '@/packages/common/time';
 
 export const dynamic = 'force-dynamic';
 
@@ -78,7 +79,7 @@ export default async function AdminPage() {
                 <td style={{ padding: 8 }}>{r.submitter_nickname}</td>
                 <td style={{ padding: 8 }}>{r.processing_state}</td>
                 <td style={{ padding: 8, fontSize: 14, color: '#526174' }}>
-                  {new Date(r.submitted_at).toLocaleString('zh-CN')}
+                  {formatDateTime(r.submitted_at)}
                 </td>
                 <td style={{ padding: 8 }}>
                   {/*

@@ -268,6 +268,9 @@ describe('fetchRepository', () => {
 describe('fetchPluginManifest', () => {
   const MANIFEST = JSON.stringify({ name: 'dsh-foo', dsh: { bundle: { patch: './cordis.patch.yml' } } });
 
+  /** 清单里没有的展示字段（迁移 0005）：契约要求它们**如实为 null**，不猜不补。 */
+  const NO_DISPLAY = { description: null, author: null, version: null };
+
   it('正常：声明 dsh.bundle + 引用文件存在 → bundleExists true，路径相对 pluginPath', async () => {
     const calls: StubCall[] = [];
     const { fetchImpl } = makeStub(
@@ -280,7 +283,7 @@ describe('fetchPluginManifest', () => {
     const probe = createGithubCatalogProbe({ fetch: fetchImpl, env: OFFLINE_OFF });
 
     const manifest = await probe.fetchPluginManifest({ owner: OWNER, repo: REPO, pluginPath: 'packages/foo' });
-    expect(manifest).toEqual({ bundlePath: 'packages/foo/cordis.patch.yml', bundleExists: true });
+    expect(manifest).toEqual({ bundlePath: 'packages/foo/cordis.patch.yml', bundleExists: true, name: 'dsh-foo', ...NO_DISPLAY });
     expect(calls).toHaveLength(2);
     expect(calls[1]?.url).toBe(`https://api.github.com/repos/${OWNER}/${REPO}/contents/packages/foo/cordis.patch.yml`);
   });
@@ -296,7 +299,7 @@ describe('fetchPluginManifest', () => {
     );
     const probe = createGithubCatalogProbe({ fetch: fetchImpl, env: OFFLINE_OFF });
     const manifest = await probe.fetchPluginManifest({ owner: OWNER, repo: REPO, pluginPath: '.' });
-    expect(manifest).toEqual({ bundlePath: 'cordis.patch.yml', bundleExists: true });
+    expect(manifest).toEqual({ bundlePath: 'cordis.patch.yml', bundleExists: true, name: 'dsh-foo', ...NO_DISPLAY });
     expect(calls[0]?.url).toBe(`https://api.github.com/repos/${OWNER}/${REPO}/contents/package.json`);
   });
 
@@ -304,7 +307,7 @@ describe('fetchPluginManifest', () => {
     const { fetchImpl } = makeStub({ [`/contents/packages/foo/package.json`]: () => contentsFile(MANIFEST) });
     const probe = createGithubCatalogProbe({ fetch: fetchImpl, env: OFFLINE_OFF });
     const manifest = await probe.fetchPluginManifest({ owner: OWNER, repo: REPO, pluginPath: 'packages/foo' });
-    expect(manifest).toEqual({ bundlePath: 'packages/foo/cordis.patch.yml', bundleExists: false });
+    expect(manifest).toEqual({ bundlePath: 'packages/foo/cordis.patch.yml', bundleExists: false, name: 'dsh-foo', ...NO_DISPLAY });
   });
 
   it('package.json 不存在（404）→ null（收录检查失败）', async () => {
@@ -335,6 +338,8 @@ describe('fetchPluginManifest', () => {
     expect(await probe.fetchPluginManifest({ owner: OWNER, repo: REPO, pluginPath: '.' })).toEqual({
       bundlePath: '',
       bundleExists: false,
+      name: 'x',
+      ...NO_DISPLAY,
     });
   });
 
@@ -487,5 +492,111 @@ describe('注入边界：本测试文件绝不出网', () => {
     } finally {
       globalThis.fetch = original;
     }
+  });
+});
+
+/**
+ * 展示字段提取（迁移 0005）。
+ *
+ * 口径：这些值**全部来自已经拿到手的响应体**，不额外发请求（用例里断请求条数就是钉这条）；
+ * 能取就取，类型不符 / 缺失一律 `null` / 空数组 —— **不猜、不 `String()` 强转**。
+ */
+describe('展示字段提取（迁移 0005）', () => {
+  const richRepo = () =>
+    new Response(
+      JSON.stringify({
+        id: 7,
+        full_name: `${OWNER}/${REPO}`,
+        html_url: 'https://github.com/o/r',
+        archived: false,
+        description: '  一个插件仓库  ',
+        // 大小写混合 + 重复 + 一个非字符串：结果应是"小写去重后的字符串数组"
+        topics: ['DSH', 'dsh', 'memory', 42],
+        owner: { login: 'owner', avatar_url: 'https://avatars.example/a.png' },
+        updated_at: '2026-10-13T13:46:01Z',
+      }),
+      { status: 200 },
+    );
+
+  it('fetchRepository：同一个响应体里取简介 / topics / owner / 仓库更新时间，且不多发请求', async () => {
+    const calls: StubCall[] = [];
+    const { fetchImpl } = makeStub({ [`/repos/${OWNER}/${REPO}`]: richRepo }, calls);
+    const probe = createGithubCatalogProbe({ fetch: fetchImpl, env: OFFLINE_OFF });
+
+    const info = await probe.fetchRepository({ owner: OWNER, repo: REPO });
+
+    expect(info.description).toBe('一个插件仓库');
+    expect(info.topics).toEqual(['dsh', 'memory']);
+    expect(info.ownerLogin).toBe('owner');
+    expect(info.ownerAvatarUrl).toBe('https://avatars.example/a.png');
+    expect(info.repoUpdatedAt).toBe(Date.parse('2026-10-13T13:46:01Z'));
+    // 关键：展示字段是"白拿的"，实现里不许为它们再打一次 GitHub。
+    expect(calls).toHaveLength(1);
+  });
+
+  it('fetchRepository：字段缺失或类型不对 → null / 空数组（不猜、不强转）', async () => {
+    const { fetchImpl } = makeStub({
+      [`/repos/${OWNER}/${REPO}`]: () =>
+        new Response(
+          JSON.stringify({
+            id: 8,
+            full_name: `${OWNER}/${REPO}`,
+            html_url: 'https://github.com/o/r',
+            archived: false,
+            description: { text: '对象冒充简介' },
+            topics: 'dsh',
+            owner: 'owner',
+            updated_at: '不是时间',
+          }),
+          { status: 200 },
+        ),
+    });
+    const probe = createGithubCatalogProbe({ fetch: fetchImpl, env: OFFLINE_OFF });
+    const info = await probe.fetchRepository({ owner: OWNER, repo: REPO });
+
+    expect(info.description).toBeNull();
+    expect(info.topics).toEqual([]);
+    expect(info.ownerLogin).toBeNull();
+    expect(info.ownerAvatarUrl).toBeNull();
+    expect(info.repoUpdatedAt).toBeNull();
+  });
+
+  it('fetchPluginManifest：取清单的名称 / 简介 / 作者（对象取 name）/ 版本', async () => {
+    const manifestJson = JSON.stringify({
+      name: 'dsh-x',
+      description: '一句话简介',
+      author: { name: '张三', email: 'x@y.z' },
+      version: '1.2.3',
+      dsh: { bundle: { patch: './p.yml' } },
+    });
+    const { fetchImpl } = makeStub({
+      [`/contents/package.json`]: () => contentsFile(manifestJson),
+      [`/contents/p.yml`]: () => new Response(JSON.stringify({ type: 'file' }), { status: 200 }),
+    });
+    const probe = createGithubCatalogProbe({ fetch: fetchImpl, env: OFFLINE_OFF });
+
+    const manifest = await probe.fetchPluginManifest({ owner: OWNER, repo: REPO, pluginPath: '.' });
+
+    expect(manifest).toMatchObject({
+      bundlePath: 'p.yml',
+      bundleExists: true,
+      name: 'dsh-x',
+      description: '一句话简介',
+      author: '张三',
+      version: '1.2.3',
+    });
+  });
+
+  it('fetchPluginManifest：作者是数字 / 简介是对象 → null（不写进库的脏值）', async () => {
+    const manifestJson = JSON.stringify({ name: 'dsh-y', description: 123, author: 42, dsh: { bundle: './p.yml' } });
+    const { fetchImpl } = makeStub({
+      [`/contents/package.json`]: () => contentsFile(manifestJson),
+      [`/contents/p.yml`]: () => new Response(JSON.stringify({ type: 'file' }), { status: 200 }),
+    });
+    const probe = createGithubCatalogProbe({ fetch: fetchImpl, env: OFFLINE_OFF });
+
+    const manifest = await probe.fetchPluginManifest({ owner: OWNER, repo: REPO, pluginPath: '.' });
+
+    expect(manifest).toMatchObject({ name: 'dsh-y', description: null, author: null, version: null });
   });
 });

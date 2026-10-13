@@ -9,6 +9,7 @@
  */
 
 import { describe, expect, it, afterEach, beforeAll, afterAll, vi } from 'vitest';
+import { readdirSync } from 'node:fs';
 import { createTestDb, type TestDb } from './support/db';
 import {
   WORKER_DEAD_MS,
@@ -35,6 +36,16 @@ function setup(): TestDb {
   ctx = createTestDb();
   return ctx;
 }
+
+/**
+ * 最新迁移文件名：从 `migrations/` **现取**，不硬写。
+ * 硬写版本号的结果是"每加一个迁移就要改两处测试"，改一次忘一次 —— 那是噪音不是覆盖；
+ * 现取仍是有意义的断言：它咬住"健康检查报的版本 == 库里实际应用的最新迁移"。
+ */
+const LATEST_MIGRATION = readdirSync('migrations')
+  .filter((f) => f.endsWith('.sql'))
+  .sort()
+  .at(-1) as string;
 
 describe('运行时心跳（迁移 0004）', () => {
   it('迁移 0004 真的进库了：自检要求表齐全，且心跳表可写可读', () => {
@@ -127,7 +138,7 @@ describe('健康报告', () => {
 
     expect(report.status).toBe('ok');
     expect(statusForHealth(report)).toBe(200);
-    expect(report.schema_version).toBe('0004_runtime_heartbeats.sql');
+    expect(report.schema_version).toBe(LATEST_MIGRATION);
     expect(report.checks.map((c) => c.name)).toContain('db.readable');
     // 唯一允许"未 ok"的检查项就是 worker 心跳：它只报告，不改变结论（见 requireWorker 注释）。
     expect(report.checks.filter((c) => !c.ok).map((c) => c.name)).toEqual(['worker.heartbeat']);
@@ -196,7 +207,7 @@ describe('GET /api/health（真调用路由）', () => {
     const body = (await res.json()) as { ok: boolean; data: Record<string, unknown> };
     expect(body.ok).toBe(true);
     expect(body.data.status).toBe('ok');
-    expect(body.data.schema_version).toBe('0004_runtime_heartbeats.sql');
+    expect(body.data.schema_version).toBe(LATEST_MIGRATION);
     expect(body.data.checks).toBeUndefined();
     expect(body.data.worker).toBeUndefined();
   });

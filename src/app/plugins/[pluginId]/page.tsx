@@ -12,6 +12,7 @@ import { createCatalogService } from '@/server/modules/catalog';
 import { resolveVisibilityInTx } from '@/server/modules/content';
 import { currentContext } from '@/app/api/_lib/context';
 import { StartDraftButton } from '@/components/start-draft-button';
+import { formatDateTimeOr } from '@/packages/common/time';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,19 +41,54 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ p
   return (
     <div>
       <h1 style={{ fontSize: 24 }}>
-        {plugin.repository.fullName}
+        {plugin.displayName ?? plugin.repository.fullName}
         {plugin.pluginPath === '.' ? '' : ` / ${plugin.pluginPath}`}
       </h1>
+      {plugin.displayName ? (
+        <p style={{ color: '#8A94A6', fontSize: 13, marginTop: -8 }}>
+          {plugin.repository.fullName}
+          {plugin.pluginPath === '.' ? '' : ` / ${plugin.pluginPath}`}
+        </p>
+      ) : null}
+
+      {/* 简介：没有就明说"暂无简介"，不留空行（本地旧条目正是这种情形） */}
+      <p style={{ color: '#111827' }}>{plugin.description ?? '暂无简介'}</p>
+
+      <p>
+        {/* 用途标签来自 GitHub topics；本切片还没有中文分类字典，无标签即"未分类" */}
+        {(plugin.topics.length > 0 ? plugin.topics : ['未分类']).map((t) => (
+          <span
+            key={t}
+            style={{ background: '#EEF3FF', color: '#2456B8', borderRadius: 4, padding: '2px 8px', fontSize: 13, marginRight: 6 }}
+          >
+            {t}
+          </span>
+        ))}
+        {plugin.repository.isArchived ? (
+          <span style={{ background: '#FFF9E8', color: '#8A6D1C', borderRadius: 4, padding: '2px 8px', fontSize: 13 }}>
+            已归档
+          </span>
+        ) : null}
+      </p>
+
       <p style={{ color: '#526174' }}>
         仓库：{' '}
         <a href={plugin.repository.htmlUrl} style={{ color: '#2456B8' }}>
           {plugin.repository.htmlUrl}
         </a>
         <br />
+        作者：{plugin.authorLogin ?? plugin.ownerLogin ?? '未知'}
+        {plugin.manifestVersion ? ` · 清单版本 ${plugin.manifestVersion}` : ''}
+        <br />
         上游状态：{plugin.repository.availabilityState}
         {plugin.repository.isArchived ? ' · 已归档' : ''}
+        {plugin.repository.availabilityState !== 'available' ? '（以下为最后一次成功同步的资料）' : ''}
         <br />
         子路径：<code>{plugin.pluginPath}</code>
+        <br />
+        {/* 两个时间语义不同，必须分开写：前者是"本站何时拉的"，后者是"上游仓库何时动的" */}
+        资料同步：{formatDateTimeOr(plugin.infoUpdatedAt ?? plugin.updatedAt, '未知')} · 仓库更新：
+        {formatDateTimeOr(plugin.repoUpdatedAt, '未知')}
       </p>
 
       <section style={{ marginTop: 24 }}>

@@ -11,6 +11,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestDb, insertUser, type TestDb } from './support/db';
+import { manifestStub, repoInfoStub } from './support/probe';
 import { createCatalogService } from '../src/server/modules/catalog/service';
 import { ROOT_PLUGIN_PATH, parseSubmissionUrl } from '../src/server/modules/catalog/parse-url';
 import { ErrorCodes, err as errorHelpers } from '../src/packages/common/errors';
@@ -41,7 +42,7 @@ function activeCaller(userId: string): CallerContextLike {
 function makeProbe(options: {
   repoId?: string;
   archived?: boolean;
-  manifest?: { bundlePath: string; bundleExists: boolean } | null;
+  manifest?: Awaited<ReturnType<CatalogProbe['fetchPluginManifest']>>;
   onRepo?: () => void;
   onManifest?: () => void;
 }): CatalogProbe & { calls: { repo: number; manifest: number; manifestPaths: string[] } } {
@@ -51,18 +52,16 @@ function makeProbe(options: {
     async fetchRepository() {
       calls.repo += 1;
       options.onRepo?.();
-      return {
+      return repoInfoStub({
         githubRepositoryId: options.repoId ?? '9001',
-        fullName: 'owner/repo',
-        htmlUrl: 'https://github.com/owner/repo',
         isArchived: options.archived ?? false,
-      };
+      });
     },
     async fetchPluginManifest(input: { owner: string; repo: string; pluginPath: string }) {
       calls.manifest += 1;
       calls.manifestPaths.push(input.pluginPath);
       options.onManifest?.();
-      return options.manifest === undefined ? { bundlePath: 'dsh.bundle.json', bundleExists: true } : options.manifest;
+      return options.manifest === undefined ? manifestStub() : options.manifest;
     },
   };
 }
@@ -205,7 +204,7 @@ describe('acceptPluginSubmission：收录检查', () => {
 
   it('【对照】dsh.bundle 声明了但引用的配置文件不存在 → 收录被拒', async () => {
     const { testDb, service, userId } = setup();
-    const probe = makeProbe({ manifest: { bundlePath: 'dsh.bundle.json', bundleExists: false } });
+    const probe = makeProbe({ manifest: manifestStub({ bundleExists: false }) });
 
     await expect(
       service.acceptPluginSubmission(
@@ -221,7 +220,7 @@ describe('acceptPluginSubmission：收录检查', () => {
 
   it('dsh.bundle 声明为空白 → 收录被拒', async () => {
     const { testDb, service, userId } = setup();
-    const probe = makeProbe({ manifest: { bundlePath: '   ', bundleExists: true } });
+    const probe = makeProbe({ manifest: manifestStub({ bundlePath: '   ' }) });
     await expect(
       service.acceptPluginSubmission(
         activeCaller(userId),
@@ -253,7 +252,7 @@ describe('acceptPluginSubmission：收录检查', () => {
         throw errorHelpers.providerDown('GitHub 不可用。');
       },
       async fetchPluginManifest() {
-        return { bundlePath: 'x', bundleExists: true };
+        return manifestStub({ bundlePath: 'x' });
       },
     };
 
