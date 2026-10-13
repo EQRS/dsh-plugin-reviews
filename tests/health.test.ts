@@ -16,6 +16,7 @@ import {
   WORKER_HEARTBEAT_NAME,
   WORKER_STALE_MS,
   beat,
+  beginRun,
   heartbeatAgeMs,
   heartbeatState,
   readHeartbeat,
@@ -79,6 +80,25 @@ describe('运行时心跳（迁移 0004）', () => {
   it('没有心跳时读回 null（"从没写过"必须能和"写过但很旧"区分开）', () => {
     const { db } = setup();
     expect(readHeartbeat(db, WORKER_HEARTBEAT_NAME)).toBeNull();
+  });
+
+  it('**新进程的第一次写入（beginRun）重置 started_at**：重启不能被误读成"一直活到现在"', () => {
+    const { db } = setup();
+    // 上一轮跑了很久
+    beat(db, WORKER_HEARTBEAT_NAME, 1_000, { pid: 42 });
+    beat(db, WORKER_HEARTBEAT_NAME, 100_000, { pid: 42 });
+    expect(readHeartbeat(db, WORKER_HEARTBEAT_NAME)?.startedAt).toBe(1_000);
+
+    // 进程重启：第一笔必须是 beginRun，把"本轮开始时间"拉回现在
+    beginRun(db, WORKER_HEARTBEAT_NAME, 200_000, { pid: 99 });
+    const afterRestart = readHeartbeat(db, WORKER_HEARTBEAT_NAME);
+    expect(afterRestart?.startedAt).toBe(200_000);
+    expect(afterRestart?.beatAt).toBe(200_000);
+
+    // 之后同进程的心跳仍然保留 started_at（两者语义不能混）
+    beat(db, WORKER_HEARTBEAT_NAME, 205_000, { pid: 99 });
+    expect(readHeartbeat(db, WORKER_HEARTBEAT_NAME)?.startedAt).toBe(200_000);
+    expect(readHeartbeat(db, WORKER_HEARTBEAT_NAME)?.beatAt).toBe(205_000);
   });
 
   it('心跳名长度有界，超长直接拒绝，不写脏数据', () => {

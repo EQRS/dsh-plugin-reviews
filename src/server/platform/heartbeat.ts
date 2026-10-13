@@ -65,6 +65,35 @@ export function beat(
   ).run(name, Math.trunc(now), Math.trunc(now), json);
 }
 
+/**
+ * **开启一轮运行**：把 `started_at` 重置为本次进程的启动时间。
+ *
+ * 与 `beat` 的区别是有意为之，也必须保留：
+ *   * `beat`（同进程内的周期心跳）**保留** `started_at` —— 否则"活了多久"每次心跳都被冲成 0；
+ *   * `beginRun`（新进程的第一次写入）**重置** `started_at` —— 否则重启之后
+ *     `worker-healthcheck` 会报告"本轮已活 37 分钟"，而进程其实刚起来 3 秒
+ *     （线上实测踩到过：重启后仍报 2244 秒），把"刚重启"与"跑了很久"混为一谈。
+ */
+export function beginRun(
+  db: SqliteDatabase,
+  name: string,
+  now: number,
+  detail?: Record<string, unknown> | null,
+): void {
+  assertName(name);
+  if (!Number.isFinite(now) || now < 0) throw new Error(`心跳时间必须是 UTC 毫秒：${now}`);
+  const json = detail === undefined || detail === null ? null : JSON.stringify(detail);
+  const ts = Math.trunc(now);
+  db.prepare(
+    `INSERT INTO runtime_heartbeats (name, started_at, beat_at, detail)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(name) DO UPDATE SET
+       started_at = excluded.started_at,
+       beat_at    = excluded.beat_at,
+       detail     = excluded.detail`,
+  ).run(name, ts, ts, json);
+}
+
 /** 读一条心跳；没有则返回 null（"从没写过"和"写过但很旧"必须能区分）。 */
 export function readHeartbeat(db: SqliteDatabase, name: string): HeartbeatRecord | null {
   assertName(name);
@@ -114,7 +143,8 @@ export function startHeartbeat(
   const beatNow = () => {
     beat(db, name, now(), options.detail ? options.detail() : null);
   };
-  beatNow();
+  // 第一次写用 beginRun：新进程必须重置 started_at（见 beginRun 注释）。
+  beginRun(db, name, now(), options.detail ? options.detail() : null);
   const timer = setInterval(beatNow, intervalMs);
   timer.unref?.();
   return { stop: () => clearInterval(timer), beatNow };
