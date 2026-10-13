@@ -1,0 +1,29 @@
+[Unit]
+Description=DSH Plugin Review · Web (Next.js)
+Documentation=https://github.com/furongjun-lingshu/dsh-plugin-reviews
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dsh
+Group=dsh
+WorkingDirectory=/srv/dsh-plugin-review
+EnvironmentFile=/srv/dsh-plugin-review/.env.local
+# 直接调 Next 的 CLI，不经过 npx/npm 的包装脚本 —— 少一层进程，日志与退出码都更干净。
+ExecStart=/usr/local/bin/node /srv/dsh-plugin-review/node_modules/next/dist/bin/next start -H 0.0.0.0 -p 80
+Restart=always
+RestartSec=3
+
+# 监听 80 需要特权端口，但**不需要 root**：只给这一个能力。
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dsh-review-web
+
+[Install]
+WantedBy=multi-user.target

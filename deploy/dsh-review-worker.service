@@ -1,0 +1,28 @@
+[Unit]
+Description=DSH Plugin Review · Worker (任务队列)
+Documentation=https://github.com/furongjun-lingshu/dsh-plugin-reviews
+After=network-online.target
+Wants=network-online.target
+# 与 Web 用同一个库文件，SQLite 在 WAL 下支持多进程；但这个 worker 必须在跑，
+# 内容才会真的发布 —— 「提交了却永远不公开」的第一嫌疑就是它没起。
+After=dsh-review-web.service
+
+[Service]
+Type=simple
+User=dsh
+Group=dsh
+WorkingDirectory=/srv/dsh-plugin-review
+EnvironmentFile=/srv/dsh-plugin-review/.env.local
+# worker 用 tsx 直接跑 TypeScript（和本地 npm run worker 一致），因此 devDependencies 也要装。
+ExecStart=/usr/local/bin/node /srv/dsh-plugin-review/node_modules/tsx/dist/cli.mjs /srv/dsh-plugin-review/src/worker/main.ts
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dsh-review-worker
+
+[Install]
+WantedBy=multi-user.target
