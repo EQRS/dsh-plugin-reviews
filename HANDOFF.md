@@ -86,6 +86,9 @@
 | 凭据预检（假 code 换 token） | `bad_verification_code`（= 凭据配对正确） | 见 §5.4 第 3 步 |
 | **健康检查 `/api/health`** | **通过**（16 条新测试）：结构坏了 503、公网 body 不含逐项检查、`?worker=1` 才把 worker 算进结论 | `tests/health.test.ts` |
 | **worker 运行时心跳** | **通过（正反两向真跑）**：worker 起来后心跳新鲜、`diagnose` 显示 ok；停掉且阈值压到 1 秒 → 判 dead、退出码 1 | `migrations/0004`、`scripts/worker-healthcheck.mjs` |
+| **访问日志（每请求一行，含状态码与耗时）** | **通过**：生产下打出 `http_request` 行（200/404/400 都验过），`/api/health` 与 `/_next/*` 静音；`request_id` 与响应头/响应体**同一个号** | `server.mjs` + `tests`… 见 §4.5 相关坑 |
+| **未捕获异常链路（digest 闭环）** | **通过**：故意抛异常的页面 → HTTP 500 → `request_error` 日志含 `path`/`digest`/`stack`，用户错误页上显示**同一个** digest（浏览器实测） | `src/instrumentation*.ts`、`src/app/error.tsx` |
+| **中文 404 / 错误页** | **通过**：404 页含中文说明、三个入口与本次 `request_id`；错误页含 digest、重试、回首页 | `src/app/not-found.tsx`、`error.tsx`、`global-error.tsx` |
 
 端到端脚本覆盖：登录 → 会话接口 → 收录真实插件 → 建草稿 → 保存 → **过期版本被拒** → 提交(pending)
 → **真 worker 进程** → `published` → 公开修订指针切换 → 匿名可读 → 发评论 → worker 发布
@@ -228,6 +231,10 @@ Next dev 默认把 `127.0.0.1` 视为**跨源**并拦掉 `/_next/*`
 | **测试里 `getDb()` 单例占着临时库，Windows 删不掉目录** | 用例全绿但**文件级**失败：`EPERM ... dsh-review-test-xxxx`，很容易被"Tests 388 passed"那行糊过去 | 该 describe 的 `afterAll` 里先 `closeDb()` 再 `cleanup()` |
 | **`Start-Process npx` 在 Windows 起不来** | 报"不是有效的 Win32 应用程序"（npx 是 .cmd 垫片） | 后台跑用 `cmd /c npx ...`，或直接用作业层 |
 | **诊断脚本查任务队列用了想当然的列名** | 我按 `status` / `error_code` 写，真表是 `processing_state` / `last_error_code`；更糟的是 `try/catch` 把错误吞了，输出只留一个 `运行中 ?` | 列名一律回迁移里核对；诊断脚本自己也要把"读失败"打出来（已改：`out.tasks.error` 会进结论） |
+| **Next 自带的访问日志在生产下不生效** | `logging.incomingRequests` 只在 dev 打；中间件又拿不到最终状态码 → 生产日志里"哪个接口 500、哪个页面慢"完全看不见 | 用自定义 server（`server.mjs`）包一层，打 `http_request` 行；`npm start` 与容器 CMD、systemd 单元都指向它 |
+| **访问行的 request_id 与响应体里的对不上** | 自定义 server 自己生成一个 id 放进响应头，业务层 `requestIdFromHeaders` 又生成另一个 → 用户报的编号 grep 不到那一行 | server 里把 id **注入入站请求头**（`req.headers['x-request-id']`），业务层就会沿用；实测三处同一个号，且外部带 id 进来也会沿用 |
+| **`_` 前缀的 App Router 目录不参与路由** | 临时验证页放在 `src/app/__boom/`，请求它得到 404（Next 把 `_` 前缀当私有文件夹） | 验证类页面别用下划线前缀（改成 `boom-verify` 后立即命中 500） |
+| **`instrumentation.ts` 会被同时编到 Edge 运行时** | 在同文件里动态 import 业务模块 → 构建打出 7 条 "A Node.js API is used ... not supported in the Edge Runtime" 警告（`process.stderr`、`process.pid`、better-sqlite3） | 拆成 `instrumentation.ts`（只留正条件判断 + 动态引入）+ `instrumentation-node.ts`（真正实现），警告清零 |
 
 ---
 

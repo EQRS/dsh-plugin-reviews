@@ -51,7 +51,7 @@ RUN groupadd --gid 10001 dsh \
 COPY --from=deps    /app/node_modules ./node_modules
 COPY --from=builder /app/.next        ./.next
 COPY --from=builder /app/package.json /app/package-lock.json ./
-COPY --from=builder /app/tsconfig.json /app/next.config.ts ./
+COPY --from=builder /app/tsconfig.json /app/next.config.ts /app/server.mjs ./
 COPY --from=builder /app/src        ./src
 COPY --from=builder /app/migrations ./migrations
 COPY --from=builder /app/scripts    ./scripts
@@ -68,5 +68,8 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD curl -fsS http://127.0.0.1:3000/api/health || exit 1
 
+# 用自定义 server（server.mjs）而不是 `next start`：
+# 只有它能在生产下打出**每请求一行、含状态码与耗时**的访问日志
+# （Next 自带的 incomingRequests 日志只在 dev 生效，实测生产下不出一行）。
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["npx", "next", "start", "-H", "0.0.0.0", "-p", "3000"]
+CMD ["node", "server.mjs"]

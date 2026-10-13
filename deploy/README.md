@@ -170,13 +170,42 @@ systemctl restart dsh-review-web dsh-review-worker
 - **容器内固定 UID/GID 10001，绝不用 root 跑业务**；`tini` 做 1 号进程，SIGTERM 才能真的传到 node（worker 的优雅退出依赖它）。
 - **日志有上限**：`json-file` + `10m × 3`（journald 会自动轮转，容器默认不会）。
 
-### 健康检查（这一层是"出问题能不能看准"的关键）
+### 可观测性（这一层是"出问题能不能看准"的关键）
 
 | 谁 | 怎么判 | 判据 |
 |---|---|---|
 | `web` 容器 | `HEALTHCHECK` 打 `/api/health` | 库能查 + 外键开启 + 必需表齐全 → 200；结构坏了 → 503 |
 | `worker` 容器 | `node scripts/worker-healthcheck.mjs` | 读 worker 自己写的心跳，超过阈值没更新 → 退出码 1 |
 | 人 | `node scripts/diagnose.mjs` | 一屏看全：配置配没配、库结构/大小、数据量、任务队列与最近失败、worker 心跳、磁盘、媒体目录 |
+| 出故障时 | 访问日志 + `request_error` 日志 | 每请求一行（状态码/耗时）；未捕获异常一行含 `path`/`digest`/`stack`；用户错误页上显示**同一个 digest** |
+
+**web 容器跑的是 `node server.mjs`，不是 `next start`** —— 因为 Next 自带的
+`logging.incomingRequests` **只在 dev 生效**（生产下实测不出一行），而中间件拿不到最终状态码。
+自定义 server 才能给出"每请求一行、含状态码与耗时"的访问日志。
+systemd 单元（`dsh-review-web.service`）也已指向同一个入口，**下次重启生效**。
+
+一行长这样（`/api/health` 与 `/_next/*` 静音，否则日志会被淹掉）：
+
+```json
+{"ts":"...","level":"warn","message":"http_request","request_id":"ec217484-...","method":"GET","path":"/boom-verify","status":500,"duration_ms":81,"slow":false}
+```
+
+故障时的排查顺序（本机实测过整条链）：
+
+```bash
+# 1) 用户报了一个"编号"（错误页上的 digest）→ 直接定位
+journalctl -u dsh-review-web --no-pager | grep '2387506696'
+#    或容器：docker compose logs web | grep '2387506696'
+
+# 2) 用访问日志看影响面与耗时
+journalctl -u dsh-review-web --no-pager | grep '"status":5' | tail -20
+
+# 3) 一屏看全状态
+node scripts/diagnose.mjs
+```
+
+> 页面级未捕获异常在浏览器里显示中文错误页 + 编号；`not-found.tsx` 的 404 页也会显示本次 `request_id`。
+> 两者都是以前没有的 —— 以前用户看到的是 Next 的英文白页，服务端可能一个字都没有。
 
 > `/api/health` **刻意不含** worker 心跳：worker 是另一个容器，它挂了不该让 web 被重启。
 > 要问 worker 就显式加 `?worker=1`（那时返回 503）。公网可见的响应里只有状态与 schema 版本；
@@ -195,6 +224,10 @@ systemctl restart dsh-review-web dsh-review-worker
 | 心跳 | 容器内 worker 日志：`已开始写运行时心跳 interval_ms:5000 stale_ms:30000`，库里 `runtime_heartbeats` 有行（含 `worker_reference` 与 `pid`） |
 | 身份 | 容器内 `uid=10001(dsh) gid=10001(dsh)`，数据文件属主一致 |
 | 诊断脚本 | 在容器里能跑，正确报出配置（只报长度）、库结构、数据量、心跳 |
+
+> ⚠️ **那次真机验证的镜像比 `server.mjs` 早**：当时容器里跑的还是 `next start`，
+> 所以那一次**没有访问日志**。要拿到访问日志，重新 `docker compose up -d --build` 即可
+> （Dockerfile 的 CMD 已改成 `node server.mjs`）。
 
 ### 数据目录属主：这条最容易卡住
 

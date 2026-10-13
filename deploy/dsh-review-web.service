@@ -10,8 +10,13 @@ User=dsh
 Group=dsh
 WorkingDirectory=/srv/dsh-plugin-review
 EnvironmentFile=/srv/dsh-plugin-review/.env.local
-# 直接调 Next 的 CLI，不经过 npx/npm 的包装脚本 —— 少一层进程，日志与退出码都更干净。
-ExecStart=/usr/local/bin/node /srv/dsh-plugin-review/node_modules/next/dist/bin/next start -H 0.0.0.0 -p 80
+# 走自定义 server（server.mjs）而不是 Next 的 CLI：
+# 只有它能在生产下打出**每请求一行、含状态码与耗时**的访问日志
+# （Next 自带的 incomingRequests 日志只在 dev 生效，实测生产下不出一行）。
+# 端口/绑定地址由环境变量给：PORT=80、DSH_REVIEW_HOST=0.0.0.0。
+Environment=PORT=80
+Environment=DSH_REVIEW_HOST=0.0.0.0
+ExecStart=/usr/local/bin/node /srv/dsh-plugin-review/server.mjs
 Restart=always
 RestartSec=3
 

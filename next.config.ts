@@ -16,6 +16,15 @@ const nextConfig: NextConfig = {
   //
   // 这只影响开发服务器；生产构建不受影响。
   allowedDevOrigins: ['127.0.0.1', 'localhost'],
+
+  // 请求访问日志：生产下默认**不**打，出问题时"哪个接口 500 了、哪个页面慢"就无从看起。
+  // 这里打开 Next 自带的 incoming request 日志（一行一条：方法 路径 状态码 耗时），
+  // 但把静态资源与健康检查排掉 —— 它们量最大、信息量最小，会把日志淹掉。
+  logging: {
+    incomingRequests: {
+      ignore: [/^\/_next\//, /^\/api\/health/, /^\/favicon\.ico$/],
+    },
+  },
 };
 
 export default nextConfig;

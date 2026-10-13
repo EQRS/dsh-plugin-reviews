@@ -100,6 +100,8 @@ node scripts/grant-admin.mjs --github-login <账号> --revoke
 | `node scripts/diagnose.mjs` | **一屏看全状态**：配置配没配、库结构/大小/外键/WAL、数据量、任务队列与最近失败、worker 心跳、磁盘、媒体目录；`--json` 给监控 | 本机可跑；发现的问题会进"结论"并以退出码 1 报告 |
 | `node scripts/worker-healthcheck.mjs` | **worker 容器健康检查**：读它自己写的心跳，过期即退出码 1 | 正反两向真跑过：worker 在跑 → 0；停掉并把阈值压到 1 秒 → 1 |
 | `/api/health`（HTTP） | 存活/就绪检查：结构坏了 503；公网 body 不含逐项检查；`?worker=1` 才把 worker 算进结论 | 见 `tests/health.test.ts`（16 条） |
+| `npm start`（= `node server.mjs`） | **访问日志**：每请求一行 JSON（`request_id`/方法/路径/状态码/耗时/是否慢），`/api/health` 与 `/_next/*` 静音 | 生产构建下实测：200/404/400 都出行，`request_id` 与响应头/响应体同一个号 |
+| 故意抛异常的页面 | **未捕获异常链路**：HTTP 500 + 日志 `request_error`（含 path/digest/stack）+ 错误页显示同一个 digest | 浏览器实测：用户看到「这个页面出错了」与编号 `2387506696`，日志里是同一个值 |
 
 > `acceptance-http*.mjs` 需要 dev server 在跑；它们走真实 HTTP，不是调用函数。
 > 它们都**不假设库里没有别的数据**（早先版本假设为空，被演示数据干扰过，已修），
