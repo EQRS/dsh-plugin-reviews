@@ -10,12 +10,13 @@
 | 线上 OAuth App | `dsh-plugin-review-test`（**注意名字里是 test，但它就是线上那个**）；本地那个叫 `dsh-plugin-review-dev` |
 | 回调 | `http://5.231.26.36/api/auth/github/callback` |
 | 首个管理员 | `icelily` / `01a13531-b77f-7162-8c1f-2f796c2ccab1`（GitHub `liceses` / `121547321`） |
-| 数据库 | 目录仍是空库（0 个插件）；实测登录后 `users=1`、`external_identities=1`、`role=admin`；schema 已到 **0005_plugin_directory_info.sql** |
+| 数据库 | 目录仍是空库（0 个插件）；实测登录后 `users=1`、`external_identities=1`、`role=admin`；schema 已到 **0006_rate_limiter.sql** |
 | 状态 | web + worker 都 active，`enable` 过（重启自动起） |
 | Web 入口 | **`node server.mjs`**（自定义 server）—— 带访问日志；`PORT=80`、`DSH_REVIEW_HOST=0.0.0.0` 由单元里的 `Environment=` 给 |
-| 健康检查 | `GET /api/health` → 200 `status:ok`，`schema_version 0005_plugin_directory_info.sql`；`?worker=1` 也 200（worker 心跳新鲜） |
+| 健康检查 | `GET /api/health` → 200 `status:ok`，`schema_version 0006_rate_limiter.sql`；`?worker=1` 也 200（worker 心跳新鲜） |
 | 可观测性 | 访问日志 `http_request`（状态码/耗时/request_id）、启动自检、worker 心跳、中文错误页与 404 **均已生效** |
 | 插件目录 | 搜索 / 用途标签 / 是否有评测 / 排序 / 分页 / 两种空状态 **已上线**；空库时显示"目录当前为空"与「提交插件」入口 |
+| 请求频控 | 评论变更 **5 次/分/用户**（合并计数）、插件提交检查 **10 次/时/用户**；超限 429 + `retry_after_seconds`；幂等重放不占额度。**线上只验到"迁移到位 + 表存在"**：线上生产环境关掉了测试登录通道，跑不了那条"打满 6 次拿 429"的 HTTP 验收（本机 dev 上 12/12） |
 | 依赖 | 显式声明了 `sharp`（原先只靠 `next` 的可选依赖活着）；删掉了零引用的 `zod` / `drizzle-orm` —— 线上 `npm install` 后确认 `require('sharp')` 在 Linux 上可加载 |
 
 **外部验收（从本机对公网地址发真请求）**：`DSH_ACCEPTANCE_BASE=http://5.231.26.36 node scripts/acceptance-catalog-browse.mjs`

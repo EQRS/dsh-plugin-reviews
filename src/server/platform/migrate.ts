@@ -117,6 +117,8 @@ export const REQUIRED_TABLES = [
   'site_settings',
   // 0004：运行时心跳（健康检查与容器 HEALTHCHECK 的判据；不是业务表）
   'runtime_heartbeats',
+  // 0006：请求频控的计数表（rate-limiter-flexible 的 SQLite store 用它；不是业务表）
+  'rate_limiter_flexible',
 ] as const;
 
 export function selfCheck(db: SqliteDatabase): SelfCheckResult {

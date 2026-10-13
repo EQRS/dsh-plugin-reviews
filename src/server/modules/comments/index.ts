@@ -45,6 +45,14 @@ export interface CreateCommentResult {
   commentId: string;
   revisionId: string;
   submissionId: string;
+  /**
+   * false = 命中**同作者同 requestKey 的幂等重放**（返回既有提交，没有新建任何东西）。
+   *
+   * 之前实现里已经在返回这个字段，但契约里漏声明了 —— 现在明确写进来，因为调用方需要它：
+   * 频控要求"重放不另算一次提交"，路由据此决定要不要退还额度（见
+   * `src/server/platform/rate-limit.ts` 的 ticket.refund）。
+   */
+  created: boolean;
 }
 
 /** 评论正文上限：与架构第 79 节的正文长度上限保持一致（超出即拒绝，不静默截断）。 */
@@ -399,7 +407,14 @@ export const commentsService = {
       });
     }
 
-    return { commentId: result.commentId, revisionId: result.revisionId, submissionId: result.submissionId };
+    // ⚠️ 必须把 created 透传出去：丢掉它会让调用方无法区分"新建"与"幂等重放"，
+    // 频控的"重放退还额度"就会静默失效（这个字段以前在这里被漏掉了，tsc 报出来后才发现）。
+    return {
+      commentId: result.commentId,
+      revisionId: result.revisionId,
+      submissionId: result.submissionId,
+      created: result.created,
+    };
   },
 
   /** 公开讨论组分页（仅顶层；`reply_to_comment_id IS NULL`）。 */

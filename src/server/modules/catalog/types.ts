@@ -49,6 +49,14 @@ export interface AcceptPluginSubmissionResult {
   repositoryId: string;
   /** true = 本次创建了 plugin 行；false = 命中既有 (repository_id, plugin_path)。 */
   created: boolean;
+  /**
+   * true = 命中 **request_key 幂等重放**（同一请求键返回原结果，本次没有产生新变更）。
+   *
+   * 必须与 `created: false` 区分开：`created:false` 还包含"这个插件以前就收录过"，
+   * 那种情况**是**一次真实的业务动作（会刷新资料），不该被当成重放。
+   * 频控用它决定要不要退还额度（规格：重放不另算一次提交）。
+   */
+  replayed: boolean;
   status: 'accepted';
 }
 

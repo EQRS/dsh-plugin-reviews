@@ -205,7 +205,7 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
         if (replay) {
           const separator = replay.target_type.indexOf(':');
           const repositoryId = separator >= 0 ? replay.target_type.slice(separator + 1) : '';
-          return { pluginId: replay.target_id, repositoryId, created: false, status: 'accepted' };
+          return { pluginId: replay.target_id, repositoryId, created: false, replayed: true, status: 'accepted' };
         }
       }
 
@@ -390,7 +390,7 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
               );
           }
 
-          return { pluginId, repositoryId, created, status: 'accepted' as const };
+          return { pluginId, repositoryId, created, replayed: false, status: 'accepted' as const };
         },
         db,
       );

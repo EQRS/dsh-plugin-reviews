@@ -11,7 +11,7 @@
 登录 → 收录插件 → **从插件页写评测** → 保存 → 提交 → **检查/人工审核** → **真 worker 发布** → 公开可读
 → 评论 → **回复** → 作者**撤回**；新用户落地页 `/onboarding` 可用。
 
-`tsc` exit 0、单测 **404/404（21 文件）**、HTTP 验收 **16 + 21 + 14**、端到端 **22/22**，
+`tsc` exit 0、单测 **418/418（22 文件）**、HTTP 验收 **16 + 21 + 14**、端到端 **22/22**，
 浏览器点击链路两轮共 22 步（§5.2 / §5.3）。
 **已提交并推送：`938f32a`（第二轮）→ `c8c4138`（交接书）→ 第三轮见 §6。**
 
@@ -79,6 +79,18 @@
 | `scripts/backfill-plugin-info.mjs` | 存量条目回填（幂等重跑收录检查；默认 dry-run） |
 | `scripts/acceptance-catalog-browse.mjs` | 目录浏览 HTTP 验收（10 条，不假设库里数据量） |
 
+### 1.5 第五轮：请求频控（主人在"下一步"里选了先做频控）
+
+| 文件 | 作用 |
+|---|---|
+| `migrations/0006_rate_limiter.sql` | 频控计数表（DDL **照抄** rate-limiter-flexible 自建的那份；库用 `tableCreated:true` 不再自建） |
+| `src/server/platform/rate-limit.ts` | `RATE_LIMIT_RULES`（5/分、10/时，逐字对应规格）+ `enforceRateLimit` / `refundQuietly` / `peekRateLimit`；limiter 按 (db × 动作) 缓存，用 WeakMap 以免串库 |
+| `src/app/api/plugins/route.ts` | 收录前先 `assertCanWrite` + 限流（**先限流再出网探测**），`replayed` 时退还 |
+| `src/app/api/content/[contentId]/comments/route.ts` | 评论唯一写入口，挂 `comment_change`；`created===false`（重放）时退还 |
+| `src/server/modules/comments/index.ts` | 修掉一处真 bug：最终 return 丢了 `created`，导致"重放退还"会静默失效（tsc 报出来的） |
+| `tests/rate-limit.test.ts` | 13 条：规则防漂移、表结构与库期望一致、并发不超发、过期重置、退还、误用保护 |
+| `scripts/acceptance-rate-limit.mjs` | 真 HTTP 验收 12 条（重放不占额度 / 同键换正文 409 / 第 6 次 429 + 等待秒数） |
+
 ---
 
 ## 2. 验证状态（**都是真跑出来的数字，附复现命令**）
@@ -86,7 +98,7 @@
 | 项目 | 结果 | 复现命令 |
 |---|---|---|
 | 类型检查 | **exit 0** | `npx tsc --noEmit` |
-| 单元/集成测试 | **404 passed / 21 files** | `npx vitest run` |
+| 单元/集成测试 | **418 passed / 22 files** | `npx vitest run` |
 | HTTP 读验收 | **16/16**（连跑两次都一样） | `node scripts/acceptance-http.mjs`（需 dev server） |
 | HTTP 写验收 | **21/21** | `npx tsx scripts/acceptance-http-write.mjs` |
 | 图片上传验收 | **14/14**（可重复运行） | `npx tsx scripts/acceptance-upload.mjs` |
@@ -107,6 +119,7 @@
 | **插件目录：搜索 / 筛选 / 排序 / 分页** | **通过**：搜索命中名称·仓库·简介三字段；`q=%` 与 `q=_` 得 **0 条**（转义生效，不匹配全表）；标签筛选、`has_reviews` 三态、两种空状态文案不同、越界页单独提示、未知 id → 404 | `tests/catalog-browse.test.ts`（12 条）+ `node scripts/acceptance-catalog-browse.mjs`（**10/10**，对运行中的服务发真请求） |
 | **目录卡片真实资料（迁移 0005）** | **通过（真 GitHub）**：回填 `deepseek-ai/deepseek-harness / packages/bundle/base` 后，库里真有 `display_name=@deepseek-ai/dsh-base`、`manifest_version=0.2.1-alpha.2`、`topics=["ai-agents","cordis","dsh","dsh-plugin"]`、owner 头像 URL、仓库更新时间 | `npx tsx scripts/backfill-plugin-info.mjs --apply`，结果见 README §验收脚本 |
 | **时区修正** | **通过**：全站时间改用固定 `Asia/Shanghai` 格式化（原先用 `toLocaleString('zh-CN')` = 服务器本地时区，线上 UTC 会**整体差 8 小时**） | `src/packages/common/time.ts`，7 处调用点已替换 |
+| **请求频控（迁移 0006）** | **通过**：评论变更 5/分/用户（合并计数）、插件提交 10/时/用户；超限 **429 + `retry_after_seconds`**；**同键同内容重放不占额度且返回原结果**；同键换正文给 409；并发 20 次恰好放过 5 次 | `tests/rate-limit.test.ts`（13 条）+ `npx tsx scripts/acceptance-rate-limit.mjs`（**12/12**，真 HTTP） |
 
 端到端脚本覆盖：登录 → 会话接口 → 收录真实插件 → 建草稿 → 保存 → **过期版本被拒** → 提交(pending)
 → **真 worker 进程** → `published` → 公开修订指针切换 → 匿名可读 → 发评论 → worker 发布
@@ -174,7 +187,7 @@
 ```cmd
 cd /d "D:\developing\ds民间科研成果展示\插件测评网站"
 npx tsc --noEmit                 REM 期望 exit 0
-npx vitest run                   REM 期望 404 passed / 21 files
+npx vitest run                   REM 期望 418 passed / 22 files
 dev.cmd                          REM 迁移 + 自检 + 起 Web（3100）
 REM 另开窗口（要让提交自动发布才需要）：
 set DSH_REVIEW_CONTENT_SCREEN=basic
@@ -246,7 +259,7 @@ Next dev 默认把 `127.0.0.1` 视为**跨源**并拦掉 `/_next/*`
 | **Client ID 抄错一个字符，GitHub 只回 404** | `POST /login/oauth/access_token` → `HTTP 404 {"error":"Not Found"}`（不是 `incorrect_client_credentials`）。把截图里的 `…TSkl` 看成了 `…TSk1`（小写 L / 数字 1） | 用 `node scripts/check-github-oauth.mjs` 判定：`bad_verification_code` = 凭据与回调都对；`Not Found` = 这个 client_id 它不认识。**抄 id/secret 一律用复制按钮，不要看图打** |
 | 登出后页面不刷新 | 点「登出」后，已渲染的服务端页面仍显示登录态操作（如插件页的「写一篇评测」） | 这是 Next 的 Router Cache；**硬刷新即正确**（刷新后显示"登录后可以在这里写评测"），且服务端照样会 401 拦住。暂未处理 |
 | **`npm ci` 在 `NODE_ENV=production` 下不装 devDependencies** | 容器构建时 `tsx`（worker 运行时）与 `typescript`（构建）都在 dev 里 → 构建失败或 worker 起不来 | Dockerfile 里显式 `npm ci --include=dev`，并在注释里写清为什么 |
-| **测试里 `getDb()` 单例占着临时库，Windows 删不掉目录** | 用例全绿但**文件级**失败：`EPERM ... dsh-review-test-xxxx`，很容易被"Tests 404 passed"那行糊过去 | 该 describe 的 `afterAll` 里先 `closeDb()` 再 `cleanup()` |
+| **测试里 `getDb()` 单例占着临时库，Windows 删不掉目录** | 用例全绿但**文件级**失败：`EPERM ... dsh-review-test-xxxx`，很容易被"Tests 418 passed"那行糊过去 | 该 describe 的 `afterAll` 里先 `closeDb()` 再 `cleanup()` |
 | **`Start-Process npx` 在 Windows 起不来** | 报"不是有效的 Win32 应用程序"（npx 是 .cmd 垫片） | 后台跑用 `cmd /c npx ...`，或直接用作业层 |
 | **诊断脚本查任务队列用了想当然的列名** | 我按 `status` / `error_code` 写，真表是 `processing_state` / `last_error_code`；更糟的是 `try/catch` 把错误吞了，输出只留一个 `运行中 ?` | 列名一律回迁移里核对；诊断脚本自己也要把"读失败"打出来（已改：`out.tasks.error` 会进结论） |
 | **Next 自带的访问日志在生产下不生效** | `logging.incomingRequests` 只在 dev 打；中间件又拿不到最终状态码 → 生产日志里"哪个接口 500、哪个页面慢"完全看不见 | 用自定义 server（`server.mjs`）包一层，打 `http_request` 行；`npm start` 与容器 CMD、systemd 单元都指向它 |
@@ -259,6 +272,9 @@ Next dev 默认把 `127.0.0.1` 视为**跨源**并拦掉 `/_next/*`
 | **SSR 输出在插值处插了 `<!-- -->`** | 用 HTML 文本做断言时，`共 {total} 个条目` 实际渲染成 `共 <!-- -->4<!-- --> 个条目`，正则匹配不到 → 会误判成"页面没渲染" | 断言前先 `html.replace(/<!-- -->/g, '')`；验收脚本里统一走这个 normalize |
 | **测试里硬写 schema 版本号** | 每加一个迁移，`health.test.ts` 就有 2 条用例变红（"期望 0004、实际 0005"）—— 改一次忘一次，那是噪音不是覆盖 | 改成从 `migrations/` **现取最新文件名**再断言（仍咬住"健康检查报的版本 == 库里实际最新迁移"） |
 | **回填脚本不能用 `userId: null` 冒充系统身份** | `acceptPluginSubmission` 对匿名直接抛"收录插件需要先登录"（这是**故意的**安全约束）；我第一次就是这么写的，4 条全被拒 | 借库里一个活跃账号（优先管理员）并**打印用的是谁**（操作会写进 `operation_records`，事后可查）；没有账号则明确拒绝回填 |
+| **curl 的 `-w` 与响应体混在 stdout 会互相污染** | 验收脚本把 body 和 `-w '\n%{http_code}'` 一起解析，`Expect: 100-continue` 那一步先打了 `000`，JSON 前缀变成 `\n000\n000{...}` → **登录明明 200 成功却被判失败** | 响应体用 `-o` 落文件、stdout 只留状态码；登录失败时**把原始响应打出来**，别让后来人靠猜 |
+| **"重放"必须是同键**且**同摘要** | 我用同一个 requestKey 但每次换正文，得到的是 409 `request_key_reused`（设计如此），**幂等重放路径根本没被走到**，测试却"看起来过了" | 重放用例必须正文逐字一致；并单独断言"同键换正文 → 409" |
+| **库的计数表里被拒请求也会被计入** | 我按"计数会被截到上限"写断言，实际 `points` 会涨到 20（上限 5）；差点把正确的实现当成 bug 去修 | 断言要按库的真实语义写：**计数不截断、窗口终点不推后**；退还只在"拿到 ticket 之后"才有意义 |
 
 ---
 
@@ -400,7 +416,7 @@ src/app/               App Router：页面 + /api 路由；页面含 /onboarding
 src/components/        session-nav · plugin-submit-form · review-editor · comment-section ·
                        start-draft-button · admin-decision-form · profile-form · withdraw-button · api-client
 src/worker/            main（独立进程）· handlers（4 处理器）· content-screen（本地基础筛查）
-tests/                 21 文件 / 404 测试（用真实临时库 + 真实迁移，**不用 `:memory:`**）
+tests/                 22 文件 / 418 测试（用真实临时库 + 真实迁移，**不用 `:memory:`**）
 scripts/               验收与自检脚本；grant-admin.mjs（指定/撤销管理员）；check-github-oauth.mjs（凭据体检）
 docs/                  设计映射、并行分组协议、模块签名契约、验收纪律、环境坑
 ```
@@ -466,7 +482,7 @@ docs/                  设计映射、并行分组协议、模块签名契约、
 ```cmd
 cd /d "D:\developing\ds民间科研成果展示\插件测评网站"
 npx tsc --noEmit                 REM 期望 exit 0
-npx vitest run                   REM 期望 404 passed / 21 files
+npx vitest run                   REM 期望 418 passed / 22 files
 dev.cmd                          REM 迁移 + 自检 + 起 Web（3100）
 REM 另开窗口：
 set DSH_REVIEW_CONTENT_SCREEN=basic

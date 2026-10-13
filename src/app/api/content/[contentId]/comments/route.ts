@@ -8,6 +8,8 @@
  */
 
 import { getDb } from '@/server/platform/db';
+import { assertCanWrite } from '@/server/platform/context';
+import { enforceRateLimit, refundQuietly } from '@/server/platform/rate-limit';
 import { commentsService } from '@/server/modules/comments';
 import { resolveVisibilityInTx } from '@/server/modules/content';
 import { err } from '@/packages/common/errors';
@@ -80,17 +82,30 @@ export async function POST(
     const vis = resolveVisibilityInTx(db, contentId);
     if (!vis.publiclyVisible) throw err.unavailable('该内容当前不可评论。');
 
-    const result = await commentsService.createComment(
-      ctx,
-      {
-        contentEntityId: contentId,
-        body: body.body,
-        replyToCommentId: typeof body.replyToCommentId === 'string' ? body.replyToCommentId : null,
-        requestKey: body.requestKey,
-      },
-      db,
-    );
-    return okJson(result, requestId, 202);
+    // 频控（参数与管理规则.md 第 24 行）：新评论 / 回复 / 正文修改**合并计数**，每分钟 5 次。
+    // 本路由是评论唯一的写入入口（回复也走这里，用 replyToCommentId 区分），所以挂一处即可。
+    assertCanWrite(ctx);
+    const ticket = await enforceRateLimit(db, 'comment_change', ctx.userId);
+
+    try {
+      const result = await commentsService.createComment(
+        ctx,
+        {
+          contentEntityId: contentId,
+          body: body.body,
+          replyToCommentId: typeof body.replyToCommentId === 'string' ? body.replyToCommentId : null,
+          requestKey: body.requestKey,
+        },
+        db,
+      );
+      // 幂等重放（同作者同 requestKey 复用既有提交）不另算一次提交 → 退还额度。
+      if (result.created === false) await refundQuietly(ticket);
+      return okJson(result, requestId, 202);
+    } catch (e) {
+      // 未产生任何变更 → 不占用业务额度（无效输入由独立的请求层防护，见规格第 27 行）。
+      await refundQuietly(ticket);
+      throw e;
+    }
   } catch (e) {
     return errorResponse(e, requestId);
   }

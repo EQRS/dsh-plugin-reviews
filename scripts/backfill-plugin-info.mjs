@@ -30,9 +30,9 @@ const dryRun = !apply;
 const limitArg = args.indexOf('--limit');
 const limit = limitArg >= 0 ? Number.parseInt(args[limitArg + 1] ?? '0', 10) || 0 : 0;
 
-const dbPath = resolveDbPath(process.env.DSH_REVIEW_DB);
+const dbPath = resolveDbPath(process.env.DSH_REVIEW_DB_PATH);
 if (!existsSync(dbPath)) {
-  console.error(`找不到数据库：${dbPath}（可用 DSH_REVIEW_DB 指定）`);
+  console.error(`找不到数据库：${dbPath}（可用 DSH_REVIEW_DB_PATH 指定）`);
   process.exitCode = 1;
 } else {
   const db = getDb();

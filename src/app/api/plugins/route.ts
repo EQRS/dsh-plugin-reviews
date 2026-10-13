@@ -10,6 +10,8 @@
  */
 
 import { getDb } from '@/server/platform/db';
+import { assertCanWrite } from '@/server/platform/context';
+import { enforceRateLimit, refundQuietly } from '@/server/platform/rate-limit';
 import { createCatalogService } from '@/server/modules/catalog';
 import { createGithubCatalogProbe } from '@/server/adapters/catalog/github-probe';
 import { err } from '@/packages/common/errors';
@@ -55,18 +57,34 @@ export async function POST(request: Request): Promise<Response> {
       ]);
     }
 
+    const db = getDb();
+
+    // 频控必须落在"出网探测 GitHub"**之前**（参数与管理规则.md 第 25 行：每小时 10 次新提交检查）：
+    // 否则超限的用户仍然能让我们替他打满上游额度。
+    // assertCanWrite 自己会把匿名/停用账户挡掉（业务层同样会拒，这里是前置，顺便收窄类型）。
+    assertCanWrite(ctx);
+    const ticket = await enforceRateLimit(db, 'plugin_submission', ctx.userId);
+
     // 真实 GitHub 探针：仓库可访问 + package.json 声明 dsh.bundle + 引用文件存在，三项都过才收录。
     // 探针在事务外调用（better-sqlite3 是同步驱动，事务内出网会长时间持锁）。
     const probe = createGithubCatalogProbe();
-    const catalog = createCatalogService({ db: getDb() });
-    const result = await catalog.acceptPluginSubmission(
-      ctx,
-      { url: body.url, requestKey: body.requestKey },
-      { probe },
-    );
-
-    // 201：本次收录请求已成功处理（created=false 表示命中既有记录，同样算成功而不是 200/409）。
-    return okJson(result, requestId, 201);
+    const catalog = createCatalogService({ db });
+    try {
+      const result = await catalog.acceptPluginSubmission(
+        ctx,
+        { url: body.url, requestKey: body.requestKey },
+        { probe },
+      );
+      // 幂等重放 = 本次没有产生新的收录检查 → 退还额度（规格：重放不另算一次提交）。
+      if (result.replayed) await refundQuietly(ticket);
+      // 201：本次收录请求已成功处理（created=false 表示命中既有记录，同样算成功而不是 200/409）。
+      return okJson(result, requestId, 201);
+    } catch (e) {
+      // 失败 = 没有产生任何变更。规格把"无效输入防护"划给独立的请求层，
+      // 不用业务计数冒充全局限流，所以这里把额度还回去。
+      await refundQuietly(ticket);
+      throw e;
+    }
   } catch (e) {
     return errorResponse(e, requestId);
   }
