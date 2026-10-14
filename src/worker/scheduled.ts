@@ -76,17 +76,24 @@ export async function ensureDailyDiscoveryTask(deps: {
     return { created: false, taskId: null, deduplicationKey: key, skippedReason };
   }
 
+  const budget = discoveryBudgetFor(env);
   const { taskId, created } = await deps.tasks.enqueue({
     taskType: 'plugin_discovery',
     deduplicationKey: key,
     // 系统排入：没有具体请求人（requested_by 允许 NULL），审计走 operation_records 的 system 身份。
     requestedBy: null,
+    // ⚠️ payload 键名必须与 handlers.ts 的读取名**一致**：这里用 snake_case
+    // （与 `submission_id` 等既有 payload 同风格）。曾经这里写成 camelCase，
+    // 结果 handler 读不到 → 预算被静默忽略（真实踩过：线上第一轮用了 60 个候选，
+    // 而不是预算里的 20）。tests/plugin-discovery.test.ts 里有专门的防漂移用例。
     payload: {
       run_key: key,
       query: DISCOVERY_DEFAULTS.query,
-      // 预算按"有没有 GITHUB_TOKEN"分档：未认证时核心接口只有 60 次/小时，
-      // 给大预算只会撞 403（见 discovery.ts 的 discoveryBudgetFor）。
-      ...discoveryBudgetFor(env),
+      search_pages: budget.searchPages,
+      per_page: budget.perPage,
+      max_candidates: budget.maxCandidates,
+      max_plugins: budget.maxPlugins,
+      max_requests: budget.maxRequests,
     },
     schedulingGroup: DISCOVERY_SCHEDULING_GROUP,
     availableAt: now,

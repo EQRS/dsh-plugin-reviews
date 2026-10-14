@@ -69,12 +69,14 @@ export function discoveryBudgetFor(env: Record<string, string | undefined>): {
         maxRequests: DISCOVERY_DEFAULTS.maxRequests,
       }
     : {
-        // 未认证：把单轮压在匿名配额之内（55 次核心请求 < 60），保证一轮能跑完而不是撞墙。
-        searchPages: 1,
-        perPage: 20,
-        maxCandidates: 8,
+        // 未认证：**搜索**是独立配额（匿名 10 次/分，一次能拿 30 个候选），便宜；
+        // 真正的瓶颈是**核心接口**（仓库树/清单文件）60 次/小时。
+        // 所以搜索给足、核心请求压在 58 次以内，让每一轮把小时配额吃满而不撞墙。
+        searchPages: 2,
+        perPage: 30,
+        maxCandidates: 10,
         maxPlugins: 12,
-        maxRequests: 55,
+        maxRequests: 58,
       };
 }
 

@@ -289,6 +289,14 @@ function makePluginDiscoveryHandler(deps: HandlerDeps): TaskHandler {
     const readNum = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : undefined);
 
     const runKey = readStr(payload.run_key) ?? discoveryDailyKey(nowMs());
+    /** payload 里的数字参数：snake_case 为主，同时容忍 camelCase（历史/手写 payload）。 */
+    const readNumEither = (...keys: string[]): number | undefined => {
+      for (const k of keys) {
+        const v = readNum(payload[k]);
+        if (v !== undefined) return v;
+      }
+      return undefined;
+    };
     const discovery = deps.discovery ?? createGithubPluginDiscovery();
     const probe = deps.probe ?? createGithubCatalogProbe();
     const service = createPluginDiscoveryService({ db: deps.db, discovery, probe });
@@ -298,11 +306,11 @@ function makePluginDiscoveryHandler(deps: HandlerDeps): TaskHandler {
         runKey,
         taskId: task.taskId,
         query: readStr(payload.query) ?? DISCOVERY_DEFAULTS.query,
-        searchPages: readNum(payload.search_pages),
-        perPage: readNum(payload.per_page),
-        maxCandidates: readNum(payload.max_candidates),
-        maxPlugins: readNum(payload.max_plugins),
-        maxRequests: readNum(payload.max_requests),
+        searchPages: readNumEither('search_pages', 'searchPages'),
+        perPage: readNumEither('per_page', 'perPage'),
+        maxCandidates: readNumEither('max_candidates', 'maxCandidates'),
+        maxPlugins: readNumEither('max_plugins', 'maxPlugins'),
+        maxRequests: readNumEither('max_requests', 'maxRequests'),
       });
       return { outcome: 'success', progress: summary };
     } catch (e) {

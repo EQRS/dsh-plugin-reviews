@@ -23,6 +23,7 @@ import {
 import { createPluginDiscoveryService, discoveryDailyKey } from '@/server/modules/catalog/discovery';
 import { ensureDailyDiscoveryTask, discoveryScheduleSkipReason } from '@/worker/scheduled';
 import { createTasksService } from '@/server/modules/tasks/service';
+import { createHandlers } from '@/worker/handlers';
 import { createCatalogService } from '@/server/modules/catalog/service';
 import { newId } from '@/server/platform/id';
 import type { CatalogProbe } from '@/server/modules/catalog/types';
@@ -566,6 +567,67 @@ describe('每日发现排程', () => {
     expect(
       (ctx.db.prepare("SELECT COUNT(*) AS c FROM background_tasks WHERE task_type = 'plugin_discovery'").get() as { c: number }).c,
     ).toBe(2);
+  });
+});
+
+// ============================================================
+// 6) 排程 payload ↔ handler 读取名**不许漂移**（真实踩过的 bug）
+// ============================================================
+
+describe('排程 payload 与 handler 的契约', () => {
+  it('排程写进去的预算，handler 必须真的读到（键名不一致就会静默忽略预算）', async () => {
+    ctx = createTestDb();
+    const db = ctx.db;
+    const tasks = createTasksService(db);
+
+    // 未认证 → 预算应是保守档（perPage 20 / 单页），排进 payload
+    const scheduled = await ensureDailyDiscoveryTask({
+      tasks,
+      now: Date.parse('2026-10-14T02:00:00Z'),
+      env: {},
+    });
+    expect(scheduled.taskId).not.toBeNull();
+    const claim = await tasks.claim('w', Date.parse('2026-10-14T02:00:01Z'));
+    expect(claim).not.toBeNull();
+
+    // 假适配器把**收到的搜索参数**记下来
+    let seen: { pages?: number; perPage?: number } | null = null;
+    const recording: PluginDiscoveryPort = {
+      requestsUsed: () => 0,
+      wasRateLimited: () => false,
+      async searchCandidates(input) {
+        seen = { pages: input.pages, perPage: input.perPage };
+        return [];
+      },
+      async findPlugins() {
+        return [];
+      },
+    };
+
+    const handlers = createHandlers({ db, discovery: recording, probe: stubProbe() });
+    await handlers.plugin_discovery!(claim!);
+
+    // 预算必须落到 handler 手里：未认证档是 2 页 × 30 条（搜索便宜，核心请求才是瓶颈）
+    expect(seen).not.toBeNull();
+    expect(seen!.perPage).toBe(30);
+    expect(seen!.pages).toBe(2);
+  });
+
+  it('有 token 时排程给的是放大的预算（认证后配额高得多）', async () => {
+    ctx = createTestDb();
+    const tasks = createTasksService(ctx.db);
+    const scheduled = await ensureDailyDiscoveryTask({
+      tasks,
+      now: Date.parse('2026-10-14T02:00:00Z'),
+      env: { GITHUB_TOKEN: 'x' },
+    });
+    const row = ctx.db
+      .prepare('SELECT payload FROM background_tasks WHERE id = ?')
+      .get(scheduled.taskId) as { payload: string };
+    const payload = JSON.parse(row.payload) as Record<string, unknown>;
+    expect(payload.per_page).toBe(30);
+    expect(payload.search_pages).toBe(2);
+    expect(payload.max_plugins).toBe(30);
   });
 });
 
