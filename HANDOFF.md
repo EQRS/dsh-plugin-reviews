@@ -11,7 +11,7 @@
 登录 → 收录插件 → **从插件页写评测** → 保存 → 提交 → **检查/人工审核** → **真 worker 发布** → 公开可读
 → 评论 → **回复** → 作者**撤回**；新用户落地页 `/onboarding` 可用。
 
-`tsc` exit 0、单测 **418/418（22 文件）**、HTTP 验收 **16 + 21 + 14**、端到端 **22/22**，
+`tsc` exit 0、单测 **450/450（24 文件）**、HTTP 验收 **16 + 21 + 14**、端到端 **22/22**，
 浏览器点击链路两轮共 22 步（§5.2 / §5.3）。
 **已提交并推送：`938f32a`（第二轮）→ `c8c4138`（交接书）→ 第三轮见 §6。**
 
@@ -91,6 +91,21 @@
 | `tests/rate-limit.test.ts` | 13 条：规则防漂移、表结构与库期望一致、并发不超发、过期重置、退还、误用保护 |
 | `scripts/acceptance-rate-limit.mjs` | 真 HTTP 验收 12 条（重放不占额度 / 同键换正文 409 / 第 6 次 429 + 等待秒数） |
 
+### 1.6 第六轮：插件目录**自动发现**（迁移 0007）+ 第一波真实数据
+
+| 文件 | 作用 |
+|---|---|
+| `migrations/0007_task_type_plugin_discovery.sql` | 给 `background_tasks.task_type` 的 CHECK 加 `plugin_discovery`。SQLite 改不了 CHECK → **重建表**；重建要关外键、而 PRAGMA 在事务里是空操作 → 文件头声明 `-- dsh:migration-transaction=off` 自己管事务 |
+| `src/server/platform/migrate.ts` | 新增受控逃生口：声明该标记的迁移不再被 `db.transaction()` 包住（本地实测重建后 73 条任务/68 条尝试全在、索引重建、`foreign_key_check` 干净） |
+| `src/server/adapters/catalog/github-discovery.ts` | 发现适配器：搜索 → 读树找 `package.json` → 取 `dsh.bundle` → 给可收录 URL。**带重试/退避/超时/请求计数/限流识别**（与用户路径的 probe 刻意分工：探针失败即报，发现允许重试） |
+| `src/server/modules/catalog/discovery.ts` | 发现服务：候选 → 逐条走**与用户提交相同**的收录检查 → 汇总（收录/刷新/跳过 + 原因 + 是否截断）；`discoveryBudgetFor()` 按有没有 token 分档预算 |
+| `src/server/modules/catalog/service.ts` | 抽出共享 `runAccept`，新增 **`acceptPluginSubmissionBySystem`**：审计记 `actor_kind='system'` + `actor_user_id=NULL` + `task_id`（schema 本来就支持），用户路径的登录与同键重放语义原样保留 |
+| `src/worker/scheduled.ts` | 每日排程：按天幂等键 + 启动即试排 → 容器化可用、重启自愈；离线/`DSH_REVIEW_DISCOVERY_DAILY=0` 时不排并给原因 |
+| `src/worker/handlers.ts` | `plugin_discovery` 处理器；payload 参数读取（snake_case 为主、容忍 camelCase）；限流→skipped/其它→error 的重试语义 |
+| `src/worker/main.ts` + `tasks/service.ts` | `HandlerResult.progress` → 写进 `background_tasks.progress`（此前该列**从没被写过**），后台页/诊断终于能看"这一轮发现了什么" |
+| `scripts/discover-now.mjs` | 手动排一轮（运维/管理员立即发现的后端）；`scripts/discover-dsh-plugins.mjs` 只读发现（不写库） |
+| `tests/plugin-discovery.test.ts`（25 条）+ `tests/migrate-transaction.test.ts`（3 条） | 适配器重试语义/离线闸门/系统身份审计/幂等/截断/夹具过滤/按天排程/payload 契约/迁移事务语义/两条清单防漂移 |
+
 ---
 
 ## 2. 验证状态（**都是真跑出来的数字，附复现命令**）
@@ -98,7 +113,7 @@
 | 项目 | 结果 | 复现命令 |
 |---|---|---|
 | 类型检查 | **exit 0** | `npx tsc --noEmit` |
-| 单元/集成测试 | **418 passed / 22 files** | `npx vitest run` |
+| 单元/集成测试 | **450 passed / 24 files** | `npx vitest run` |
 | HTTP 读验收 | **16/16**（连跑两次都一样） | `node scripts/acceptance-http.mjs`（需 dev server） |
 | HTTP 写验收 | **21/21** | `npx tsx scripts/acceptance-http-write.mjs` |
 | 图片上传验收 | **14/14**（可重复运行） | `npx tsx scripts/acceptance-upload.mjs` |
@@ -121,6 +136,7 @@
 | **时区修正** | **通过**：全站时间改用固定 `Asia/Shanghai` 格式化（原先用 `toLocaleString('zh-CN')` = 服务器本地时区，线上 UTC 会**整体差 8 小时**） | `src/packages/common/time.ts`，7 处调用点已替换 |
 | **请求频控（迁移 0006）** | **通过**：评论变更 5/分/用户（合并计数）、插件提交 10/时/用户；超限 **429 + `retry_after_seconds`**；**同键同内容重放不占额度且返回原结果**；同键换正文给 409；并发 20 次恰好放过 5 次 | `tests/rate-limit.test.ts`（13 条）+ `npx tsx scripts/acceptance-rate-limit.mjs`（**12/12**，真 HTTP） |
 | **频控已上线上（2026-10-13 22:29）** | **通过（能验的部分）**：`/api/health` → `schema_version 0006_rate_limiter.sql`；`selfcheck` → `missingTables: []`、`problems: []`；三个页面 200；近 200 行日志 **0 条 error**。**未验**："打满 6 次拿 429" 需真人登录（生产关掉了测试登录通道）| `deploy/README.md` §当前线上状态 |
+| **自动发现上线并完成第一波入库（2026-10-14 17:41）** | **通过**：worker 启动日志 `handler_count: 5` / `scheduled_tasks: true` / 已排入 `daily:2026-10-14`；第一波 `plugins_found 9 / accepted 9 / created 9`、第二波再 9 条 → 线上目录 **17 个真实插件**；`selfcheck` schema 0007、`missingTables: []`；页面"共 17 个条目"、`?q=dsh` 命中 16；审计 18 条全是 `actor_kind='system'` | `logs`（worker journal）+ `deploy/README.md` §当前线上状态 |
 
 端到端脚本覆盖：登录 → 会话接口 → 收录真实插件 → 建草稿 → 保存 → **过期版本被拒** → 提交(pending)
 → **真 worker 进程** → `published` → 公开修订指针切换 → 匿名可读 → 发评论 → worker 发布
@@ -188,7 +204,7 @@
 ```cmd
 cd /d "D:\developing\ds民间科研成果展示\插件测评网站"
 npx tsc --noEmit                 REM 期望 exit 0
-npx vitest run                   REM 期望 418 passed / 22 files
+npx vitest run                   REM 期望 450 passed / 24 files
 dev.cmd                          REM 迁移 + 自检 + 起 Web（3100）
 REM 另开窗口（要让提交自动发布才需要）：
 set DSH_REVIEW_CONTENT_SCREEN=basic
@@ -260,7 +276,7 @@ Next dev 默认把 `127.0.0.1` 视为**跨源**并拦掉 `/_next/*`
 | **Client ID 抄错一个字符，GitHub 只回 404** | `POST /login/oauth/access_token` → `HTTP 404 {"error":"Not Found"}`（不是 `incorrect_client_credentials`）。把截图里的 `…TSkl` 看成了 `…TSk1`（小写 L / 数字 1） | 用 `node scripts/check-github-oauth.mjs` 判定：`bad_verification_code` = 凭据与回调都对；`Not Found` = 这个 client_id 它不认识。**抄 id/secret 一律用复制按钮，不要看图打** |
 | 登出后页面不刷新 | 点「登出」后，已渲染的服务端页面仍显示登录态操作（如插件页的「写一篇评测」） | 这是 Next 的 Router Cache；**硬刷新即正确**（刷新后显示"登录后可以在这里写评测"），且服务端照样会 401 拦住。暂未处理 |
 | **`npm ci` 在 `NODE_ENV=production` 下不装 devDependencies** | 容器构建时 `tsx`（worker 运行时）与 `typescript`（构建）都在 dev 里 → 构建失败或 worker 起不来 | Dockerfile 里显式 `npm ci --include=dev`，并在注释里写清为什么 |
-| **测试里 `getDb()` 单例占着临时库，Windows 删不掉目录** | 用例全绿但**文件级**失败：`EPERM ... dsh-review-test-xxxx`，很容易被"Tests 418 passed"那行糊过去 | 该 describe 的 `afterAll` 里先 `closeDb()` 再 `cleanup()` |
+| **测试里 `getDb()` 单例占着临时库，Windows 删不掉目录** | 用例全绿但**文件级**失败：`EPERM ... dsh-review-test-xxxx`，很容易被"Tests 450 passed"那行糊过去 | 该 describe 的 `afterAll` 里先 `closeDb()` 再 `cleanup()` |
 | **`Start-Process npx` 在 Windows 起不来** | 报"不是有效的 Win32 应用程序"（npx 是 .cmd 垫片） | 后台跑用 `cmd /c npx ...`，或直接用作业层 |
 | **诊断脚本查任务队列用了想当然的列名** | 我按 `status` / `error_code` 写，真表是 `processing_state` / `last_error_code`；更糟的是 `try/catch` 把错误吞了，输出只留一个 `运行中 ?` | 列名一律回迁移里核对；诊断脚本自己也要把"读失败"打出来（已改：`out.tasks.error` 会进结论） |
 | **Next 自带的访问日志在生产下不生效** | `logging.incomingRequests` 只在 dev 打；中间件又拿不到最终状态码 → 生产日志里"哪个接口 500、哪个页面慢"完全看不见 | 用自定义 server（`server.mjs`）包一层，打 `http_request` 行；`npm start` 与容器 CMD、systemd 单元都指向它 |
@@ -276,6 +292,11 @@ Next dev 默认把 `127.0.0.1` 视为**跨源**并拦掉 `/_next/*`
 | **curl 的 `-w` 与响应体混在 stdout 会互相污染** | 验收脚本把 body 和 `-w '\n%{http_code}'` 一起解析，`Expect: 100-continue` 那一步先打了 `000`，JSON 前缀变成 `\n000\n000{...}` → **登录明明 200 成功却被判失败** | 响应体用 `-o` 落文件、stdout 只留状态码；登录失败时**把原始响应打出来**，别让后来人靠猜 |
 | **"重放"必须是同键**且**同摘要** | 我用同一个 requestKey 但每次换正文，得到的是 409 `request_key_reused`（设计如此），**幂等重放路径根本没被走到**，测试却"看起来过了" | 重放用例必须正文逐字一致；并单独断言"同键换正文 → 409" |
 | **库的计数表里被拒请求也会被计入** | 我按"计数会被截到上限"写断言，实际 `points` 会涨到 20（上限 5）；差点把正确的实现当成 bug 去修 | 断言要按库的真实语义写：**计数不截断、窗口终点不推后**；退还只在"拿到 ticket 之后"才有意义 |
+| **payload 键名不一致 → 预算被静默忽略** | 排程写 `searchPages/perPage`（camelCase），handler 读 `search_pages/...`（snake_case）→ 预算全丢，线上第一轮用了 60 个候选而不是 20；只因撞上 403 才没造成更大浪费 | payload 统一 snake_case、读取端容忍两种拼法；并补一条**契约用例**：把排程产出的 payload 交给**真实 handler**，断言假适配器收到的参数 == 预算 |
+| **把"任何 403"都当限流 → 一个仓库能中止整天** | 线上某轮第 3 个请求就"限流收尾"，而同一时刻 `curl` 同一 IP 打 GitHub 是 **200**（配额没耗尽）：那其实是仓库级拒绝（屏蔽/无权限） | 按证据分派：429 / `x-ratelimit-remaining: 0` / 消息含 `rate limit` → 限流；其余 403 → `target_unavailable` **记为跳过的候选**；并把上游 `message` 与剩余配额带进错误消息（否则排障只能靠猜） |
+| **测试夹具被当成插件收进目录** | 线上目录里出现了 `vlln/dsh-autofork / tests/e2e/slow-tool-plugin`（名字 `@vlln/e2e-slow-tool`），用户会以为那是能装的插件 | 发现阶段启发式过滤 `tests/examples/fixtures/e2e`，并**如实记一笔** `discovery_non_shippable_path`；根目录永不匹配（别误杀"仓库即插件"）。已收录的脏行按精确 id 清理，**审计不回删**（历史定位） |
+| **`operation_records.task_id` 有外键** | 测试里传了个假 `task_id` → 收录事务被 FK 拦下，`accepted` 静默变成 0（排查时才发现） | 系统路径的 `task_id` 必须指向**真实任务**；测试改成先用排程真造一条任务再用它的 id（顺带证明"顺着审计能查回哪一轮"） |
+| **未认证访问 GitHub 的核心接口只有 60 次/小时** | 第一轮 38 次请求就把小时配额吃满，紧接着的第二轮第 3 个请求就 403；搜索是**独立配额**（匿名 10 次/分），别把它当瓶颈 | 预算按"有没有 token"分档（未认证 58 次/轮、认证 400 次/轮）；搜索给足、核心收紧；撞配额时**干净收尾保住已收录的**。要快就在服务器 `.env.local` 加只读 `GITHUB_TOKEN`（worker 通过 systemd `EnvironmentFile` 读得到；运维脚本自己读 `.env.local`，因为 `tsx` 不经过 Next） |
 
 ---
 
@@ -417,7 +438,7 @@ src/app/               App Router：页面 + /api 路由；页面含 /onboarding
 src/components/        session-nav · plugin-submit-form · review-editor · comment-section ·
                        start-draft-button · admin-decision-form · profile-form · withdraw-button · api-client
 src/worker/            main（独立进程）· handlers（4 处理器）· content-screen（本地基础筛查）
-tests/                 22 文件 / 418 测试（用真实临时库 + 真实迁移，**不用 `:memory:`**）
+tests/                 24 文件 / 450 测试（用真实临时库 + 真实迁移，**不用 `:memory:`**）
 scripts/               验收与自检脚本；grant-admin.mjs（指定/撤销管理员）；check-github-oauth.mjs（凭据体检）
 docs/                  设计映射、并行分组协议、模块签名契约、验收纪律、环境坑
 ```
@@ -483,7 +504,7 @@ docs/                  设计映射、并行分组协议、模块签名契约、
 ```cmd
 cd /d "D:\developing\ds民间科研成果展示\插件测评网站"
 npx tsc --noEmit                 REM 期望 exit 0
-npx vitest run                   REM 期望 418 passed / 22 files
+npx vitest run                   REM 期望 450 passed / 24 files
 dev.cmd                          REM 迁移 + 自检 + 起 Web（3100）
 REM 另开窗口：
 set DSH_REVIEW_CONTENT_SCREEN=basic

@@ -50,7 +50,7 @@ npm run dev             # Web：http://127.0.0.1:3100
 npm run worker          # 独立 worker 进程（**要真正发布内容就需要它**）
 npm run admin:grant -- --list                    # 看现有用户与管理员
 npm run admin:grant -- --github-login <账号>      # 指定管理员（该账号需先登录过一次）
-npm test                # 418 个测试
+npm test                # 450 个测试
 npm run typecheck       # tsc --noEmit
 ```
 
@@ -86,7 +86,7 @@ node scripts/grant-admin.mjs --github-login <账号> --revoke
 
 | 命令 | 做什么 | 当前结果 |
 |---|---|---|
-| `npx vitest run` | 单元 + 集成 + 端到端（含真实临时库与真实迁移） | **418 passed / 22 files** |
+| `npx vitest run` | 单元 + 集成 + 端到端（含真实临时库与真实迁移） | **450 passed / 24 files** |
 | `npx tsc --noEmit` | 类型检查 | **exit 0** |
 | `node scripts/verify-tests-bite.mjs` | **反恒真自检**：删掉盖楼触发器 → 测试必须变红 → 还原 → 必须复绿 | 通过 |
 | `node scripts/verify-comment-visibility-bite.mjs` | **反恒真自检**：去掉评论公开修订过滤 → 评论可见性测试必须变红 → 还原（逐字节核对）→ 必须复绿 | 通过 |
@@ -105,6 +105,8 @@ node scripts/grant-admin.mjs --github-login <账号> --revoke
 | `node scripts/acceptance-catalog-browse.mjs` | **插件目录浏览验收**：搜索 / 通配符转义 / 标签筛选 / 是否有评测 / 排序 / 越界页 / 首页入口 / 未知 id → 404（对**运行中**的服务发真请求，不假设库里有几条数据） | **10/10** |
 | `npx tsx scripts/backfill-plugin-info.mjs` | **存量条目回填展示资料**（迁移 0005 之后的补数据）：对缺 `info_updated_at` 的条目重跑收录检查，幂等、失败只跳过；默认 dry-run，`--apply` 才写 | dry-run 列出 4 条；`--apply` → **成功 1 条**（真实仓库的简介/topics/头像/版本真写进库）、跳过 3 条（本地测试造的假仓库，报"仓库不存在"） |
 | `npx tsx scripts/acceptance-rate-limit.mjs` | **频控验收**（迁移 0006）：同键同内容重放不占额度且返回**原结果**、同键换正文给 409、5 次新提交后第 6 次必须 **429 + retry_after_seconds** | **12/12**（对运行中的 dev server 发真请求；每次用唯一身份，可重复运行） |
+| `npx tsx scripts/discover-dsh-plugins.mjs` | **只读发现**（找真实插件，不写库）：GitHub 搜索 → 逐个核验 `dsh.bundle` → 打印可收录 URL 清单 | 实测扫出 `viztor/dsh-opencode-patch`、`peng456/dsh-plugin-mesh` 等候选 |
+| `npx tsx scripts/discover-now.mjs [--limit N] [--dry-run]` | **手动排一轮自动发现**（只排任务，执行在 worker 里；与定时发现同一条路径）。读 `.env.local`，预算按有没有 token 自动分档 | 线上实测：第一波 9 条、第二波 9 条入库 |
 
 > `acceptance-http*.mjs` 需要 dev server 在跑；它们走真实 HTTP，不是调用函数。
 > 它们都**不假设库里没有别的数据**（早先版本假设为空，被演示数据干扰过，已修），
@@ -424,7 +426,7 @@ src/app/               App Router：页面 + /api 路由；页面含 /onboarding
 src/components/        session-nav · plugin-submit-form · review-editor · comment-section ·
                        start-draft-button · admin-decision-form · profile-form · withdraw-button · api-client
 src/worker/            main（独立任务进程）· handlers（4 个处理器）· content-screen（本地基础筛查）
-tests/                 22 个文件 / 418 个测试（含 support/db.ts 真实临时库）
+tests/                 22 个文件 / 450 个测试（含 support/db.ts 真实临时库）
 scripts/               验收与自检脚本；grant-admin.mjs（指定/撤销管理员）
 docs/                  设计映射、并行分组协议、模块签名契约、验收纪律、环境坑
 ```
@@ -441,7 +443,7 @@ docs/                  设计映射、并行分组协议、模块签名契约、
 
 **可以说的**：
 
-- 这条垂直链路在本机真实跑通了：**418 单测** + HTTP 验收（读 **16/16**、写 **21/21**、上传 **14/14**）
+- 这条垂直链路在本机真实跑通了：**450 单测** + HTTP 验收（读 **16/16**、写 **21/21**、上传 **14/14**）
   + **端到端整条链 22/22**（含**真 worker 进程**把内容从 `pending` 推到 `published`）。
 - **页面上真的能点通**（两轮）：插件页 → 写评测 → 保存 → 提交 → worker 发布 → 公开可读 → 评论（§5.2）；
   后台 → 人工通过 → **入队发布 → worker 发布**、评论回复、作者撤回、`/onboarding` 改昵称（§5.3）。

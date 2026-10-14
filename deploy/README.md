@@ -10,13 +10,14 @@
 | 线上 OAuth App | `dsh-plugin-review-test`（**注意名字里是 test，但它就是线上那个**）；本地那个叫 `dsh-plugin-review-dev` |
 | 回调 | `http://5.231.26.36/api/auth/github/callback` |
 | 首个管理员 | `icelily` / `01a13531-b77f-7162-8c1f-2f796c2ccab1`（GitHub `liceses` / `121547321`） |
-| 数据库 | 目录仍是空库（0 个插件）；实测登录后 `users=1`、`external_identities=1`、`role=admin`；schema 已到 **0006_rate_limiter.sql** |
+| 数据库 | 目录已有 **17 个真实 DSH 插件**（15 个仓库，含 1 个 monorepo 里的两个子插件）；schema 已到 **0007_task_type_plugin_discovery.sql** |
 | 状态 | web + worker 都 active，`enable` 过（重启自动起） |
 | Web 入口 | **`node server.mjs`**（自定义 server）—— 带访问日志；`PORT=80`、`DSH_REVIEW_HOST=0.0.0.0` 由单元里的 `Environment=` 给 |
-| 健康检查 | `GET /api/health` → 200 `status:ok`，`schema_version 0006_rate_limiter.sql`；`?worker=1` 也 200（worker 心跳新鲜） |
+| 健康检查 | `GET /api/health` → 200 `status:ok`，`schema_version 0007_task_type_plugin_discovery.sql`；`?worker=1` 也 200（worker 心跳新鲜） |
 | 可观测性 | 访问日志 `http_request`（状态码/耗时/request_id）、启动自检、worker 心跳、中文错误页与 404 **均已生效** |
-| 插件目录 | 搜索 / 用途标签 / 是否有评测 / 排序 / 分页 / 两种空状态 **已上线**；空库时显示"目录当前为空"与「提交插件」入口 |
-| 请求频控 | 评论变更 **5 次/分/用户**（合并计数）、插件提交检查 **10 次/时/用户**；超限 429 + `retry_after_seconds`；幂等重放不占额度。线上核验：`selfcheck` → `missingTables: []`、`problems: []`、`schemaVersion 0006`，三个页面 200，近 200 行日志 **0 条 error**。**"打满 6 次拿 429"那条 HTTP 验收没在线上跑**：生产关掉了测试登录通道，需要真人登录才能触发（本机 dev 上 12/12）|
+| 插件目录 | 搜索 / 用途标签 / 是否有评测 / 排序 / 分页 / 两种空状态 **已上线**（实测 `?q=dsh` 命中 16/17，搜索真的在工作） |
+| 请求频控 | 评论变更 **5 次/分/用户**（合并计数）、插件提交检查 **10 次/时/用户**；超限 429 + `retry_after_seconds`；幂等重放不占额度。线上核验：`selfcheck` → `missingTables: []`、`problems: []`、`schemaVersion 0007`。**"打满 6 次拿 429"那条 HTTP 验收没在线上跑**：生产关掉了测试登录通道，需要真人登录才能触发（本机 dev 上 12/12）|
+| 自动发现 | 每天一轮（worker 内排程，按天幂等 + 重启自愈），走**系统身份**收录（`operation_records.actor_kind='system'` + `task_id`）；第一波实测收录 9 条、第二波 9 条。**限额现实**：服务器 `.env.local` **没有** `GITHUB_TOKEN`，匿名核心接口只有 **60 次/小时** → 一轮约 9 个插件，撞配额时干净收尾（保住已收录的）。想一次导上百个：在 `.env.local` 加一行只读 `GITHUB_TOKEN=...` 再 `systemctl restart dsh-review-worker`（预算会自动放大到 400 次/轮），见 §环境变量 |
 | 依赖 | 显式声明了 `sharp`（原先只靠 `next` 的可选依赖活着）；删掉了零引用的 `zod` / `drizzle-orm` —— 线上 `npm install` 后确认 `require('sharp')` 在 Linux 上可加载 |
 
 **外部验收（从本机对公网地址发真请求）**：`DSH_ACCEPTANCE_BASE=http://5.231.26.36 node scripts/acceptance-catalog-browse.mjs`
