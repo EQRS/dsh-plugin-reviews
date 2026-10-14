@@ -504,13 +504,69 @@ docs/                  设计映射、并行分组协议、模块签名契约、
 ```cmd
 cd /d "D:\developing\ds民间科研成果展示\插件测评网站"
 npx tsc --noEmit                 REM 期望 exit 0
-npx vitest run                   REM 期望 450 passed / 24 files
+npx vitest run                   REM 期望 465 passed / 25 files
 dev.cmd                          REM 迁移 + 自检 + 起 Web（3100）
 REM 另开窗口：
 set DSH_REVIEW_CONTENT_SCREEN=basic
 dev.cmd worker                   REM 要真正发布内容就需要它
 dev.cmd accept                   REM 读/写/上传/端到端 四段验收（跑之前先停掉常驻 worker）
+npx tsx scripts/acceptance-notifications.mjs   REM 通知/评论编辑删除/后台鉴权（需先起 3100）
 ```
 
 然后：读 §3 挑一件做 —— 要么请主人给 OAuth 密钥把真实登录跑通，
 要么把 §3.2 里某条"未做"补上（后台审核页面 / 修订历史界面 / 搜索 是最顺手的三个）。
+
+---
+
+## 11. 2026-10-14（第二轮）：通知 + 评论编辑/删除 + 配置化 + 后台两组
+
+提交 `364caad`；线上已应用迁移 `0008`，`selfcheck` → `missingTables: []`、`problems: []`，双服务 active。
+
+### 11.1 做了什么
+
+* **迁移 0008 `notifications`**：一条"同一事件不重复"与"自己不通知自己"**都由数据库约束保证**
+  （`UNIQUE(deduplication_key)` + `CHECK (recipient_id <> actor_id)`）。去重键按**评论**不按修订 ——
+  编辑评论换新修订，但那不是新评论，**不再通知一次**。
+* **投递点在 `publishComment` 的事务里**：评论公开那一刻才发；投递失败不会回滚发布（只记 warn）。
+  刻意**没有**建 `business_events` / `event_delivery_tasks`（本切片只要站内一条记录，要加邮件/webhook 时再补）。
+* **评论编辑**：新修订 + 新提交走同套检查（绝不直接替换公开内容）+ 维护 `latest_submitted_revision_id`，
+  并按 `publish-comment.ts` 里写明的约束**同时**加回 `superseded` 检查 —— 只加一边会让所有评论发不出去
+  （那个坑的原文就在被删掉的注释里）。发布后写 `edited_at`（页面显示"已编辑"）。
+* **评论删除**：软删除 + 幂等；**读模型一起改了**（`toView` / `readBody` 不再吐已删正文，
+  有回复保留占位、无回复整条消失、回复计数不含已删除）—— 不改编读模型的话，删除等于没删。
+* **配置化**：`modules/settings` 接上 `site_settings` + `configuration_revisions`（此前零读写的两张表）。
+  默认值只有一个来源（`SETTING_DEFINITIONS`）；只认定义过的键；修改必留修订（完整生效快照 + 变化 + 原因 + 谁改的）；
+  **值与现状相同则不产生修订**（幂等不靠请求键）。已接 4 项：两条频控 + 发现每轮上限 + 每日开关。
+* **后台 1/8 → 3/8 组**：新增「任务与同步」（立即发现按钮 + 最近几轮结果，读 `background_tasks.progress`）
+  与「业务设置」（表单 + 修订记录）。
+
+### 11.2 这一轮新踩的坑（都写进代码注释了）
+
+1. **`limiterFor` 按动作名缓存 limiter** → 上限改成可调之后，管理员把 5 改成 10 仍会命中旧实例（上限还是 5）。
+   缓存键必须带上生效的数值：`动作:points:duration`。
+2. **`isDomainError` 只认真 `DomainError` 实例**（老坑，本轮的 settings 测试又差点踩）。
+3. **通知的外键**：`notifications.comment_id` 指向真实评论，测试里先投递一条不存在的评论会撞 FK。
+4. **路由相对路径层级**：`src/app/api/me/notifications/route.ts` 是 `../../_lib/context`，
+   而 `.../notifications/read/route.ts` 是 `../../../_lib/context` —— 数层级容易数错，照抄同深度既有文件最快。
+5. **`ctx.userId` 是 `string | null`**：要传给频控前必须用 `assertCanWrite(ctx)` 收窄，
+   只判 `isAuthenticated` 过不了类型（而且禁用账户还能读通知）。
+
+### 11.3 验证证据（本轮）
+
+* `npx vitest run` → **465 passed / 25 files**（新增 `tests/notifications-settings.test.ts` 15 条，含
+  "编辑后旧修订必须被判 superseded"、"把上限改成 1 之后只放行一次、放宽到 3 立刻生效"、
+  "越权标不了别人的已读"）。
+* `npx tsc --noEmit` 干净；`npm run build` exit 0。
+* `scripts/acceptance-notifications.mjs` 对**真 HTTP**跑 23 项断言全绿（含 401/403、幂等、越权、删除后列表为空）。
+* **既有四段验收仍然全绿**（改读模型 / 改发布流程后重点复核）：`acceptance-http` 16/16、
+  `acceptance-http-write` 21/21、`acceptance-upload` 14/14、`acceptance-e2e-chain` 22/22。
+* 线上冒烟：`GET /api/me/notifications` 401、`PUT /api/admin/settings` 403、`/admin` 200、
+  `/me/notifications` 307（未登录跳登录）、`/plugins` 200 且目录仍 17 个真插件（无回退）。
+
+### 11.4 仍未做（别当成做了）
+
+* 媒体限额（单张 ≤10MB / 每篇 ≤20 张）与草稿自动保存间隔**仍是模块内常量**；
+* 管理员隐藏评论、举报/纠错、有帮助、收藏、评测搜索与 FTS5、整合包、Awesome 来源合并；
+* 备份（每日 03:00 恢复点）与 HTTPS —— **线上仍是单点、仍是明文 HTTP**，这是当前最大的风险；
+* 后台剩余 5 组（用户管理 / 资料修正 / 存储备份 …）；
+* 服务器加只读 `GITHUB_TOKEN` 提升发现吞吐（主人的决定，未做）。
