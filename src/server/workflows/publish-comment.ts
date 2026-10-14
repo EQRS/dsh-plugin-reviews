@@ -16,10 +16,12 @@
 
 import { withTransaction, type Tx } from '@/server/platform/tx';
 import { nowMs } from '@/server/platform/time';
+import { log } from '@/server/platform/log';
 import type { SqliteDatabase } from '@/server/platform/db';
 import { getDb } from '@/server/platform/db';
 import { err } from '@/packages/common/errors';
 import type { SubmissionState } from '@/packages/common/field-rules';
+import { deliverCommentNotification } from '@/server/modules/notifications';
 
 export type CommentPublishReason =
   | 'submission_not_approved'
@@ -27,7 +29,8 @@ export type CommentPublishReason =
   | 'submission_type_mismatch'
   | 'revision_missing'
   | 'comment_deleted'
-  | 'comment_missing';
+  | 'comment_missing'
+  | 'superseded';
 
 export interface CommentPublishOutcome {
   published: boolean;
@@ -83,12 +86,20 @@ export function publishComment(
     if (!revision) return { published: false, reason: 'revision_missing' as const };
 
     const comment = handle
-      .prepare('SELECT id, deleted_at, published_revision_id FROM comments WHERE id = ?')
+      .prepare(
+        `SELECT id, content_entity_id, author_id, reply_to_comment_id, deleted_at,
+                published_revision_id, latest_submitted_revision_id
+           FROM comments WHERE id = ?`,
+      )
       .get(revision.comment_id) as
       | {
           id: string;
+          content_entity_id: string;
+          author_id: string;
+          reply_to_comment_id: string | null;
           deleted_at: number | null;
           published_revision_id: string | null;
+          latest_submitted_revision_id: string | null;
         }
       | undefined;
     if (!comment) return { published: false, reason: 'comment_missing' as const };
@@ -98,18 +109,15 @@ export function publishComment(
       return { published: false, reason: 'comment_deleted' as const };
     }
 
-    // 注意：这里**没有**评测那样的 `superseded` 资格检查。
-    //
-    // publishReview 会用 `reviews.latest_submitted_revision_id !== revision.id` 挡掉
-    // "被更新的提交取代"的旧快照。评论侧不能照抄：评论的提交路径
-    // （src/server/modules/comments）**从未写过** `comments.latest_submitted_revision_id`，
-    // 该列恒为 NULL。照抄会让检查永远不通过 —— 所有评论都判 superseded、
-    // 一条也发不出去。这是实跑测试立刻暴露出来的（曾经真的写错过一次）。
-    //
-    // 评论当前只有"首次提交即修订"这一条路径（无编辑后再提交），所以
-    // "被取代"这个状态在数据上还不可能出现。**将来若要支持编辑评论**，
-    // 必须先在提交路径里维护 `latest_submitted_revision_id`，再在这里加回检查 ——
-    // 两件事必须同时做，只加检查会重新踩上面这个坑。
+    // 「被更新的提交取代」检查 —— 支持编辑评论之后**才能**加回这一条（原注释里写明的约束）。
+    // 现在 `editComment` 会维护 `latest_submitted_revision_id`，所以旧修订的发布任务
+    // 不会把用户新写的版本覆盖回旧正文。
+    if (comment.latest_submitted_revision_id !== null && comment.latest_submitted_revision_id !== revision.id) {
+      return { published: false, reason: 'superseded' as const };
+    }
+
+    // 这次发布是"首次公开"还是"编辑后替换"：决定要不要写 edited_at（页面据此显示"已编辑"）。
+    const isEdit = comment.published_revision_id !== null;
 
     handle.prepare('UPDATE comments SET published_revision_id = ? WHERE id = ?').run(revision.id, comment.id);
 
@@ -118,6 +126,24 @@ export function publishComment(
     handle
       .prepare('UPDATE comments SET first_published_at = COALESCE(first_published_at, ?) WHERE id = ?')
       .run(now, comment.id);
+
+    // 编辑后替换：记下"最后修改时间"。同样只在首次置位之外单独写，不改动首次语义。
+    if (isEdit) {
+      handle.prepare('UPDATE comments SET edited_at = ? WHERE id = ?').run(now, comment.id);
+    }
+
+    // 站内通知：只在**评论公开的那一刻**投递（`idea.md §11`）。编辑不会重复通知
+    // （去重键按评论而不是修订，见 notifications 模块）。
+    const delivered = deliverCommentNotification(handle, {
+      commentId: comment.id,
+      contentEntityId: comment.content_entity_id,
+      actorId: comment.author_id,
+      replyToCommentId: comment.reply_to_comment_id,
+      now,
+    });
+    if (!delivered.created && delivered.reason !== 'self' && delivered.reason !== 'duplicate') {
+      log.warn('通知未投递', { comment_id: comment.id, reason: delivered.reason });
+    }
 
     handle
       .prepare(`UPDATE content_submissions SET processing_state = 'published', state_version = state_version + 1, updated_at = ? WHERE id = ?`)

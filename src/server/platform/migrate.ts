@@ -149,6 +149,8 @@ export const REQUIRED_TABLES = [
   'runtime_heartbeats',
   // 0006：请求频控的计数表（rate-limiter-flexible 的 SQLite store 用它；不是业务表）
   'rate_limiter_flexible',
+  // 0008：站内通知（新评论通知内容作者、回复通知被回复人）
+  'notifications',
 ] as const;
 
 export function selfCheck(db: SqliteDatabase): SelfCheckResult {

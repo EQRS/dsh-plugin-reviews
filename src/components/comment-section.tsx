@@ -29,6 +29,8 @@ interface CommentView {
   publishedRevisionId: string | null;
   createdAt: number;
   firstPublishedAt: number | null;
+  /** 被编辑并**发布**过的时间（空 = 没改过）；页面据此显示"已编辑"。 */
+  editedAt: number | null;
   deletedAt: number | null;
   replyCount: number;
 }
@@ -62,6 +64,8 @@ function CommentMeta({ comment }: { comment: CommentView }) {
       {comment.firstPublishedAt === null
         ? ' · 尚未公开'
         : ` · ${formatDateTime(comment.firstPublishedAt)}`}
+      {/* 编辑过的评论要留痕（`idea.md §11`：替换后显示"已编辑"） */}
+      {comment.editedAt !== null ? ` · 已编辑 ${formatDateTime(comment.editedAt)}` : ''}
     </div>
   );
 }
@@ -88,6 +92,12 @@ export function CommentSection({ contentId }: { contentId: string }) {
   // 回复相关
   const [expanded, setExpanded] = useState<Record<string, ReplyState>>({});
   const [replyTo, setReplyTo] = useState<{ commentId: string; authorId: string } | null>(null);
+
+  // 编辑相关：一次只编辑一条（同时开两个编辑框只会让人改错）
+  const [editing, setEditing] = useState<{ commentId: string; body: string } | null>(null);
+  // 编辑也用幂等键：失败重试复用，免得重试变成两个修订（同新建评论的道理）
+  const [editKey, setEditKey] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const loadSession = useCallback(async () => {
     try {
@@ -187,9 +197,57 @@ export function CommentSection({ contentId }: { contentId: string }) {
     }
   };
 
+  /** 保存编辑：走 PUT（同套检查，通过后才替换公开内容）。 */
+  const saveEdit = async (commentId: string) => {
+    if (editing === null) return;
+    setBusy(true);
+    setError(null);
+    const requestKey = editKey ?? newRequestKey();
+    setEditKey(requestKey);
+    try {
+      await apiFetch(
+        `/api/content/${encodeURIComponent(contentId)}/comments/${encodeURIComponent(commentId)}`,
+        { method: 'PUT', json: { body: editing.body, requestKey } },
+      );
+      setEditKey(null);
+      setEditing(null);
+      setNotice('修改已提交，正在等待检查；通过后才会替换公开内容。');
+      await loadComments();
+    } catch (e) {
+      setError(e as ApiError);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** 删除自己的评论（软删除；有回复时保留占位）。 */
+  const removeComment = async (commentId: string) => {
+    setBusy(true);
+    setError(null);
+    setDeletingId(commentId);
+    try {
+      const result = await apiFetch<{ deleted: boolean; alreadyDeleted: boolean; hasReplies: boolean }>(
+        `/api/content/${encodeURIComponent(contentId)}/comments/${encodeURIComponent(commentId)}`,
+        { method: 'DELETE' },
+      );
+      setNotice(
+        result.alreadyDeleted
+          ? '这条评论已经删过了。'
+          : result.hasReplies
+            ? '评论已删除；因为下面还有回复，这里会留一个占位。'
+            : '评论已删除。',
+      );
+      await loadComments();
+    } catch (e) {
+      setError(e as ApiError);
+    } finally {
+      setDeletingId(null);
+      setBusy(false);
+    }
+  };
+
   return (
-    <section style={{ marginTop: 32, borderTop: '1px solid #DBE1EA', paddingTop: 16 }}>
-      <h2 style={{ fontSize: 18 }}>评论（{data?.total ?? 0}）</h2>
+    <section style={{ marginTop: 32, borderTop: '1px solid #DBE1EA', paddingTop: 16 }}>      <h2 style={{ fontSize: 18 }}>评论（{data?.total ?? 0}）</h2>
 
       {error ? <ErrorNotice error={error} onDismiss={() => setError(null)} /> : null}
       {notice ? <p style={{ color: '#1E5B32', fontSize: 14 }}>{notice}</p> : null}
@@ -215,7 +273,36 @@ export function CommentSection({ contentId }: { contentId: string }) {
                 }}
               >
                 <CommentMeta comment={c} />
-                <CommentBody comment={c} />
+                {editing?.commentId === c.commentId ? (
+                  <div style={{ marginTop: 6 }}>
+                    <textarea
+                      value={editing.body}
+                      onChange={(e) => setEditing({ commentId: c.commentId, body: e.target.value })}
+                      rows={4}
+                      aria-label="编辑评论正文"
+                      style={{ ...inputStyle, width: '100%' }}
+                    />
+                    <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>
+                      <button type="button" disabled={busy} onClick={() => void saveEdit(c.commentId)} style={buttonStyle}>
+                        保存修改
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          setEditing(null);
+                          setEditKey(null);
+                        }}
+                        style={{ ...buttonStyle, background: '#526174' }}
+                      >
+                        取消
+                      </button>
+                      <span style={{ fontSize: 13, color: '#526174' }}>保存后要过检查，通过才会替换公开内容。</span>
+                    </div>
+                  </div>
+                ) : (
+                  <CommentBody comment={c} />
+                )}
 
                 <div style={{ marginTop: 6, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                   <button
@@ -225,6 +312,26 @@ export function CommentSection({ contentId }: { contentId: string }) {
                   >
                     回复
                   </button>
+                  {/* 只有作者本人看得到编辑/删除；服务端还有一道 ownership 校验兜底 */}
+                  {session?.authenticated && session.userId === c.authorId && c.deletedAt === null ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setEditing({ commentId: c.commentId, body: c.body })}
+                        style={{ background: 'none', border: 'none', color: '#2456B8', cursor: 'pointer', padding: 0, fontSize: 13 }}
+                      >
+                        编辑
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy && deletingId === c.commentId}
+                        onClick={() => void removeComment(c.commentId)}
+                        style={{ background: 'none', border: 'none', color: '#B4232A', cursor: 'pointer', padding: 0, fontSize: 13 }}
+                      >
+                        {deletingId === c.commentId ? '删除中…' : '删除'}
+                      </button>
+                    </>
+                  ) : null}
                   {c.replyCount > 0 ? (
                     <button
                       type="button"

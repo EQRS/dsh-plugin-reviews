@@ -10,6 +10,8 @@ import { getDb } from '@/server/platform/db';
 import { currentContext } from '../api/_lib/context';
 import { isAdmin } from '@/server/platform/context';
 import { AdminDecisionForm } from '@/components/admin-decision-form';
+import { AdminSettingsForm } from '@/components/admin-settings-form';
+import { AdminDiscoveryPanel } from '@/components/admin-discovery-panel';
 import { formatDateTime } from '@/packages/common/time';
 
 export const dynamic = 'force-dynamic';
@@ -113,6 +115,11 @@ export default async function AdminPage() {
       <Link href="/" style={{ color: '#2456B8', fontSize: 14 }}>
         ← 返回首页
       </Link>
+
+      {/* 另外两组：`idea.md §23` 规划 8 组，目前做到 3 组（待办 / 任务与同步 / 业务设置）。
+          顺序按"管理员日常先看什么"排：先看同步有没有跑、再改参数。 */}
+      <AdminDiscoveryPanel />
+      <AdminSettingsForm />
     </div>
   );
 }

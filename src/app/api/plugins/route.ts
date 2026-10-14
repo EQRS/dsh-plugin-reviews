@@ -11,7 +11,8 @@
 
 import { getDb } from '@/server/platform/db';
 import { assertCanWrite } from '@/server/platform/context';
-import { enforceRateLimit, refundQuietly } from '@/server/platform/rate-limit';
+import { enforceRateLimit, refundQuietly, RATE_LIMIT_RULES } from '@/server/platform/rate-limit';
+import { rateLimitOverrideFor } from '@/server/modules/settings';
 import { createCatalogService } from '@/server/modules/catalog';
 import { createGithubCatalogProbe } from '@/server/adapters/catalog/github-probe';
 import { err } from '@/packages/common/errors';
@@ -63,7 +64,13 @@ export async function POST(request: Request): Promise<Response> {
     // 否则超限的用户仍然能让我们替他打满上游额度。
     // assertCanWrite 自己会把匿名/停用账户挡掉（业务层同样会拒，这里是前置，顺便收窄类型）。
     assertCanWrite(ctx);
-    const ticket = await enforceRateLimit(db, 'plugin_submission', ctx.userId);
+    const ticket = await enforceRateLimit(
+      db,
+      'plugin_submission',
+      ctx.userId,
+      1,
+      await rateLimitOverrideFor(db, RATE_LIMIT_RULES.plugin_submission),
+    );
 
     // 真实 GitHub 探针：仓库可访问 + package.json 声明 dsh.bundle + 引用文件存在，三项都过才收录。
     // 探针在事务外调用（better-sqlite3 是同步驱动，事务内出网会长时间持锁）。

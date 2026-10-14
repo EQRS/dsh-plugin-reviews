@@ -19,7 +19,9 @@
 
 import { log } from '@/server/platform/log';
 import { nowMs } from '@/server/platform/time';
+import type { SqliteDatabase } from '@/server/platform/db';
 import { discoveryDailyKey, discoveryBudgetFor, DISCOVERY_DEFAULTS } from '@/server/modules/catalog/discovery';
+import { discoverySettingsFrom } from '@/server/modules/settings';
 import type { TasksService } from '@/server/modules/tasks/service';
 
 /** 排程检查间隔：不必每 tick 都查（一个 SELECT 而已，但也没必要每秒一次）。 */
@@ -61,11 +63,16 @@ export interface EnsureDailyDiscoveryResult {
 
 /**
  * 保证"今天这一天"的发现任务已经排入（幂等；可反复调用）。
+ *
+ * 预算与开关的优先级：**环境变量（硬刹车）> 后台配置 > 按 token 的默认档**。
+ * 硬刹车留给运维（出事时一行 env 就能停），日常调整交给后台配置页。
  */
 export async function ensureDailyDiscoveryTask(deps: {
   tasks: TasksService;
   now?: number;
   env?: ScheduleEnvView;
+  /** 给了就读后台配置（`discovery.daily_enabled` / `discovery.max_plugins_per_run`）。 */
+  db?: SqliteDatabase;
 }): Promise<EnsureDailyDiscoveryResult> {
   const env = deps.env ?? process.env;
   const now = deps.now ?? nowMs();
@@ -74,6 +81,22 @@ export async function ensureDailyDiscoveryTask(deps: {
   const skippedReason = discoveryScheduleSkipReason(env);
   if (skippedReason !== null) {
     return { created: false, taskId: null, deduplicationKey: key, skippedReason };
+  }
+
+  // 后台配置：每日开关 + 每轮上限（取"配置值"与"按 token 的档位"里更小的那个，
+  // 因为配额是硬约束，配置不该把它顶穿）。
+  let maxPluginsCap = Number.POSITIVE_INFINITY;
+  if (deps.db) {
+    const settings = discoverySettingsFrom(deps.db);
+    if (!settings.dailyEnabled) {
+      return {
+        created: false,
+        taskId: null,
+        deduplicationKey: key,
+        skippedReason: '后台配置里「每日自动发现」已关闭（discovery.daily_enabled=false）。',
+      };
+    }
+    maxPluginsCap = settings.maxPluginsPerRun;
   }
 
   const budget = discoveryBudgetFor(env);
@@ -92,7 +115,7 @@ export async function ensureDailyDiscoveryTask(deps: {
       search_pages: budget.searchPages,
       per_page: budget.perPage,
       max_candidates: budget.maxCandidates,
-      max_plugins: budget.maxPlugins,
+      max_plugins: Math.min(budget.maxPlugins, maxPluginsCap),
       max_requests: budget.maxRequests,
     },
     schedulingGroup: DISCOVERY_SCHEDULING_GROUP,

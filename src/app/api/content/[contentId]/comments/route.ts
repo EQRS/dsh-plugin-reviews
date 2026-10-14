@@ -9,7 +9,8 @@
 
 import { getDb } from '@/server/platform/db';
 import { assertCanWrite } from '@/server/platform/context';
-import { enforceRateLimit, refundQuietly } from '@/server/platform/rate-limit';
+import { enforceRateLimit, refundQuietly, RATE_LIMIT_RULES } from '@/server/platform/rate-limit';
+import { rateLimitOverrideFor } from '@/server/modules/settings';
 import { commentsService } from '@/server/modules/comments';
 import { resolveVisibilityInTx } from '@/server/modules/content';
 import { err } from '@/packages/common/errors';
@@ -84,8 +85,15 @@ export async function POST(
 
     // 频控（参数与管理规则.md 第 24 行）：新评论 / 回复 / 正文修改**合并计数**，每分钟 5 次。
     // 本路由是评论唯一的写入入口（回复也走这里，用 replyToCommentId 区分），所以挂一处即可。
+    // 上限可后台调（modules/settings），默认值仍是 5/分。
     assertCanWrite(ctx);
-    const ticket = await enforceRateLimit(db, 'comment_change', ctx.userId);
+    const ticket = await enforceRateLimit(
+      db,
+      'comment_change',
+      ctx.userId,
+      1,
+      await rateLimitOverrideFor(db, RATE_LIMIT_RULES.comment_change),
+    );
 
     try {
       const result = await commentsService.createComment(

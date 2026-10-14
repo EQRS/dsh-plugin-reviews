@@ -30,12 +30,25 @@ export function SessionNav() {
   const [session, setSession] = useState<SessionData | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
+  /** 未读通知数（`idea.md §11`：顶部未读数）。未登录/取失败时保持 null = 不显示角标。 */
+  const [unread, setUnread] = useState<number | null>(null);
 
   const loadSession = useCallback(async () => {
     try {
       const data = await apiFetch<SessionData>('/api/session', { cache: 'no-store' });
       setSession(data);
       setError(null);
+      if (!data.authenticated) {
+        setUnread(null);
+        return;
+      }
+      // 未读数失败不影响登录态展示（角标是锦上添花，不是鉴权信息）。
+      try {
+        const inbox = await apiFetch<{ unreadCount: number }>('/api/me/notifications?limit=1', { cache: 'no-store' });
+        setUnread(inbox.unreadCount);
+      } catch {
+        setUnread(null);
+      }
     } catch (e) {
       setError(e as ApiError);
     }
@@ -101,6 +114,27 @@ export function SessionNav() {
             <span style={{ color: '#526174' }}>正在读取登录状态…</span>
           ) : session.authenticated ? (
             <>
+              <Link
+                href="/me/notifications"
+                style={{ color: '#2456B8', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                通知
+                {unread !== null && unread > 0 ? (
+                  <span
+                    aria-label={`${unread} 条未读通知`}
+                    style={{
+                      background: '#B4232A',
+                      color: '#FFFFFF',
+                      borderRadius: 10,
+                      padding: '1px 7px',
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {unread > 99 ? '99+' : unread}
+                  </span>
+                ) : null}
+              </Link>
               <span style={{ color: '#526174' }}>
                 {session.userId}
                 {session.role === 'admin' ? '（管理员）' : ''}

@@ -94,7 +94,7 @@ export interface RateLimitTicket {
  * 用 WeakMap 而不是模块级单例：测试会建很多临时库，缓存串了会让"每个库各自计数"失效。
  * 也不要在每次请求里 new：那会每次构造都跑一遍库内部的初始化。
  */
-const limiterCache = new WeakMap<SqliteDatabase, Map<RateLimitAction, RateLimiterSQLite>>();
+const limiterCache = new WeakMap<SqliteDatabase, Map<string, RateLimiterSQLite>>();
 
 function limiterFor(db: SqliteDatabase, rule: RateLimitRule): RateLimiterSQLite {
   let byAction = limiterCache.get(db);
@@ -102,7 +102,11 @@ function limiterFor(db: SqliteDatabase, rule: RateLimitRule): RateLimiterSQLite 
     byAction = new Map();
     limiterCache.set(db, byAction);
   }
-  const cached = byAction.get(rule.action);
+  // 缓存键**必须带上生效的数值**：上限现在可以在后台调（见 modules/settings），
+  // 只按动作名缓存的话，管理员把 5 改成 10 之后仍会命中旧 limiter（上限还是 5）——
+  // 那种"改了不生效"最难查。带宽高之后旧实例留着也无害（进程重启即清）。
+  const cacheKey = `${rule.action}:${rule.points}:${rule.durationMs}`;
+  const cached = byAction.get(cacheKey);
   if (cached) return cached;
 
   const limiter = new RateLimiterSQLite({
@@ -119,7 +123,7 @@ function limiterFor(db: SqliteDatabase, rule: RateLimitRule): RateLimiterSQLite 
     // 过期行不清理也不会涨爆 —— 键是"用户 × 动作"，与用户数同阶（见 README 的口径）。
     clearExpiredByTimeout: false,
   });
-  byAction.set(rule.action, limiter);
+  byAction.set(cacheKey, limiter);
   return limiter;
 }
 
@@ -134,6 +138,13 @@ export async function enforceRateLimit(
   action: RateLimitAction,
   userId: string,
   points = 1,
+  /**
+   * 生效值覆盖（来自后台配置，见 modules/settings）。
+   *
+   * 只覆盖**数值**，不覆盖动作名/规格键/文案：否则"这条限流是哪条规格"就说不清了。
+   * 非法数值（非正整数）一律忽略、回落到默认值 —— 配置坏了不该把接口打瘫。
+   */
+  override?: { points?: number; durationMs?: number },
 ): Promise<RateLimitTicket> {
   if (typeof userId !== 'string' || userId.length === 0) {
     // 编程错误：所有挂了频控的动作都要求登录。这里宁可响亮地失败，
@@ -141,7 +152,16 @@ export async function enforceRateLimit(
     throw err.internal('频控需要已确认的登录用户，不应以匿名身份调用。');
   }
 
-  const rule = RATE_LIMIT_RULES[action];
+  const base = RATE_LIMIT_RULES[action];
+  const rule: RateLimitRule = {
+    ...base,
+    ...(typeof override?.points === 'number' && Number.isInteger(override.points) && override.points > 0
+      ? { points: override.points }
+      : {}),
+    ...(typeof override?.durationMs === 'number' && override.durationMs > 0
+      ? { durationMs: override.durationMs }
+      : {}),
+  };
   const limiter = limiterFor(db, rule);
   const key = `${rule.action}:${userId}`;
 
@@ -175,8 +195,18 @@ export async function peekRateLimit(
   db: SqliteDatabase,
   action: RateLimitAction,
   userId: string,
+  override?: { points?: number; durationMs?: number },
 ): Promise<{ consumedPoints: number; remainingPoints: number }> {
-  const rule = RATE_LIMIT_RULES[action];
+  const base = RATE_LIMIT_RULES[action];
+  const rule: RateLimitRule = {
+    ...base,
+    ...(typeof override?.points === 'number' && Number.isInteger(override.points) && override.points > 0
+      ? { points: override.points }
+      : {}),
+    ...(typeof override?.durationMs === 'number' && override.durationMs > 0
+      ? { durationMs: override.durationMs }
+      : {}),
+  };
   const limiter = limiterFor(db, rule);
   const res = await limiter.get(`${rule.action}:${userId}`);
   const consumed = res?.consumedPoints ?? 0;

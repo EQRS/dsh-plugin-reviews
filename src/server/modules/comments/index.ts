@@ -117,6 +117,14 @@ function parseRequestKey(requestKey: string): string {
   return requestKey;
 }
 
+/** 评论标识：与内容标识同一套规范（UUIDv7），格式不对就是输入错误，不做静默兜底。 */
+function parseCommentId(commentId: string): string {
+  if (typeof commentId !== 'string' || !isUuidV7(commentId)) {
+    throw err.input('评论标识格式不正确。', [{ path: 'comment_id', message: '必须是规范 UUIDv7' }]);
+  }
+  return commentId;
+}
+
 function normalizePageRequest(req: PageRequest): PageRequest {
   const page = Number.isInteger(req?.page) && req.page > 0 ? req.page : 1;
   const size = Number.isInteger(req?.page_size) && req.page_size > 0 ? req.page_size : PaginationDefaults.default_page_size;
@@ -128,7 +136,9 @@ function toView(row: CommentRow, body: string, replyCount: number): CommentView 
     commentId: row.id,
     contentEntityId: row.content_entity_id,
     authorId: row.author_id,
-    body,
+    // 已删除的评论**不留正文**（占位靠 deletedAt 非空表达，页面显示"该评论已被作者删除"）。
+    // 这是删除功能的前提：删除只是标记，如果这里照样把 body 读出来，删除等于没删。
+    body: row.deleted_at !== null ? '' : body,
     replyToCommentId: row.reply_to_comment_id,
     rootCommentId: row.root_comment_id,
     publishedRevisionId: row.published_revision_id,
@@ -156,6 +166,8 @@ function readCommentRow(db: SqliteDatabase, commentId: string): CommentRow {
 
 /** 未发布评论没有修订可读；已发布的读**公开修订**，不是最新提交修订。 */
 function readBody(db: SqliteDatabase, row: CommentRow): string {
+  // 已删除：不读任何修订（哪怕它还留着 published_revision_id）。
+  if (row.deleted_at !== null) return '';
   if (row.published_revision_id) {
     const rev = db
       .prepare('SELECT body FROM comment_revisions WHERE id = ? AND comment_id = ?')
@@ -183,8 +195,12 @@ function readBody(db: SqliteDatabase, row: CommentRow): string {
  */
 function countReplies(db: SqliteDatabase, rootCommentId: string): number {
   return (
+    // 已删除的回复不计数：它的正文不展示，计数里带着它会让"回复数"和看得见的条数对不上。
     db
-      .prepare('SELECT count(*) AS c FROM comments WHERE root_comment_id = ? AND published_revision_id IS NOT NULL')
+      .prepare(
+        `SELECT count(*) AS c FROM comments
+          WHERE root_comment_id = ? AND published_revision_id IS NOT NULL AND deleted_at IS NULL`,
+      )
       .get(rootCommentId) as { c: number }
   ).c;
 }
@@ -417,9 +433,185 @@ export const commentsService = {
     };
   },
 
+  /**
+   * 修改自己的评论（`idea.md §11`：同套检查后替换公开内容、页面显示"已编辑"）。
+   *
+   * 三件事必须**一起**做，否则会踩 `publishComment` 里写明的那两个坑：
+   *  1. 新建修订（revision_number = 该评论当前最大 + 1，快照不可变）；
+   *  2. 新建提交走**同一套检查**（绝不直接替换公开内容 —— 改后的正文没查过就上线是漏洞）；
+   *  3. 维护 `comments.latest_submitted_revision_id`，让发布侧能判"旧修订已被新修订取代"。
+   *     只加发布侧的 superseded 检查而不维护这一列，会让**所有**评论永远发不出去（曾经写错过一次）。
+   *
+   * 编辑**不重新发通知**（去重键按评论而不是修订，见 notifications 模块）。
+   */
+  async editComment(
+    ctx: CallerContext,
+    input: { commentId: string; body: string; requestKey: string },
+    injectedDb?: SqliteDatabase,
+  ): Promise<CreateCommentResult & { contentEntityId: string }> {
+    const userId = requireActiveUser(ctx);
+    const commentId = parseCommentId(input.commentId);
+    const body = parseBody(input.body);
+    const requestKey = parseRequestKey(input.requestKey);
+
+    let enqueue: EnqueueFn | null = null;
+    if (injectedDb) {
+      enqueue = await loadEnqueue(injectedDb);
+    } else {
+      const { getDb } = await import('@/server/platform/db');
+      enqueue = await loadEnqueue(getDb());
+    }
+
+    const result = withTransaction((tx) => {
+      const db = tx.db;
+      const comment = readCommentRow(db, commentId);
+
+      // 幂等优先（与新建同构）：同作者同 requestKey 复用既有提交，不新建修订。
+      const existing = db
+        .prepare(
+          `SELECT s.id AS submission_id, s.request_digest AS request_digest,
+                  s.comment_revision_id AS comment_revision_id, rev.comment_id AS comment_id
+             FROM content_submissions s
+             LEFT JOIN comment_revisions rev ON rev.id = s.comment_revision_id
+            WHERE s.submitted_by = ? AND s.request_key = ?`,
+        )
+        .get(userId, requestKey) as
+        | { submission_id: string; request_digest: string; comment_revision_id: string | null; comment_id: string | null }
+        | undefined;
+
+      if (existing) {
+        if (existing.request_digest !== digestCommentEditRequest(commentId, body)) throw err.keyReused();
+        if (!existing.comment_revision_id || !existing.comment_id) {
+          throw err.internal('既有修改提交缺少快照关联。');
+        }
+        return {
+          commentId: existing.comment_id,
+          revisionId: existing.comment_revision_id,
+          submissionId: existing.submission_id,
+          created: false,
+          contentEntityId: comment.content_entity_id,
+        };
+      }
+
+      // 权限与状态（都在事务内重新核验，不依赖调用方此前的判断）
+      if (comment.author_id !== userId) throw err.forbidden('只能修改自己发布的评论。');
+      if (comment.deleted_at !== null) throw err.unavailable('评论已删除，不能再修改。');
+
+      const now = nowMs();
+      const revisionId = newId();
+      const submissionId = newId();
+      const nextNumber =
+        (
+          db
+            .prepare('SELECT COALESCE(MAX(revision_number), 0) AS n FROM comment_revisions WHERE comment_id = ?')
+            .get(commentId) as { n: number }
+        ).n + 1;
+
+      db.prepare(
+        `INSERT INTO comment_revisions (id, comment_id, revision_number, body, submitted_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      ).run(revisionId, commentId, nextNumber, body, now);
+
+      db.prepare(
+        `INSERT INTO content_submissions
+           (id, submitted_by, submission_type, comment_revision_id, request_key, request_digest,
+            processing_state, state_version, publication_context, submitted_at, updated_at)
+         VALUES (?, ?, 'comment_revision', ?, ?, ?, ?, 0, ?, ?, ?)`,
+      ).run(
+        submissionId,
+        userId,
+        revisionId,
+        requestKey,
+        digestCommentEditRequest(commentId, body),
+        COMMENT_SUBMISSION_INITIAL_STATE,
+        JSON.stringify({
+          contentEntityId: comment.content_entity_id,
+          commentId,
+          rootCommentId: comment.root_comment_id,
+          replyToCommentId: comment.reply_to_comment_id,
+          edit: true,
+        }),
+        now,
+        now,
+      );
+
+      // 关键的一列：发布侧的"被更新提交取代"检查靠它（见本方法注释第 3 条）。
+      db.prepare('UPDATE comments SET latest_submitted_revision_id = ? WHERE id = ?').run(revisionId, commentId);
+
+      return {
+        commentId,
+        revisionId,
+        submissionId,
+        created: true,
+        contentEntityId: comment.content_entity_id,
+      };
+    }, injectedDb);
+
+    if (result.created && enqueue) {
+      await enqueue({
+        taskType: 'comment_check',
+        deduplicationKey: `comment_check:${result.submissionId}`,
+        requestedBy: userId,
+        payload: {
+          submissionId: result.submissionId,
+          commentId: result.commentId,
+          contentEntityId: result.contentEntityId,
+        },
+        schedulingGroup: COMMENT_CHECK_SCHEDULING_GROUP,
+        availableAt: nowMs(),
+        tx: undefined,
+      });
+    }
+
+    return result;
+  },
+
+  /**
+   * 删除自己的评论（`idea.md §11`）。
+   *
+   * **软删除**（写 `deleted_at`），不是物理删：讨论串里的回复还引用着它，
+   * 而"有回复保留占位"要求那一层还在（正文由读模型抹掉，见 `toView`/`readBody`）。
+   * 重复删除是幂等的（返回 `alreadyDeleted`），不报错 —— 用户连点两下不该看到失败。
+   */
+  async deleteComment(
+    ctx: CallerContext,
+    input: { commentId: string },
+    injectedDb?: SqliteDatabase,
+  ): Promise<{ deleted: boolean; alreadyDeleted: boolean; hasReplies: boolean }> {
+    const userId = requireActiveUser(ctx);
+    const commentId = parseCommentId(input.commentId);
+
+    return withTransaction((tx) => {
+      const db = tx.db;
+      const comment = readCommentRow(db, commentId);
+      if (comment.author_id !== userId) throw err.forbidden('只能删除自己发布的评论。');
+
+      const hasReplies =
+        (
+          db
+            .prepare(
+              `SELECT count(*) AS c FROM comments
+                WHERE (root_comment_id = ? OR reply_to_comment_id = ?)
+                  AND published_revision_id IS NOT NULL AND deleted_at IS NULL`,
+            )
+            .get(commentId, commentId) as { c: number }
+        ).c > 0;
+
+      if (comment.deleted_at !== null) {
+        return { deleted: false, alreadyDeleted: true, hasReplies };
+      }
+
+      // 条件更新：并发下两个人同时删，只有一个 changes=1，另一个按"已删除"返回。
+      const now = nowMs();
+      const res = db
+        .prepare('UPDATE comments SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL')
+        .run(now, commentId);
+      return { deleted: res.changes === 1, alreadyDeleted: res.changes !== 1, hasReplies };
+    }, injectedDb);
+  },
+
   /** 公开讨论组分页（仅顶层；`reply_to_comment_id IS NULL`）。 */
-  async listRootComments(
-    contentEntityId: string,
+  async listRootComments(    contentEntityId: string,
     req: PageRequest,
     injectedDb?: SqliteDatabase,
   ): Promise<PageResult<CommentView>> {
@@ -429,11 +621,20 @@ export const commentsService = {
       // 公开可见条件（架构第 78.2、79.3 节）：
       //  - 必须已有**当前公开修订**（未公开的新评论不进公开列表）；
       //  - 未隐藏（隐藏的顶层在有合法回复时给中性占位，但本切片不做隐藏态展示，
-      //    一律不返回正文，避免泄露）。
+      //    一律不返回正文，避免泄露）；
+      //  - **已删除的顶层**：有已公开回复的保留占位（讨论串不能凭空缺一层），
+      //    没有回复的整条不出现（删了就该看不见）。
       // 计数与取数使用同一条件，避免 total 与实际条目不一致。
       const VISIBLE = `
         content_entity_id = ? AND reply_to_comment_id IS NULL AND root_comment_id IS NULL
-        AND published_revision_id IS NOT NULL`;
+        AND published_revision_id IS NOT NULL
+        AND (
+          deleted_at IS NULL
+          OR EXISTS (
+            SELECT 1 FROM comments r
+             WHERE r.root_comment_id = comments.id AND r.published_revision_id IS NOT NULL
+          )
+        )`;
 
       const total = (
         db.prepare(`SELECT count(*) AS c FROM comments WHERE ${VISIBLE}`).get(entityId) as { c: number }
@@ -475,10 +676,14 @@ export const commentsService = {
         throw err.unavailable('讨论组不存在或已不可访问。');
       }
 
-      // 回复同样只展示**已公开**项（架构第 79.3 节：未公开回复不进公开列表）。
+      // 回复同样只展示**已公开**项（架构第 79.3 节：未公开回复不进公开列表）；
+      // 已删除的回复一律不展示（回复不可能有下级，没有"保留占位"的必要）。
       const total = (
         db
-          .prepare('SELECT count(*) AS c FROM comments WHERE root_comment_id = ? AND published_revision_id IS NOT NULL')
+          .prepare(
+            `SELECT count(*) AS c FROM comments
+              WHERE root_comment_id = ? AND published_revision_id IS NOT NULL AND deleted_at IS NULL`,
+          )
           .get(rootCommentId) as { c: number }
       ).c;
 
@@ -488,7 +693,7 @@ export const commentsService = {
                   published_revision_id, latest_submitted_revision_id,
                   created_at, first_published_at, edited_at, deleted_at
            FROM comments
-           WHERE root_comment_id = ? AND published_revision_id IS NOT NULL
+           WHERE root_comment_id = ? AND published_revision_id IS NOT NULL AND deleted_at IS NULL
            ORDER BY first_published_at ASC, id ASC
            LIMIT ? OFFSET ?`,
         )
@@ -510,6 +715,16 @@ export function digestCommentRequest(
   replyToCommentId: string | null,
 ): string {
   return digest({ contentEntityId, body, replyToCommentId });
+}
+
+/**
+ * 评论**修改**的请求摘要。
+ *
+ * 与新建分开：新建的摘要基于内容+正文+被回复人；修改还要带上**评论标识**
+ * （同一个人在不同评论下写了同样一句话，是两次不同的提交，不能因摘要相同就判为复用）。
+ */
+export function digestCommentEditRequest(commentId: string, body: string): string {
+  return digest({ operation: 'edit_comment', commentId, body });
 }
 
 export type CommentsService = typeof commentsService;

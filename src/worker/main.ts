@@ -8,7 +8,7 @@
  * 本文件**不依赖网页**：不 import 任何 Next / React 代码，只依赖平台层与任务模块。
  */
 
-import { getDb, closeDb } from '@/server/platform/db';
+import { getDb, closeDb, type SqliteDatabase } from '@/server/platform/db';
 import { nowMs } from '@/server/platform/time';
 import { log } from '@/server/platform/log';
 import { newId } from '@/server/platform/id';
@@ -65,6 +65,11 @@ export interface WorkerOptions {
    * 真实入口显式传 true（并会打日志说明状态）。
    */
   scheduledTasks?: boolean;
+  /**
+   * 排定时任务时读后台配置用的连接（`discovery.daily_enabled` / `discovery.max_plugins_per_run`）。
+   * 不传就只用环境变量与按 token 的默认档 —— 生产入口会传。
+   */
+  settingsDb?: SqliteDatabase;
 }
 
 const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -173,7 +178,7 @@ export function createWorker(options: WorkerOptions) {
     if (options.scheduledTasks === true && now >= nextScheduleCheckAt) {
       nextScheduleCheckAt = now + DISCOVERY_SCHEDULE_CHECK_MS;
       try {
-        const scheduled = await ensureDailyDiscoveryTask({ tasks, now });
+        const scheduled = await ensureDailyDiscoveryTask({ tasks, now, db: options.settingsDb });
         if (scheduled.skippedReason !== null) {
           log.info('未排入自动发现任务', { reason: scheduled.skippedReason });
         }
@@ -267,7 +272,9 @@ export async function main(): Promise<void> {
     shouldContinue: () => running,
     onTick: () => heartbeat.beatNow(),
     // 生产入口打开定时排程（每日插件自动发现）；关掉的方式见 worker/scheduled.ts。
+    // settingsDb 让排程能读后台配置（每日开关 / 每轮上限）。
     scheduledTasks: true,
+    settingsDb: db,
   });
 
   try {
