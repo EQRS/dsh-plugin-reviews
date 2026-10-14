@@ -189,12 +189,23 @@ export function createGithubPluginDiscovery(deps: GithubDiscoveryDeps = {}): Plu
           signal: controller.signal,
         });
         if (res.ok) return res;
-        const retriable = res.status >= 500 || res.status === 429 || res.status === 403;
-        // 限流单独记一笔：服务层要据此**干净收尾**（保住已收录的），而不是把整轮当故障丢重来。
-        if (res.status === 403 || res.status === 429) rateLimited = true;
-        lastReason = res.status === 403 || res.status === 429 ? `被上游限流（HTTP ${res.status}）` : `HTTP ${res.status}`;
-        if (!retriable) {
-          throw err.providerDown(`访问 GitHub 失败：${lastReason}。`);
+
+        if (res.status === 403 || res.status === 429) {
+          const verdict = await classifyNonOk(res);
+          if (verdict.rateLimited) {
+            // 限流单独记一笔：服务层要据此**干净收尾**（保住已收录的），而不是把整轮当故障丢重来。
+            rateLimited = true;
+            lastReason = `被上游限流（${verdict.detail}）`;
+          } else {
+            // 非限流的 403：这个候选不成立（仓库被屏蔽/无权限），**不是整轮故障**。
+            // 用 target_unavailable 而不是 provider_unavailable —— 服务层据此记为跳到下一个候选。
+            throw err.unavailable(`上游拒绝访问该资源：${verdict.detail}`);
+          }
+        } else {
+          lastReason = `HTTP ${res.status}`;
+          if (res.status < 500) {
+            throw err.providerDown(`访问 GitHub 失败：${lastReason}。`);
+          }
         }
       } catch (cause) {
         if (cause instanceof Error && cause.name === 'DomainError') throw cause; // err.* 已是最终结论
@@ -214,6 +225,33 @@ export function createGithubPluginDiscovery(deps: GithubDiscoveryDeps = {}): Plu
     } catch {
       throw err.providerDown('GitHub 返回了无法解析的响应体。');
     }
+  }
+
+  /**
+   * 判断一个非 2xx 响应到底是"配额用尽"还是"这个资源不让看"，并把上游的话带出来。
+   *
+   * 为什么必须分清（真实踩过）：线上发现任务某轮在第 3 个请求就 403 收尾了，
+   * 我一开始把 **任何 403 都当限流** → "一个仓库拒绝访问"会让**整天**的发现中止。
+   * 判据其实很明确：
+   *   * HTTP 429、或 `x-ratelimit-remaining: 0`、或消息含 "rate limit"（含二级限流）→ 配额问题；
+   *   * 其余 403（仓库被屏蔽 / 无权限 / DMCA）→ **只是这个候选不成立**，应记为跳过而不是中止整轮。
+   * 顺带把上游 `message` 原文与剩余配额塞进错误消息：不然排障只能靠猜。
+   */
+  async function classifyNonOk(res: Response): Promise<{ rateLimited: boolean; detail: string }> {
+    const remaining = res.headers.get('x-ratelimit-remaining');
+    let message = '';
+    try {
+      const body = (await res.json()) as { message?: unknown };
+      if (typeof body?.message === 'string') message = body.message.trim();
+    } catch {
+      /* 没有 JSON 体就算了（403 也可能给空体） */
+    }
+    const isRateLimit =
+      res.status === 429 || remaining === '0' || /rate limit/i.test(message) || /secondary rate limit/i.test(message);
+    const parts = [`HTTP ${res.status}`];
+    if (remaining !== null) parts.push(`剩余配额 ${remaining}`);
+    if (message.length > 0) parts.push(message.slice(0, 160));
+    return { rateLimited: isRateLimit, detail: parts.join('，') };
   }
 
   /**
@@ -238,11 +276,18 @@ export function createGithubPluginDiscovery(deps: GithubDiscoveryDeps = {}): Plu
         });
         if (res.ok) return res;
         if (res.status === 404) return null;
-        const retriable = res.status >= 500 || res.status === 429 || res.status === 403;
-        // 限流单独记一笔：服务层要据此**干净收尾**（保住已收录的），而不是把整轮当故障丢重来。
-        if (res.status === 403 || res.status === 429) rateLimited = true;
-        lastReason = res.status === 403 || res.status === 429 ? `被上游限流（HTTP ${res.status}）` : `HTTP ${res.status}`;
-        if (!retriable) throw err.providerDown(`访问 GitHub 失败：${lastReason}。`);
+        if (res.status === 403 || res.status === 429) {
+          const verdict = await classifyNonOk(res);
+          if (verdict.rateLimited) {
+            rateLimited = true;
+            lastReason = `被上游限流（${verdict.detail}）`;
+          } else {
+            throw err.unavailable(`上游拒绝访问该资源：${verdict.detail}`);
+          }
+        } else {
+          lastReason = `HTTP ${res.status}`;
+          if (res.status < 500) throw err.providerDown(`访问 GitHub 失败：${lastReason}。`);
+        }
       } catch (cause) {
         if (cause instanceof Error && cause.name === 'DomainError') throw cause;
         const isAbort = cause instanceof Error && cause.name === 'AbortError';

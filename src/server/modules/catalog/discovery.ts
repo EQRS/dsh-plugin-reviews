@@ -123,6 +123,16 @@ export function discoveryDailyKey(now: number): string {
   return `daily:${formatDate(now).replace(/\//g, '-')}`;
 }
 
+/**
+ * 明显"不是给用户装的插件"的路径（测试夹具 / 示例 / e2e）：发现阶段跳过，并如实记一笔。
+ *
+ * 这是**候选筛选**（启发式），不是收录判定 —— 收录判定只认"声明了 dsh.bundle 且文件在"。
+ * 真实踩过：`vlln/dsh-autofork` 的 `tests/e2e/slow-tool-plugin` 被当成插件收进了线上目录，
+ * 页面上多出一个测试夹具（用户会以为那是能装的插件）。
+ * 根目录（pluginPath === '.'）永不匹配，避免把"仓库本身就是插件"误杀。
+ */
+const NON_SHIPPABLE_PATH = /(^|\/)(tests?|__tests__|fixtures?|__fixtures__|examples?|e2e)(\/|$)/i;
+
 export function createPluginDiscoveryService(deps: {
   db: SqliteDatabase;
   discovery: PluginDiscoveryPort;
@@ -245,6 +255,15 @@ export function createPluginDiscoveryService(deps: {
                 ? `已达单轮收录上限（${maxPlugins} 个）`
                 : `已达单轮上游请求上限（${maxRequests} 次）`;
             break;
+          }
+          // 测试夹具 / 示例不进目录（发现阶段筛选；如实记一笔而不是悄悄丢掉）
+          if (plugin.pluginPath !== '.' && NON_SHIPPABLE_PATH.test(plugin.pluginPath)) {
+            skipped.push({
+              url: plugin.url,
+              code: 'discovery_non_shippable_path',
+              reason: `路径像测试/示例（${plugin.pluginPath}），不作为可安装插件收录`,
+            });
+            continue;
           }
           pluginsFound += 1;
           try {

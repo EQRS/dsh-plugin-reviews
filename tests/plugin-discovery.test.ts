@@ -26,6 +26,7 @@ import { createTasksService } from '@/server/modules/tasks/service';
 import { createHandlers } from '@/worker/handlers';
 import { createCatalogService } from '@/server/modules/catalog/service';
 import { newId } from '@/server/platform/id';
+import { err } from '@/packages/common/errors';
 import type { CatalogProbe } from '@/server/modules/catalog/types';
 
 // ============================================================
@@ -33,7 +34,7 @@ import type { CatalogProbe } from '@/server/modules/catalog/types';
 // ============================================================
 
 /** 造一个可编程的假 fetch：按调用顺序吐出给定响应，并记录所有请求 URL。 */
-function fakeFetch(responses: Array<{ status?: number; json?: unknown; throw?: unknown }>) {
+function fakeFetch(responses: Array<{ status?: number; json?: unknown; throw?: unknown; headers?: Record<string, string> }>) {
   const calls: string[] = [];
   let i = 0;
   const fn = (async (url: string | URL) => {
@@ -42,7 +43,7 @@ function fakeFetch(responses: Array<{ status?: number; json?: unknown; throw?: u
     i += 1;
     if (r?.throw !== undefined) throw r.throw;
     const status = r?.status ?? 200;
-    return new Response(JSON.stringify(r?.json ?? {}), { status });
+    return new Response(JSON.stringify(r?.json ?? {}), { status, headers: r?.headers });
   }) as unknown as typeof globalThis.fetch;
   return { fn, calls, count: () => calls.length };
 }
@@ -132,12 +133,35 @@ describe('发现适配器：搜索', () => {
     expect(count()).toBe(3);
   });
 
-  it('403（GitHub 限流也是 403）会被重试', async () => {
-    const { fn, count } = fakeFetch([{ status: 403, json: {} }, { json: searchBody([repoItem()]) }]);
+  it('403 带限流证据（消息含 rate limit）→ 会被重试', async () => {
+    const { fn, count } = fakeFetch([
+      { status: 403, json: { message: 'You have exceeded a secondary rate limit.' } },
+      { json: searchBody([repoItem()]) },
+    ]);
     const d = createGithubPluginDiscovery({ fetch: fn, env: {}, retries: 2, sleep: async () => {} });
     const found = await d.searchCandidates({ query: 'x' });
     expect(found).toHaveLength(1);
     expect(count()).toBe(2);
+  });
+
+  it('403 **不带**限流证据（仓库被屏蔽）→ 不重试、也不算限流：判为该资源不可用', async () => {
+    const { fn, count } = fakeFetch([
+      { status: 403, json: { message: 'Repository access blocked' }, headers: { 'x-ratelimit-remaining': '57' } },
+    ]);
+    const d = createGithubPluginDiscovery({ fetch: fn, env: {}, retries: 2, sleep: async () => {} });
+    await expect(d.searchCandidates({ query: 'x' })).rejects.toMatchObject({ code: 'target_unavailable' });
+    // 只发一次；而且**不能**被记成"本轮限流"（否则一个仓库会把整天的发现中止掉）
+    expect(count()).toBe(1);
+    expect(d.wasRateLimited()).toBe(false);
+  });
+
+  it('配额真的耗尽（x-ratelimit-remaining: 0）→ 记为限流，供服务层干净收尾', async () => {
+    const { fn } = fakeFetch([
+      { status: 403, json: { message: 'API rate limit exceeded' }, headers: { 'x-ratelimit-remaining': '0' } },
+    ]);
+    const d = createGithubPluginDiscovery({ fetch: fn, env: {}, retries: 0, sleep: async () => {} });
+    await expect(d.searchCandidates({ query: 'x' })).rejects.toMatchObject({ code: 'provider_unavailable' });
+    expect(d.wasRateLimited()).toBe(true);
   });
 });
 
@@ -428,6 +452,60 @@ describe('发现服务：收录与审计', () => {
       probe: stubProbe(),
     });
     await expect(service.run({ runKey: 'k', taskId: null })).rejects.toMatchObject({ code: 'provider_unavailable' });
+  });
+
+  it('测试夹具/示例路径不进目录（线上真踩过：tests/e2e 的夹具被当成插件收了）', async () => {
+    ctx = createTestDb();
+    const db = ctx.db;
+    const service = createPluginDiscoveryService({
+      db,
+      discovery: stubDiscovery({
+        candidates: [candidate('a/b')],
+        plugins: {
+          'a/b': [
+            { pluginPath: '.', url: 'https://github.com/a/b' },
+            { pluginPath: 'tests/e2e/slow-tool-plugin', url: 'https://github.com/a/b/tree/main/tests/e2e/slow-tool-plugin' },
+            { pluginPath: 'examples/demo', url: 'https://github.com/a/b/tree/main/examples/demo' },
+          ],
+        },
+      }),
+      probe: stubProbe(),
+    });
+
+    const summary = await service.run({ runKey: 'k', taskId: null });
+    expect(summary.accepted).toBe(1); // 只收了根目录那个真的
+    expect(summary.skipped.map((s) => s.code)).toEqual([
+      'discovery_non_shippable_path',
+      'discovery_non_shippable_path',
+    ]);
+    expect((db.prepare('SELECT COUNT(*) AS c FROM plugins').get() as { c: number }).c).toBe(1);
+    expect((db.prepare("SELECT plugin_path FROM plugins").get() as { plugin_path: string }).plugin_path).toBe('.');
+  });
+
+  it('非限流的 403（仓库被屏蔽）→ 记为跳过的候选，**不中止整轮**（这是真实踩过的坑）', async () => {
+    ctx = createTestDb();
+    const db = ctx.db;
+    // 第一个候选读取时抛 target_unavailable（模拟"这个仓库不让看"），第二个正常
+    const discovery = stubDiscovery({
+      candidates: [candidate('blocked/repo'), candidate('ok/repo')],
+      plugins: { 'ok/repo': [{ pluginPath: '.', url: 'https://github.com/ok/repo' }] },
+    });
+    const originalFind = discovery.findPlugins.bind(discovery);
+    discovery.findPlugins = async (c) => {
+      if (c.fullName === 'blocked/repo') {
+        // 用**真的** DomainError：isDomainError 认的是类实例，假对象会被当成 unknown
+        throw err.unavailable('上游拒绝访问该资源：HTTP 403，剩余配额 57，Repository access blocked');
+      }
+      return originalFind(c);
+    };
+
+    const summary = await createPluginDiscoveryService({ db, discovery, probe: stubProbe() }).run({
+      runKey: 'k',
+      taskId: null,
+    });
+    expect(summary.accepted).toBe(1);
+    expect(summary.skipped).toHaveLength(1);
+    expect(summary.skipped[0]).toMatchObject({ code: 'target_unavailable' });
   });
 
   it('maxPlugins 到了就停下并如实标 truncated（不假装"本轮就这么多"）', async () => {
