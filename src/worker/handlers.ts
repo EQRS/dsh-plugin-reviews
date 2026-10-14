@@ -40,6 +40,10 @@ import { createModerationService } from '@/server/modules/moderation';
 import { publishReview } from '@/server/workflows/publish-review';
 import { publishComment } from '@/server/workflows/publish-comment';
 import { createTasksService } from '@/server/modules/tasks/service';
+import { createGithubCatalogProbe } from '@/server/adapters/catalog/github-probe';
+import { createGithubPluginDiscovery, type PluginDiscoveryPort } from '@/server/adapters/catalog/github-discovery';
+import type { CatalogProbe } from '@/server/modules/catalog/types';
+import { createPluginDiscoveryService, discoveryDailyKey, DISCOVERY_DEFAULTS } from '@/server/modules/catalog/discovery';
 import type { HandlerResult, TaskHandler } from './main';
 import { basicScreenEnabled, createBasicContentScreen } from './content-screen';
 
@@ -77,6 +81,10 @@ export interface HandlerDeps {
   contentScreenEnabled?: boolean;
   /** 显式注入的筛查函数（测试用；优先级高于 env 开关）。 */
   contentScreen?: (input: { submissionId: string; snapshot: unknown }) => Promise<'pass' | 'violation' | 'inconclusive'>;
+  /** 自动发现的上游适配器（测试注入；默认按环境变量造 GitHub 实现）。 */
+  discovery?: PluginDiscoveryPort;
+  /** 自动发现用的收录探针（测试注入；默认 GitHub 实现）。 */
+  probe?: CatalogProbe;
 }
 
 /** 不可重试：写明确 errorCode 并终结任务（skipped），不浪费重试预算。 */
@@ -263,7 +271,53 @@ function makeCommentPublishHandler(deps: HandlerDeps): TaskHandler {
 }
 
 /**
- * 构造全部四个处理器。
+ * 构造**插件目录自动发现**处理器（任务类型 `plugin_discovery`，迁移 0007 引入）。
+ *
+ * 业务全在 `modules/catalog/discovery.ts`；这里只负责：
+ *  1. 从 payload 取本轮参数（缺省用 DISCOVERY_DEFAULTS，payload 里不许塞任意大的数）；
+ *  2. 造适配器与探针（默认 GitHub 实现；离线闸门由适配器自己抛 not_configured）；
+ *  3. 把**本轮汇总写进任务 progress**（后台页要看得见），并按失败性质给出重试语义。
+ *
+ * 失败语义：
+ *   * `provider_not_configured`（显式离线）→ **skipped**：重试一万次也不会变好；
+ *   * 其余（网络抖动、上游限流、DB busy）→ **error**：交给队列按 30s/120s 重试。
+ */
+function makePluginDiscoveryHandler(deps: HandlerDeps): TaskHandler {
+  return async (task) => {
+    const payload = (task.payload ?? {}) as Record<string, unknown>;
+    const readStr = (v: unknown) => (typeof v === 'string' && v.trim().length > 0 ? v.trim() : undefined);
+    const readNum = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : undefined);
+
+    const runKey = readStr(payload.run_key) ?? discoveryDailyKey(nowMs());
+    const discovery = deps.discovery ?? createGithubPluginDiscovery();
+    const probe = deps.probe ?? createGithubCatalogProbe();
+    const service = createPluginDiscoveryService({ db: deps.db, discovery, probe });
+
+    try {
+      const summary = await service.run({
+        runKey,
+        taskId: task.taskId,
+        query: readStr(payload.query) ?? DISCOVERY_DEFAULTS.query,
+        searchPages: readNum(payload.search_pages),
+        perPage: readNum(payload.per_page),
+        maxCandidates: readNum(payload.max_candidates),
+        maxPlugins: readNum(payload.max_plugins),
+        maxRequests: readNum(payload.max_requests),
+      });
+      return { outcome: 'success', progress: summary };
+    } catch (e) {
+      const code = isDomainError(e) ? e.code : 'discovery_failed';
+      const message = e instanceof Error ? e.message : '自动发现失败。';
+      if (code === 'provider_not_configured') {
+        return terminal('discovery_disabled', message);
+      }
+      return { outcome: 'error', errorCode: code, errorSummary: message };
+    }
+  };
+}
+
+/**
+ * 构造全部处理器。
  *
  * `*_check` 复用 `moderation.runRuleCheck`；不注入筛查时保守落 manual_review。
  */
@@ -273,6 +327,7 @@ export function createHandlers(deps: HandlerDeps): Partial<Record<TaskType, Task
     review_publish: makeReviewPublishHandler(deps),
     comment_check: makeCheckHandler(deps, 'comment_publish'),
     comment_publish: makeCommentPublishHandler(deps),
+    plugin_discovery: makePluginDiscoveryHandler(deps),
   };
 }
 

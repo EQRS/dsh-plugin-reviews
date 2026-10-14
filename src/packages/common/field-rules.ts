@@ -85,7 +85,14 @@ export const AttemptOutcomes = ['success', 'error', 'lease_expired', 'skipped'] 
 export type AttemptOutcome = (typeof AttemptOutcomes)[number];
 
 /** 本切片注册的任务类型。注册集合随迁移版本维护，不能由配置注入新类型。 */
-export const TaskTypes = ['review_check', 'review_publish', 'comment_check', 'comment_publish'] as const;
+export const TaskTypes = [
+  'review_check',
+  'review_publish',
+  'comment_check',
+  'comment_publish',
+  // 0007：插件目录自动发现（系统调度；不占单个用户的提交额度）
+  'plugin_discovery',
+] as const;
 export type TaskType = (typeof TaskTypes)[number];
 
 export const OperationActorKinds = ['user', 'admin', 'system'] as const;

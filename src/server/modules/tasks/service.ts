@@ -60,7 +60,14 @@ export interface TasksService {
   renew(claim: { taskId: string; executionToken: string }, now: number): Promise<boolean>;
   finish(
     claim: { taskId: string; executionToken: string },
-    input: { outcome: 'success' | 'error' | 'skipped'; errorCode?: string; errorSummary?: string; now: number },
+    input: {
+      outcome: 'success' | 'error' | 'skipped';
+      errorCode?: string;
+      errorSummary?: string;
+      /** 结构化结果，写进 `background_tasks.progress`（后台页展示"这一轮干了什么"）。不传则保留原值。 */
+      progress?: unknown;
+      now: number;
+    },
   ): Promise<void>;
   recoverExpired(now: number): Promise<number>;
 }
@@ -367,6 +374,15 @@ export function createTasksService(db: SqliteDatabase): TasksService {
         let errorSummary: string | null = null;
         let nextRetryCycle = live.retry_cycle;
         let nextCycleAttemptCount = live.cycle_attempt_count;
+        // 结构化结果：给了才落盘（COALESCE 保留原值），序列化失败不让它把任务写回也搞挂。
+        let progressJson: string | null = null;
+        if (input.progress !== undefined) {
+          try {
+            progressJson = JSON.stringify(input.progress);
+          } catch {
+            progressJson = null;
+          }
+        }
 
         if (input.outcome === 'success') {
           nextState = 'succeeded';
@@ -407,6 +423,9 @@ export function createTasksService(db: SqliteDatabase): TasksService {
                     execution_token = NULL,
                     last_error_code = ?,
                     last_error_summary = ?,
+                    -- 结构化结果（JSON 列，本来就是给它留的）：不传就保持原值，
+                    -- 让后台页能直接看到"这一轮发现了什么"，而不是只能翻日志。
+                    progress = COALESCE(?, progress),
                     updated_at = ?,
                     finished_at = ?,
                     retry_cycle = ?,
@@ -421,6 +440,7 @@ export function createTasksService(db: SqliteDatabase): TasksService {
             availableAt,
             errorCode,
             errorSummary,
+            progressJson,
             now,
             finishedAt,
             nextRetryCycle,

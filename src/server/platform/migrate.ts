@@ -27,6 +27,27 @@ function ensureRegistry(db: SqliteDatabase): void {
   `);
 }
 
+/**
+ * 迁移文件里声明"本文件自己管事务"的标记（文件头独立一行：`-- dsh:migration-transaction=off`）。
+ *
+ * 为什么需要这个逃生口：SQLite **改不了列上的 CHECK 约束**，只能"重建表"
+ * （新建 → 拷数据 → 删旧 → 改名）。而重建一张被外键引用的表，必须先把 `foreign_keys` 关掉；
+ * 偏偏 **`PRAGMA foreign_keys` 在事务里是空操作** —— 被 `db.transaction()` 包住就永远关不掉。
+ * 所以这类迁移必须自己写：
+ *
+ *     PRAGMA foreign_keys = OFF;
+ *     BEGIN;
+ *     ... 重建 ...
+ *     COMMIT;
+ *     PRAGMA foreign_keys = ON;
+ *
+ * 并在文件头声明本标记；执行器就不替它开事务、也不再包一层。
+ *
+ * ⚠️ 用它的迁移**必须自己保证原子性**（自带 BEGIN/COMMIT）：执行器不再替你回滚，
+ * 中途失败会留下半成品。目前只有 `0007_task_type_plugin_discovery.sql` 用它。
+ */
+const NO_TRANSACTION_MARKER = /^--\s*dsh:migration-transaction=off\s*$/m;
+
 function listMigrationFiles(dir: string): string[] {
   return readdirSync(dir)
     .filter((f) => f.endsWith('.sql'))
@@ -70,11 +91,20 @@ export function migrate(options: {
       continue;
     }
     const sql = readFileSync(join(dir, name), 'utf8');
-    const run = db.transaction(() => {
-      db.exec(sql);
+    const record = () =>
       db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(name, now);
-    });
-    run();
+
+    if (NO_TRANSACTION_MARKER.test(sql)) {
+      // 本文件自带 BEGIN/COMMIT 与 PRAGMA（见 NO_TRANSACTION_MARKER 注释）：
+      // 再包一层事务会让它的 `PRAGMA foreign_keys=OFF` 失效。
+      db.exec(sql);
+      record();
+    } else {
+      db.transaction(() => {
+        db.exec(sql);
+        record();
+      })();
+    }
     applied.push(name);
   }
 

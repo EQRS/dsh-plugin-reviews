@@ -20,6 +20,7 @@ import {
 } from '@/server/platform/heartbeat';
 import type { TaskType } from '@/packages/common/field-rules';
 import { createTasksService } from '@/server/modules/tasks/service';
+import { ensureDailyDiscoveryTask, discoveryScheduleSkipReason, DISCOVERY_SCHEDULE_CHECK_MS } from './scheduled';
 import type { ClaimedTask, TasksService } from '@/server/modules/tasks/service';
 import { createHandlers } from './handlers';
 import { basicScreenEnabled } from './content-screen';
@@ -35,6 +36,8 @@ export interface HandlerResult {
   outcome: 'success' | 'error' | 'skipped';
   errorCode?: string;
   errorSummary?: string;
+  /** 结构化结果，随任务落进 `background_tasks.progress`（后台页据此展示"这一轮做了什么"）。 */
+  progress?: unknown;
 }
 
 export type TaskHandler = (task: ClaimedTask) => Promise<HandlerResult>;
@@ -54,6 +57,14 @@ export interface WorkerOptions {
   tasks?: TasksService;
   /** 每轮循环开头的回调（真实入口用它写运行时心跳；测试可不传）。 */
   onTick?: () => void;
+  /**
+   * 是否在循环里排入**定时任务**（每日插件目录自动发现）。
+   *
+   * 默认 **false**：定时排程是"会自己产生任务"的行为，隐式打开会让
+   * "领一个任务、处理一个任务"的测试与调试场景凭空多出任务。
+   * 真实入口显式传 true（并会打日志说明状态）。
+   */
+  scheduledTasks?: boolean;
 }
 
 const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -65,6 +76,8 @@ export function createWorker(options: WorkerOptions) {
   const sleep = options.sleep ?? realSleep;
   const tasks = options.tasks ?? createTasksService(getDb());
   const maxConcurrent = Math.min(options.maxConcurrent ?? MAX_CONCURRENT_TASKS, MAX_CONCURRENT_TASKS);
+  /** 下一次尝试排入定时任务的时间（0 = 启动后立刻试一次）。 */
+  let nextScheduleCheckAt = 0;
 
   /** 执行单个已领取的任务；内部负责续期与 finish。 */
   async function execute(claim: ClaimedTask): Promise<void> {
@@ -129,6 +142,7 @@ export function createWorker(options: WorkerOptions) {
           outcome: result.outcome,
           errorCode: result.errorCode,
           errorSummary: result.errorSummary,
+          progress: result.progress,
           now: nowMs(),
         },
       );
@@ -147,12 +161,26 @@ export function createWorker(options: WorkerOptions) {
     }
   }
 
-  /** 跑一轮：到期恢复 + 领一批任务并执行。返回本轮执行的任务数。 */
+  /** 跑一轮：到期恢复 + 定时排程（每天一次）+ 领一批任务并执行。返回本轮执行的任务数。 */
   async function runOnce(): Promise<number> {
     options.onTick?.();
     const now = nowMs();
     const recovered = await tasks.recoverExpired(now);
     if (recovered > 0) log.info('回收到期租约', { count: recovered });
+
+    // 定时排程：不必每 tick 都查（间隔见 DISCOVERY_SCHEDULE_CHECK_MS）。
+    // 排程失败**不能**拖垮主循环：记日志后继续跑任务（下一轮还会再试）。
+    if (options.scheduledTasks === true && now >= nextScheduleCheckAt) {
+      nextScheduleCheckAt = now + DISCOVERY_SCHEDULE_CHECK_MS;
+      try {
+        const scheduled = await ensureDailyDiscoveryTask({ tasks, now });
+        if (scheduled.skippedReason !== null) {
+          log.info('未排入自动发现任务', { reason: scheduled.skippedReason });
+        }
+      } catch (e) {
+        log.error('排入自动发现任务失败', { error: e instanceof Error ? e.message : 'unknown' });
+      }
+    }
 
     const claims: ClaimedTask[] = [];
     for (let i = 0; i < maxConcurrent; i += 1) {
@@ -208,6 +236,8 @@ export async function main(): Promise<void> {
     worker_reference: workerReference,
     handler_count: Object.keys(handlers).length,
     content_screen: basicScreenEnabled() ? 'basic' : 'disabled',
+    scheduled_tasks: true,
+    discovery_skip_reason: discoveryScheduleSkipReason(process.env),
   });
 
   let running = true;
@@ -236,6 +266,8 @@ export async function main(): Promise<void> {
     tasks,
     shouldContinue: () => running,
     onTick: () => heartbeat.beatNow(),
+    // 生产入口打开定时排程（每日插件自动发现）；关掉的方式见 worker/scheduled.ts。
+    scheduledTasks: true,
   });
 
   try {

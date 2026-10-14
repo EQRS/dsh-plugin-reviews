@@ -120,94 +120,36 @@ export function buildDirectoryWhere(req: PluginDirectoryQuery): { clause: string
   return { clause, params };
 }
 
-export interface CatalogServiceDeps {
-  /** 显式连接（测试用真实临时库）。省略时回退平台单例。 */
-  db?: SqliteDatabase;
+/**
+ * 收录的**共享实现**（用户路径与系统路径共用同一套检查与入库）。
+ *
+ * 两条路径的差别在这里显式参数化：
+ *   - actor.kind：用户路径 user、自动发现 system；
+ *   - actor.userId：系统路径必须是 null（operation_records 的 CHECK 要求
+ *     actor_kind='system' AND actor_user_id IS NULL）；
+ *   - actor.operationKey：用户路径 = requestKey（有同键重放语义）；系统路径 = 每轮唯一的键
+ *     （发现每轮都该留一条自己的审计；任务层按天去重保证一天只跑一轮）；
+ *   - actor.taskId：系统路径带上触发它的任务，事后能顺着任务查回整轮发现。
+ */
+interface AcceptActor {
+  kind: 'user' | 'system';
+  userId: string | null;
+  operationKey: string;
+  reason: string;
+  taskId: string | null;
 }
 
-interface RepositoryRow {
-  id: string;
-  github_repository_id: string;
-  full_name: string;
-  html_url: string;
-  is_archived: number;
-  availability_state: 'unknown' | 'available' | 'unavailable';
-  last_checked_at: number | null;
-  last_successful_check_at: number | null;
-}
+type ParsedSubmission = { owner: string; repo: string; pluginPath: string };
 
-interface PluginRow {
-  id: string;
-  repository_id: string;
-  plugin_path: string;
-  created_at: number;
-  updated_at: number;
-}
-
-interface OperationRow {
-  target_id: string;
-  changes: string;
-}
-
-export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogService {
-  const db: SqliteDatabase = deps.db ?? getDb();
-
-  /** 读取已存在的回执行；返回其记录的摘要。 */
-  function receiptDigest(operationKey: string): string | null {
-    const row = db
-      .prepare('SELECT target_id, changes FROM operation_records WHERE action_type = ? AND operation_key = ?')
-      .get(ACCEPT_PLUGIN_ACTION, operationKey) as OperationRow | undefined;
-    if (!row) return null;
-    try {
-      const parsed = JSON.parse(row.changes) as { request_digest?: unknown };
-      return typeof parsed.request_digest === 'string' ? parsed.request_digest : null;
-    } catch {
-      return null;
-    }
-  }
-
-  return {
-    parseSubmissionUrl,
-
-    async acceptPluginSubmission(
-      ctx: CallerContextLike,
-      input: AcceptPluginSubmissionInput,
-      probeDeps: { probe: CatalogProbe },
-    ): Promise<AcceptPluginSubmissionResult> {
-      // ---- 前置校验：写操作必须登录且账户正常（DomainError，不是裸 Error）----
-      if (ctx == null || ctx.userId === null) throw err.unauthenticated('收录插件需要先登录。');
-      if (ctx.accountStatus !== 'active') throw err.disabled();
-      if (typeof input.requestKey !== 'string' || input.requestKey.trim().length === 0) {
-        throw err.input('缺少请求标识。', [{ path: 'request_key', message: '必填且不能为纯空白。' }]);
-      }
-      if (probeDeps == null || probeDeps.probe == null) {
-        // 没有探针就无法完成"收录检查"。此时**不能**放行，否则等于关掉收录门槛。
-        throw err.notConfigured('未提供 GitHub 探针，无法完成收录检查。');
-      }
-      const probe = probeDeps.probe;
-
-      const parsed = parseSubmissionUrl(input.url);
-      if ('error' in parsed) {
-        throw err.input(parsed.error, [{ path: 'url', message: parsed.error }]);
-      }
-
-      // ---- 请求去重（第一步）：同键同摘要 → 原结果；同键不同摘要 → 冲突 ----
-      const requestDigest = digest({ url: parsed, operation: ACCEPT_PLUGIN_ACTION });
-      const priorDigest = receiptDigest(input.requestKey);
-      if (priorDigest !== null) {
-        if (priorDigest !== requestDigest) {
-          throw err.keyReused('同一请求标识已被用于另一次收录提交。');
-        }
-        const replay = db
-          .prepare('SELECT target_type, target_id FROM operation_records WHERE action_type = ? AND operation_key = ?')
-          .get(ACCEPT_PLUGIN_ACTION, input.requestKey) as { target_type: string; target_id: string } | undefined;
-        // target_type 形如 'plugin:<repositoryId>'，重放时据此还原原结果。
-        if (replay) {
-          const separator = replay.target_type.indexOf(':');
-          const repositoryId = separator >= 0 ? replay.target_type.slice(separator + 1) : '';
-          return { pluginId: replay.target_id, repositoryId, created: false, replayed: true, status: 'accepted' };
-        }
-      }
+async function runAccept(params: {
+  db: SqliteDatabase;
+  probe: CatalogProbe;
+  url: string;
+  parsed: ParsedSubmission;
+  requestDigest: string;
+  actor: AcceptActor;
+}): Promise<AcceptPluginSubmissionResult> {
+  const { db, probe, url, parsed, requestDigest, actor } = params;
 
       // ---- 收录检查（事务外：网络调用不得占用写事务）----
       // 1) 仓库可访问
@@ -367,25 +309,27 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
           // changes 内保存请求摘要，用于区分同键同摘要与同键不同摘要。
           const already = tx.db
             .prepare('SELECT 1 AS x FROM operation_records WHERE action_type = ? AND operation_key = ?')
-            .get(ACCEPT_PLUGIN_ACTION, input.requestKey) as { x: number } | undefined;
+            .get(ACCEPT_PLUGIN_ACTION, params.actor.operationKey) as { x: number } | undefined;
           if (!already) {
             tx.db
               .prepare(
                 `INSERT INTO operation_records
                    (id, action_type, operation_key, actor_kind, actor_user_id, target_type, target_id,
-                    target_snapshot, changes, reason, created_at)
-                 VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?, ?, ?)`,
+                    target_snapshot, changes, reason, task_id, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               )
               .run(
                 newId(now),
                 ACCEPT_PLUGIN_ACTION,
-                input.requestKey,
-                ctx.userId,
+                params.actor.operationKey,
+                params.actor.kind,
+                params.actor.userId,
                 `plugin:${repositoryId}`,
                 pluginId,
-                JSON.stringify({ url: input.url, owner: parsed.owner, repo: parsed.repo, plugin_path: pluginPath }),
+                JSON.stringify({ url: params.url, owner: parsed.owner, repo: parsed.repo, plugin_path: pluginPath }),
                 JSON.stringify({ request_digest: requestDigest, created, bundle_path: bundlePath }),
-                '用户提交插件收录。',
+                actor.reason,
+                actor.taskId,
                 now,
               );
           }
@@ -394,6 +338,151 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
         },
         db,
       );
+}
+
+export interface CatalogServiceDeps {
+  /** 显式连接（测试用真实临时库）。省略时回退平台单例。 */
+  db?: SqliteDatabase;
+}
+
+interface RepositoryRow {
+  id: string;
+  github_repository_id: string;
+  full_name: string;
+  html_url: string;
+  is_archived: number;
+  availability_state: 'unknown' | 'available' | 'unavailable';
+  last_checked_at: number | null;
+  last_successful_check_at: number | null;
+}
+
+interface PluginRow {
+  id: string;
+  repository_id: string;
+  plugin_path: string;
+  created_at: number;
+  updated_at: number;
+}
+
+interface OperationRow {
+  target_id: string;
+  changes: string;
+}
+
+export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogService {
+  const db: SqliteDatabase = deps.db ?? getDb();
+
+  /** 读取已存在的回执行；返回其记录的摘要。 */
+  function receiptDigest(operationKey: string): string | null {
+    const row = db
+      .prepare('SELECT target_id, changes FROM operation_records WHERE action_type = ? AND operation_key = ?')
+      .get(ACCEPT_PLUGIN_ACTION, operationKey) as OperationRow | undefined;
+    if (!row) return null;
+    try {
+      const parsed = JSON.parse(row.changes) as { request_digest?: unknown };
+      return typeof parsed.request_digest === 'string' ? parsed.request_digest : null;
+    } catch {
+      return null;
+    }
+  }
+
+  return {
+    parseSubmissionUrl,
+
+    async acceptPluginSubmission(
+      ctx: CallerContextLike,
+      input: AcceptPluginSubmissionInput,
+      probeDeps: { probe: CatalogProbe },
+    ): Promise<AcceptPluginSubmissionResult> {
+      // ---- 前置校验：写操作必须登录且账户正常（DomainError，不是裸 Error）----
+      if (ctx == null || ctx.userId === null) throw err.unauthenticated('收录插件需要先登录。');
+      if (ctx.accountStatus !== 'active') throw err.disabled();
+      if (typeof input.requestKey !== "string" || input.requestKey.trim().length === 0) {
+        throw err.input('缺少请求标识。', [{ path: 'request_key', message: '必填且不能为纯空白。' }]);
+      }
+      if (probeDeps == null || probeDeps.probe == null) {
+        // 没有探针就无法完成"收录检查"。此时**不能**放行，否则等于关掉收录门槛。
+        throw err.notConfigured('未提供 GitHub 探针，无法完成收录检查。');
+      }
+
+      const parsed = parseSubmissionUrl(input.url);
+      if ('error' in parsed) {
+        throw err.input(parsed.error, [{ path: 'url', message: parsed.error }]);
+      }
+
+      // ---- 请求去重（第一步）：同键同摘要 → 原结果；同键不同摘要 → 冲突 ----
+      const requestDigest = digest({ url: parsed, operation: ACCEPT_PLUGIN_ACTION });
+      const priorDigest = receiptDigest(input.requestKey);
+      if (priorDigest !== null) {
+        if (priorDigest !== requestDigest) {
+          throw err.keyReused('同一请求标识已被用于另一次收录提交。');
+        }
+        const replay = db
+          .prepare('SELECT target_type, target_id FROM operation_records WHERE action_type = ? AND operation_key = ?')
+          .get(ACCEPT_PLUGIN_ACTION, input.requestKey) as { target_type: string; target_id: string } | undefined;
+        // target_type 形如 'plugin:<repositoryId>'，重放时据此还原原结果。
+        if (replay) {
+          const separator = replay.target_type.indexOf(':');
+          const repositoryId = separator >= 0 ? replay.target_type.slice(separator + 1) : '';
+          return { pluginId: replay.target_id, repositoryId, created: false, replayed: true, status: 'accepted' };
+        }
+      }
+
+      return runAccept({
+        db,
+        probe: probeDeps.probe,
+        url: input.url,
+        parsed,
+        requestDigest,
+        actor: {
+          kind: 'user',
+          userId: ctx.userId,
+          operationKey: input.requestKey,
+          reason: '用户提交插件收录。',
+          taskId: null,
+        },
+      });
+    },
+
+    /**
+     * **系统路径**收录（插件目录自动发现用）。
+     *
+     * 与用户路径共用同一套收录检查与入库（见 runAccept）；差别只在审计与额度：
+     *   - 审计记 actor_kind='system' + actor_user_id=NULL + task_id（数据库 schema 本来就支持）；
+     *   - **不做同键重放**：发现每轮的 operationKey 都不同，靠任务层的按天去重保证一天只跑一轮；
+     *   - **不占单个用户的 10 次/时额度**（参数与管理规则.md 第 29 行：定时发现走系统调度预算）；
+     *   - 只允许在服务端调用（**没有**对应的 HTTP 路由）。
+     */
+    async acceptPluginSubmissionBySystem(
+      input: { url: string; operationKey: string; taskId: string | null; reason?: string },
+      probeDeps: { probe: CatalogProbe },
+    ): Promise<AcceptPluginSubmissionResult> {
+      if (typeof input.operationKey !== "string" || input.operationKey.trim().length === 0) {
+        throw err.input('系统收录需要审计键。', [{ path: 'operation_key', message: '必填且不能为纯空白。' }]);
+      }
+      if (probeDeps == null || probeDeps.probe == null) {
+        throw err.notConfigured('未提供 GitHub 探针，无法完成收录检查。');
+      }
+
+      const parsed = parseSubmissionUrl(input.url);
+      if ('error' in parsed) {
+        throw err.input(parsed.error, [{ path: 'url', message: parsed.error }]);
+      }
+
+      return runAccept({
+        db,
+        probe: probeDeps.probe,
+        url: input.url,
+        parsed,
+        requestDigest: digest({ url: parsed, operation: ACCEPT_PLUGIN_ACTION }),
+        actor: {
+          kind: 'system',
+          userId: null,
+          operationKey: input.operationKey,
+          reason: input.reason ?? '自动发现收录（系统调度）。',
+          taskId: input.taskId,
+        },
+      });
     },
 
     async getPlugin(pluginId: string): Promise<PluginView | null> {

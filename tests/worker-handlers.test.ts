@@ -26,7 +26,7 @@ import {
 import { newId } from '../src/server/platform/id';
 import type { SqliteDatabase } from '../src/server/platform/db';
 import type { CallerContext } from '../src/server/platform/context';
-import type { TaskType } from '../src/packages/common/field-rules';
+import { TaskTypes, type TaskType } from '../src/packages/common/field-rules';
 import { createTasksService, type TasksService } from '../src/server/modules/tasks/service';
 import { submitReview } from '../src/server/workflows/submit-review';
 import { publishComment } from '../src/server/workflows/publish-comment';
@@ -916,14 +916,16 @@ describe('publishComment workflow', () => {
 // ============================================================
 
 describe('handler 注册表', () => {
-  it('四个任务类型都注册了处理器（缺一个链路就断）', () => {
+  it('**每一个**任务类型都注册了处理器（缺一个链路就断，清单不许手工维护）', () => {
     const { db } = setup();
     const handlers = createHandlers({ db });
-    for (const t of ['review_check', 'review_publish', 'comment_check', 'comment_publish'] as const) {
+    // 直接遍历 TaskTypes：加类型时（如 0007 的 plugin_discovery）不用回来改本用例，
+    // 但只要有人忘了写 handler，这里立刻变红。
+    for (const t of TaskTypes) {
       expect(typeof handlers[t], `${t} 未注册`).toBe('function');
       expect(handlers[t]).toBeDefined();
     }
-    expect(Object.keys(handlers)).toHaveLength(4);
+    expect(Object.keys(handlers)).toHaveLength(TaskTypes.length);
   });
 
   it('main() 真的用 createHandlers 装配注册表（读源码，防止退回空 {}）', async () => {

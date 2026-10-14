@@ -137,6 +137,16 @@ export interface CatalogService {
     input: AcceptPluginSubmissionInput,
     deps: { probe: CatalogProbe },
   ): Promise<AcceptPluginSubmissionResult>;
+  /**
+   * **系统路径**收录：插件目录自动发现专用。
+   * 与用户路径共用检查与入库；审计记 actor_kind='system'（actor_user_id 为 NULL）并带上 task_id，
+   * 且**不占**单个用户的提交额度（规格第 29 行：定时发现走系统调度预算）。
+   * 只允许服务端内部调用，**没有**对应 HTTP 路由。
+   */
+  acceptPluginSubmissionBySystem(
+    input: { url: string; operationKey: string; taskId: string | null; reason?: string },
+    deps: { probe: CatalogProbe },
+  ): Promise<AcceptPluginSubmissionResult>;
   getPlugin(pluginId: string): Promise<PluginView | null>;
   listPlugins(req: PluginDirectoryQuery): Promise<PageResult<PluginSummary>>;
   listPluginTags(): Promise<PluginTagSummary[]>;
