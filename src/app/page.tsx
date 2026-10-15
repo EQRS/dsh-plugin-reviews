@@ -1,13 +1,12 @@
 /**
  * 首页（页面布局.md 第 3 节的三块：搜索入口、最新评测、近期更新插件）。
  *
+ * 视觉（本轮）：按参照工作区 `网站\HTML` 的深色语言重排 ——
+ * 英雄区大字展示标题 + 引导句 + 搜索，直接落在深色底上（不套面板）；
+ * 下面仍是「最新评测约 2/3 + 近期更新插件约 1/3」双栏面板（§3 线框图比例）。
+ *
  * 这里**不再**写"搜索、分类与筛选的完整交互见插件目录"这种空话 ——
  * 入口、评测、插件三块都真实渲染；没数据就显示空状态，不塞样例数据。
- *
- * 视觉重排（本轮）：
- *  - 搜索英雄区 + **用途分类 chips**（§3 首块明确要求"用途分类：全部 / 已启用分类……"，
- *    分类链接带 tag 进目录并保留语义，不是装饰）；
- *  - 桌面双栏：最新评测约 2/3、近期更新插件约 1/3（§3 线框图的比例）；手机单列。
  *
  * 文案纪律：验收脚本会断言"最新评测 / 近期更新插件 / 共 N 个条目"等真实字样，
  * 重排时**逐字保留**既有空状态与统计文案；数量口径不动（评测 6、插件 12）。
@@ -76,15 +75,16 @@ export default async function HomePage() {
 
   return (
     <div>
-      {/* 英雄区：搜索 + 分类（§3 首块）。分类为空（还没收录）时整行不渲染，不给"全部 0"的假筛选。 */}
-      <section className="panel" style={{ marginBottom: 'var(--space-6)' }}>
-        <h1 style={{ marginBottom: 4 }}>找 DSH 插件</h1>
-        <p className="muted">
+      {/* 英雄区：大字标题 + 搜索 + 分类（参照站的 home-hero 版式） */}
+      <section className="home-hero">
+        <span className="section-eyebrow">DSH 插件测评</span>
+        <h1 className="home-title">找 DSH 插件</h1>
+        <p className="home-lead">
           本站独立收录插件，<strong>收录 ≠ 已实测可用</strong>。评测由社区与站点分别撰写，公开前都经过人工审核。
         </p>
 
         {/* 搜索入口：GET 到目录页，条件留在 URL 里（目录页负责筛选与分页） */}
-        <form action="/plugins" method="get" className="search">
+        <form action="/plugins" method="get" className="search home-search">
           <input
             type="search"
             name="q"
@@ -96,9 +96,10 @@ export default async function HomePage() {
           </button>
         </form>
 
+        {/* 分类为空（还没收录）时整行不渲染，不给"全部 0"的假筛选 */}
         {tags.length > 0 ? (
-          <div className="filters" role="navigation" aria-label="按用途分类浏览" style={{ margin: '4px 0 0' }}>
-            <span className="group-label">用途分类：</span>
+          <div className="filters" role="navigation" aria-label="按用途分类浏览" style={{ marginBottom: 0 }}>
+            <span className="group-label">用途分类</span>
             <Link href={tagHref(null)} className="active">
               全部
             </Link>
@@ -107,9 +108,7 @@ export default async function HomePage() {
                 {t.tag === UNCLASSIFIED_TAG ? '未分类' : t.tag} <span className="count">{t.pluginCount}</span>
               </Link>
             ))}
-            <Link href="/plugins" style={{ marginLeft: 'auto' }}>
-              更多插件 →
-            </Link>
+            <Link href="/plugins">更多插件 →</Link>
           </div>
         ) : null}
       </section>
@@ -142,7 +141,7 @@ export default async function HomePage() {
                       {pluginLabel(r) === null ? (
                         <span>插件信息不可用</span>
                       ) : (
-                        <Link href={`/plugins/${r.plugin_id}`} className="truncate" style={{ color: 'var(--muted)' }}>
+                        <Link href={`/plugins/${r.plugin_id}`} className="truncate">
                           {pluginLabel(r)}
                         </Link>
                       )}
@@ -187,7 +186,11 @@ export default async function HomePage() {
                         </p>
                         <div className="list-meta">
                           <span>{p.publicReviewCount > 0 ? `${p.publicReviewCount} 篇公开评测` : '暂无评测'}</span>
-                          {p.topics.length > 0 ? <span className="tag" style={{ marginRight: 0 }}>{p.topics[0]}</span> : null}
+                          {p.topics.length > 0 ? (
+                            <span className="tag" style={{ marginRight: 0 }}>
+                              {p.topics[0]}
+                            </span>
+                          ) : null}
                           <span>资料更新 {formatDateTimeOr(p.infoUpdatedAt ?? p.updatedAt, '未知')}</span>
                         </div>
                       </div>

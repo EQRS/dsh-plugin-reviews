@@ -48,12 +48,12 @@ export default async function OnboardingPage({
   if (ctx.userId === null) {
     return (
       <div>
-        <h1 style={{ fontSize: 22 }}>资料确认</h1>
-        <p style={{ color: '#526174' }}>
+        <h1>资料确认</h1>
+        <p className="muted">
           需要先登录。这个页面是 GitHub 登录后给**新用户**做资料确认用的；
           未登录时请先从页面顶部登录。
         </p>
-        <Link href="/" style={{ color: '#2456B8' }}>
+        <Link href="/">
           ← 返回首页
         </Link>
       </div>
@@ -73,15 +73,15 @@ export default async function OnboardingPage({
 
   return (
     <div style={{ maxWidth: 640 }}>
-      <h1 style={{ fontSize: 24, marginBottom: 4 }}>欢迎来到 DSH 插件测评站</h1>
-      <p style={{ color: '#526174', marginTop: 0 }}>
+      <h1>欢迎来到 DSH 插件测评站</h1>
+      <p className="muted" style={{ marginTop: 0 }}>
         你是第一次来这里，先确认一下展示资料。
         {row?.provider_username ? (
           <>
             <br />
             本站通过 GitHub 识别你：
             {row.profile_url ? (
-              <a href={row.profile_url} style={{ color: '#2456B8' }}>
+              <a href={row.profile_url}>
                 {row.provider_username}
               </a>
             ) : (
@@ -91,16 +91,16 @@ export default async function OnboardingPage({
         ) : null}
       </p>
 
-      <div style={{ background: '#FFFFFF', border: '1px solid #DBE1EA', borderRadius: 10, padding: 16, marginTop: 16 }}>
+      <div className="panel" style={{ marginTop: 16 }}>
         <ProfileForm initialNickname={nickname} returnTo={returnTo} />
       </div>
 
-      <p style={{ marginTop: 16, fontSize: 14, color: '#526174' }}>
+      <p className="muted" style={{ marginTop: 16 }}>
         这里可以收录插件、写评测、评论。收录不等于已实测可用；提交的内容要先通过检查才会公开。
       </p>
 
       <p style={{ marginTop: 16 }}>
-        <Link href={returnTo} style={{ color: '#526174' }}>
+        <Link href={returnTo} className="muted">
           ← 返回
         </Link>
       </p>

@@ -1,8 +1,8 @@
 'use client';
 
 /**
- * 导航栏登录态（任务 7 第 1 项）+ 页面布局.md §2 的顶栏结构：
- * 左侧 站名 / 插件 / 评测（整合包还没有页面，不放死链），右侧 通知与账户。
+ * 导航栏登录态（任务 7 第 1 项）+ 参照站页头结构：
+ * 左侧品牌，中部药丸分段导航（当前所在栏目高亮），右侧通知与账户。
  *
  * 状态**全部来自 `GET /api/session`**，不靠假设、也不靠本地猜测：
  *   - `authenticated` 决定显示"登录"还是"账户"；
@@ -13,10 +13,11 @@
  * 登录成功后不整页跳转刷新之外的额外状态同步：直接重取会话，
  * 避免"界面说登录了、服务端其实没会话"这种假状态。
  *
- * 视觉全部走 globals.css 的类名；这里不再出现内联颜色。
+ * 视觉全部走 globals.css；这里不出现硬编码颜色。
  */
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, ErrorNotice, apiFetch, newRequestKey } from './api-client';
 
@@ -30,6 +31,7 @@ interface SessionData {
 }
 
 export function SessionNav() {
+  const pathname = usePathname();
   const [session, setSession] = useState<SessionData | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
@@ -92,15 +94,23 @@ export function SessionNav() {
     }
   };
 
+  const inPlugins = pathname === '/plugins' || pathname.startsWith('/plugins/');
+  const inReviews = pathname === '/reviews' || pathname.startsWith('/reviews/');
+
   return (
     <div>
       <nav className="header-inner" aria-label="全站导航">
         <Link href="/" className="brand">
           DSH Plugin Review
         </Link>
+
         <div className="main-nav">
-          <Link href="/plugins">插件</Link>
-          <Link href="/reviews">评测</Link>
+          <Link href="/plugins" className={inPlugins ? 'active' : ''} aria-current={inPlugins ? 'page' : undefined}>
+            插件
+          </Link>
+          <Link href="/reviews" className={inReviews ? 'active' : ''} aria-current={inReviews ? 'page' : undefined}>
+            评测
+          </Link>
         </div>
 
         <div className="account">
@@ -110,7 +120,7 @@ export function SessionNav() {
             <>
               <Link
                 href="/me/notifications"
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600 }}
               >
                 通知
                 {unread !== null && unread > 0 ? (

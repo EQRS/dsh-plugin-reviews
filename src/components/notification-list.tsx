@@ -82,8 +82,8 @@ export function NotificationList() {
     <div>
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
         <h1 style={{ fontSize: 22, margin: 0 }}>通知</h1>
-        {data !== null ? <span style={{ color: '#526174' }}>未读 {data.unreadCount} 条</span> : null}
-        <label style={{ display: 'flex', gap: 6, alignItems: 'center', color: '#526174', fontSize: 14 }}>
+        {data !== null ? <span className="muted">未读 {data.unreadCount} 条</span> : null}
+        <label className="muted" style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 14 }}>
           <input type="checkbox" checked={onlyUnread} onChange={(e) => setOnlyUnread(e.target.checked)} />
           只看未读
         </label>
@@ -91,14 +91,9 @@ export function NotificationList() {
           type="button"
           onClick={() => void markAllRead()}
           disabled={busy || data === null || data.unreadCount === 0}
+          className="button"
           style={{
             marginLeft: 'auto',
-            background: '#FFFFFF',
-            border: '1px solid #2456B8',
-            color: '#2456B8',
-            borderRadius: 6,
-            padding: '6px 12px',
-            cursor: 'pointer',
           }}
         >
           全部标为已读
@@ -108,47 +103,34 @@ export function NotificationList() {
       {error ? <ErrorNotice error={error} onDismiss={() => setError(null)} /> : null}
 
       {data === null ? (
-        <p style={{ color: '#526174' }}>正在读取通知…</p>
+        <p className="muted">正在读取通知…</p>
       ) : data.items.length === 0 ? (
-        <p style={{ color: '#526174' }}>{onlyUnread ? '没有未读通知。' : '还没有通知。'}</p>
+        <p className="muted">{onlyUnread ? '没有未读通知。' : '还没有通知。'}</p>
       ) : (
-        <ul style={{ listStyle: 'none', padding: 0 }}>
+        <ul className="item-list">
           {data.items.map((n) => (
             <li
               key={n.id}
-              style={{
-                background: n.readAt === null ? '#FFFFFF' : '#F3F5F8',
-                border: '1px solid #DBE1EA',
-                borderLeft: n.readAt === null ? '3px solid #2456B8' : '3px solid #DBE1EA',
-                borderRadius: 8,
-                padding: 12,
-                marginBottom: 10,
-              }}
+              /* 未读=强调色左边框 + 淡底；已读=静默态（设计系统的 .notice.quiet） */
+              className={n.readAt === null ? 'notice' : 'notice quiet'}
+              style={{ marginBottom: 10 }}
             >
               <div style={{ fontSize: 14 }}>
                 <strong>{n.actorNickname}</strong>
                 {n.kind === 'reply_to_comment' ? ' 回复了你的评论' : ' 评论了你的内容'}
-                <span style={{ color: '#526174' }}>
+                <span className="muted">
                   {' · '}
                   {formatDateTime(n.createdAt)}
                   {n.readAt === null ? '' : '（已读）'}
                 </span>
               </div>
-              <div style={{ marginTop: 6, color: '#1E293B', whiteSpace: 'pre-wrap' }}>{n.excerpt}</div>
-              <div style={{ marginTop: 6, display: 'flex', gap: 12 }}>
-                <Link
-                  href={`/reviews/${n.contentEntityId}`}
-                  style={{ color: '#2456B8', fontSize: 13, textDecoration: 'none' }}
-                >
+              <div style={{ marginTop: 6, color: 'var(--ink)', whiteSpace: 'pre-wrap' }}>{n.excerpt}</div>
+              <div style={{ marginTop: 6, display: 'flex', gap: 12, alignItems: 'center' }}>
+                <Link href={`/reviews/${n.contentEntityId}`} className="link-btn">
                   去看这条内容
                 </Link>
                 {n.readAt === null ? (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void markOne(n.id)}
-                    style={{ background: 'none', border: 'none', color: '#526174', cursor: 'pointer', padding: 0, fontSize: 13 }}
-                  >
+                  <button type="button" disabled={busy} onClick={() => void markOne(n.id)} className="link-btn muted">
                     标为已读
                   </button>
                 ) : null}

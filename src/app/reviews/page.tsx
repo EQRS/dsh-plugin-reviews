@@ -33,28 +33,33 @@ export default function ReviewsPage() {
 
   return (
     <div>
-      <h1 style={{ fontSize: 24 }}>评测</h1>
-      <p style={{ color: '#526174' }}>共 {reviews.length} 篇公开评测</p>
-      {reviews.length === 0 ? (
-        <p style={{ color: '#526174' }}>暂无公开评测。</p>
-      ) : (
-        <ul style={{ listStyle: 'none', padding: 0 }}>
-          {reviews.map((r) => (
-            <li
-              key={r.review_id}
-              style={{ background: '#FFFFFF', border: '1px solid #DBE1EA', borderRadius: 10, padding: 12, marginBottom: 8 }}
-            >
-              <Link href={`/reviews/${r.review_id}`} style={{ color: '#2456B8', fontWeight: 600 }}>
-                {r.title}
-              </Link>
-              <div style={{ color: '#526174', fontSize: 14 }}>
-                {r.source_kind === 'site' ? '站点评测' : '社区评测'} · {r.author_nickname} ·{' '}
-                {r.public_updated_at === null ? '时间未知' : formatDateTime(r.public_updated_at)}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+      <h1>评测</h1>
+      <p className="muted">共 {reviews.length} 篇公开评测</p>
+      <div className="panel">
+        {reviews.length === 0 ? (
+          <p className="empty" style={{ marginBottom: 0 }}>
+            暂无公开评测。
+          </p>
+        ) : (
+          <ul className="item-list">
+            {reviews.map((r) => (
+              <li key={r.review_id} className="item">
+                <div className="item-body">
+                  <h3>
+                    <Link href={`/reviews/${r.review_id}`}>
+                      {r.title}
+                    </Link>
+                  </h3>
+                  <div className="list-meta">
+                    {r.source_kind === 'site' ? '站点评测' : '社区评测'} · {r.author_nickname} ·{' '}
+                    {r.public_updated_at === null ? '时间未知' : formatDateTime(r.public_updated_at)}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

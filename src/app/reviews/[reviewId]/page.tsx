@@ -44,11 +44,11 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ r
   if (!vis.publiclyVisible) {
     return (
       <div>
-        <h1 style={{ fontSize: 22 }}>该评测当前不可查看</h1>
-        <p style={{ color: '#526174' }}>
+        <h1>该评测当前不可查看</h1>
+        <p className="muted">
           {vis.withdrawn ? '作者已撤回这篇评测。' : vis.hidden ? '这篇评测已被隐藏。' : '这篇评测尚未发布。'}
         </p>
-        <Link href="/reviews" style={{ color: '#2456B8' }}>
+        <Link href="/reviews">
           ← 返回评测列表
         </Link>
       </div>
@@ -77,17 +77,13 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ r
   const safeBodyHtml = renderMarkdownToSafeHtml(row.body_markdown);
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 280px', gap: 24 }}>
-      <article style={{ background: '#FFFFFF', border: '1px solid #DBE1EA', borderRadius: 10, padding: 20 }}>
-        <h1 style={{ fontSize: 26, marginTop: 0 }}>{row.title}</h1>
-        <p style={{ color: '#526174', fontSize: 14, marginTop: 0 }}>
+    <div className="twocol read-layout">
+      <article className="panel">
+        <h1 style={{ marginBottom: 8 }}>{row.title}</h1>
+        <p className="muted" style={{ marginTop: 0 }}>
           <span
-            style={{
-              background: row.source_kind === 'site' ? '#EEF3FF' : '#F3F5F8',
-              borderRadius: 4,
-              padding: '1px 6px',
-              marginRight: 8,
-            }}
+            className={row.source_kind === 'site' ? 'tag site' : 'tag'}
+            style={{ marginRight: 8 }}
           >
             {row.source_kind === 'site' ? '站点评测' : '社区评测'}
           </span>
@@ -112,9 +108,9 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ r
       </article>
 
       <aside>
-        <div style={{ background: '#FFFFFF', border: '1px solid #DBE1EA', borderRadius: 10, padding: 16 }}>
-          <h2 style={{ fontSize: 16, marginTop: 0 }}>结构化版本</h2>
-          <p style={{ fontSize: 14, color: '#526174' }}>
+        <div className="panel">
+          <h2 style={{ marginBottom: 8 }}>结构化版本</h2>
+          <p className="muted">
             被测插件版本：{formatVersionLabel('插件', pluginVersion)}
             <br />
             被测 DSH 版本：{formatVersionLabel('DSH', dshVersion)}
@@ -125,9 +121,9 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ r
             最近更新：
             {row.public_updated_at === null ? '未知' : formatDateTime(row.public_updated_at)}
           </p>
-          <p style={{ fontSize: 13, color: '#526174' }}>版本标签只表示作者记录的被测对象，不是兼容性承诺。</p>
+          <p style={{ fontSize: 13, color: 'var(--muted)' }}>版本标签只表示作者记录的被测对象，不是兼容性承诺。</p>
           {row.plugin_id ? (
-            <Link href={`/plugins/${row.plugin_id}`} style={{ color: '#2456B8', fontSize: 14 }}>
+            <Link href={`/plugins/${row.plugin_id}`} style={{ fontSize: 14 }}>
               ← 返回插件页
             </Link>
           ) : null}
@@ -138,16 +134,8 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ r
           这里隐藏按钮只是不摆一个点了也没用的入口，不是权限判断。
         */}
         {ctx.userId !== null && ctx.userId === row.author_id ? (
-          <div
-            style={{
-              background: '#FFFFFF',
-              border: '1px solid #DBE1EA',
-              borderRadius: 10,
-              padding: 16,
-              marginTop: 12,
-            }}
-          >
-            <h2 style={{ fontSize: 16, marginTop: 0 }}>作者操作</h2>
+          <div className="panel" style={{ marginTop: 12 }}>
+            <h2 style={{ marginBottom: 8 }}>作者操作</h2>
             <WithdrawButton reviewId={row.review_id} expectedControlVersion={vis.controlVersion} />
           </div>
         ) : null}

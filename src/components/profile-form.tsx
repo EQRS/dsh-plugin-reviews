@@ -14,7 +14,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ApiError, ErrorNotice, apiFetch, buttonStyle, inputStyle, newRequestKey } from './api-client';
+import { ApiError, ErrorNotice, apiFetch, newRequestKey } from './api-client';
 
 export function ProfileForm({ initialNickname, returnTo }: { initialNickname: string; returnTo: string }) {
   const router = useRouter();
@@ -53,7 +53,7 @@ export function ProfileForm({ initialNickname, returnTo }: { initialNickname: st
 
   return (
     <form onSubmit={save} style={{ marginTop: 12 }}>
-      <label htmlFor="nickname" style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}>
+      <label htmlFor="nickname">
         展示昵称
       </label>
       <input
@@ -62,19 +62,19 @@ export function ProfileForm({ initialNickname, returnTo }: { initialNickname: st
         value={nickname}
         onChange={(e) => setNickname(e.target.value)}
         placeholder="例如：阿猫"
-        style={inputStyle}
+        style={{ width: '100%' }}
       />
-      <p style={{ color: '#526174', fontSize: 13 }}>
+      <p className="muted" style={{ fontSize: 13 }}>
         这是你在这里唯一的公开身份：评测与评论的署名都用它。之后可以在「我的」页面再改。
       </p>
 
       {error ? <ErrorNotice error={error} onDismiss={() => setError(null)} /> : null}
 
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
-        <button type="submit" disabled={busy} style={buttonStyle}>
+        <button type="submit" disabled={busy} className="button primary">
           {busy ? '保存中…' : '保存并进入网站'}
         </button>
-        <a href={returnTo} style={{ color: '#2456B8', fontSize: 14 }}>
+        <a href={returnTo} style={{ fontSize: 14 }}>
           跳过，直接进入
         </a>
       </div>

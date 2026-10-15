@@ -17,7 +17,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { ApiError, ErrorNotice, apiFetch, buttonStyle, inputStyle, newRequestKey } from './api-client';
+import { ApiError, ErrorNotice, apiFetch, inputStyle, newRequestKey } from './api-client';
 import { formatDateTime } from '@/packages/common/time';
 
 interface CommentView {
@@ -59,7 +59,7 @@ type ReplyState = { items: CommentView[]; total: number } | null;
 /** 单条评论的时间与署名行（顶层与回复共用，避免两处格式漂移）。 */
 function CommentMeta({ comment }: { comment: CommentView }) {
   return (
-    <div style={{ fontSize: 13, color: '#526174' }}>
+    <div className="muted" style={{ fontSize: 13 }}>
       {comment.authorId}
       {comment.firstPublishedAt === null
         ? ' · 尚未公开'
@@ -71,9 +71,9 @@ function CommentMeta({ comment }: { comment: CommentView }) {
 }
 
 function CommentBody({ comment }: { comment: CommentView }) {
-  if (comment.deletedAt !== null) return <div style={{ color: '#526174' }}>该评论已删除</div>;
+  if (comment.deletedAt !== null) return <div className="muted">该评论已删除</div>;
   if (comment.publishedRevisionId === null) {
-    return <div style={{ color: '#526174' }}>该评论尚未公开</div>;
+    return <div className="muted">该评论尚未公开</div>;
   }
   return <div style={{ whiteSpace: 'pre-wrap' }}>{comment.body}</div>;
 }
@@ -247,15 +247,18 @@ export function CommentSection({ contentId }: { contentId: string }) {
   };
 
   return (
-    <section style={{ marginTop: 32, borderTop: '1px solid #DBE1EA', paddingTop: 16 }}>      <h2 style={{ fontSize: 18 }}>评论（{data?.total ?? 0}）</h2>
+    <section style={{ marginTop: 32, borderTop: '1px solid var(--line)', paddingTop: 16 }}>
+      <div className="section-head" style={{ marginBottom: 8 }}>
+        <h2 style={{ fontSize: 18 }}>评论（{data?.total ?? 0}）</h2>
+      </div>
 
       {error ? <ErrorNotice error={error} onDismiss={() => setError(null)} /> : null}
-      {notice ? <p style={{ color: '#1E5B32', fontSize: 14 }}>{notice}</p> : null}
+      {notice ? <p className="muted" style={{ fontSize: 14 }}>{notice}</p> : null}
 
       {data === null ? (
-        <p style={{ color: '#526174' }}>正在读取评论…</p>
+        <p className="muted">正在读取评论…</p>
       ) : data.items.length === 0 ? (
-        <p style={{ color: '#526174' }}>还没有评论。</p>
+        <p className="muted">还没有评论。</p>
       ) : (
         <ul style={{ listStyle: 'none', padding: 0 }}>
           {data.items.map((c) => {
@@ -264,11 +267,9 @@ export function CommentSection({ contentId }: { contentId: string }) {
             return (
               <li
                 key={c.commentId}
+                className="panel"
                 style={{
                   marginBottom: 12,
-                  background: '#FFFFFF',
-                  border: '1px solid #DBE1EA',
-                  borderRadius: 8,
                   padding: 12,
                 }}
               >
@@ -283,7 +284,7 @@ export function CommentSection({ contentId }: { contentId: string }) {
                       style={{ ...inputStyle, width: '100%' }}
                     />
                     <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>
-                      <button type="button" disabled={busy} onClick={() => void saveEdit(c.commentId)} style={buttonStyle}>
+                      <button type="button" disabled={busy} onClick={() => void saveEdit(c.commentId)} className="button primary">
                         保存修改
                       </button>
                       <button
@@ -293,11 +294,12 @@ export function CommentSection({ contentId }: { contentId: string }) {
                           setEditing(null);
                           setEditKey(null);
                         }}
-                        style={{ ...buttonStyle, background: '#526174' }}
+                        className="button"
+                        style={{ background: 'var(--surface-hover)', color: 'var(--ink)' }}
                       >
                         取消
                       </button>
-                      <span style={{ fontSize: 13, color: '#526174' }}>保存后要过检查，通过才会替换公开内容。</span>
+                      <span className="muted" style={{ fontSize: 13 }}>保存后要过检查，通过才会替换公开内容。</span>
                     </div>
                   </div>
                 ) : (
@@ -308,7 +310,7 @@ export function CommentSection({ contentId }: { contentId: string }) {
                   <button
                     type="button"
                     onClick={() => setReplyTo({ commentId: c.commentId, authorId: c.authorId })}
-                    style={{ background: 'none', border: 'none', color: '#2456B8', cursor: 'pointer', padding: 0, fontSize: 13 }}
+                    className="link-btn"
                   >
                     回复
                   </button>
@@ -318,7 +320,7 @@ export function CommentSection({ contentId }: { contentId: string }) {
                       <button
                         type="button"
                         onClick={() => setEditing({ commentId: c.commentId, body: c.body })}
-                        style={{ background: 'none', border: 'none', color: '#2456B8', cursor: 'pointer', padding: 0, fontSize: 13 }}
+                        className="link-btn"
                       >
                         编辑
                       </button>
@@ -326,7 +328,7 @@ export function CommentSection({ contentId }: { contentId: string }) {
                         type="button"
                         disabled={busy && deletingId === c.commentId}
                         onClick={() => void removeComment(c.commentId)}
-                        style={{ background: 'none', border: 'none', color: '#B4232A', cursor: 'pointer', padding: 0, fontSize: 13 }}
+                        className="link-btn danger"
                       >
                         {deletingId === c.commentId ? '删除中…' : '删除'}
                       </button>
@@ -336,7 +338,7 @@ export function CommentSection({ contentId }: { contentId: string }) {
                     <button
                       type="button"
                       onClick={() => toggleReplies(c.commentId)}
-                      style={{ background: 'none', border: 'none', color: '#2456B8', cursor: 'pointer', padding: 0, fontSize: 13 }}
+                      className="link-btn"
                     >
                       {isOpen ? '收起回复' : `查看 ${c.replyCount} 条回复`}
                     </button>
@@ -345,9 +347,9 @@ export function CommentSection({ contentId }: { contentId: string }) {
 
                 {isOpen ? (
                   group === null ? (
-                    <p style={{ color: '#526174', fontSize: 13 }}>正在读取回复…</p>
+                    <p className="muted" style={{ fontSize: 13 }}>正在读取回复…</p>
                   ) : (
-                    <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0 0', borderLeft: '2px solid #DBE1EA' }}>
+                    <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0 0', borderLeft: '2px solid var(--line)' }}>
                       {group.items.map((r) => (
                         <li key={r.commentId} style={{ marginBottom: 8, paddingLeft: 10 }}>
                           <CommentMeta comment={r} />
@@ -355,7 +357,7 @@ export function CommentSection({ contentId }: { contentId: string }) {
                         </li>
                       ))}
                       {group.total > group.items.length ? (
-                        <li style={{ paddingLeft: 10, fontSize: 13, color: '#526174' }}>
+                        <li className="muted" style={{ paddingLeft: 10, fontSize: 13 }}>
                           （还有 {group.total - group.items.length} 条回复未显示）
                         </li>
                       ) : null}
@@ -369,23 +371,23 @@ export function CommentSection({ contentId }: { contentId: string }) {
       )}
 
       {data && data.total_pages > 1 ? (
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+        <div className="pagination" style={{ marginBottom: 12 }}>
           <button
             type="button"
             disabled={!data.has_previous}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
-            style={{ background: 'none', border: '1px solid #DBE1EA', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}
+            className="button"
           >
             上一页
           </button>
-          <span style={{ fontSize: 14, color: '#526174' }}>
+          <span className="muted" style={{ fontSize: 14 }}>
             第 {data.page} / {data.total_pages} 页
           </span>
           <button
             type="button"
             disabled={!data.has_next}
             onClick={() => setPage((p) => p + 1)}
-            style={{ background: 'none', border: '1px solid #DBE1EA', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}
+            className="button"
           >
             下一页
           </button>
@@ -393,16 +395,13 @@ export function CommentSection({ contentId }: { contentId: string }) {
       ) : null}
 
       {session === null ? (
-        <p style={{ color: '#526174', fontSize: 14 }}>正在读取登录状态…</p>
+        <p className="muted" style={{ fontSize: 14 }}>正在读取登录状态…</p>
       ) : session.authenticated ? (
         <form onSubmit={submit}>
           {replyTo ? (
             <div
+              className="notice"
               style={{
-                background: '#EEF3FF',
-                border: '1px solid #C6D6F5',
-                borderRadius: 6,
-                padding: '6px 10px',
                 fontSize: 13,
                 marginBottom: 6,
               }}
@@ -411,7 +410,8 @@ export function CommentSection({ contentId }: { contentId: string }) {
               <button
                 type="button"
                 onClick={() => setReplyTo(null)}
-                style={{ marginLeft: 8, background: 'none', border: 'none', color: '#2456B8', cursor: 'pointer', padding: 0 }}
+                className="link-btn"
+                style={{ marginLeft: 8 }}
               >
                 取消
               </button>
@@ -430,19 +430,19 @@ export function CommentSection({ contentId }: { contentId: string }) {
             required
           />
           <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button type="submit" disabled={busy || body.trim() === ''} style={buttonStyle}>
+            <button type="submit" disabled={busy || body.trim() === ''} className="button primary">
               {busy ? '提交中…' : pendingKey ? '重试提交' : replyTo ? '发表回复' : '发表评论'}
             </button>
-            <span style={{ color: '#526174', fontSize: 13 }}>提交后需通过检查才会公开显示。</span>
+            <span className="muted" style={{ fontSize: 13 }}>提交后需通过检查才会公开显示。</span>
           </div>
         </form>
       ) : (
-        <p style={{ color: '#526174', fontSize: 14 }}>
+        <p className="muted" style={{ fontSize: 14 }}>
           登录后才能评论。
           {session.githubLoginConfigured ? (
             <>
               {' '}
-              <a href="/api/auth/github/start" style={{ color: '#2456B8' }}>
+              <a href="/api/auth/github/start" style={{ color: 'var(--accent)' }}>
                 用 GitHub 登录
               </a>
             </>

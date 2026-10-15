@@ -14,7 +14,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ApiError, ErrorNotice, apiFetch, buttonStyle, newRequestKey } from './api-client';
+import { ApiError, ErrorNotice, apiFetch, newRequestKey } from './api-client';
 
 interface CreatedDraft {
   draftId: string;
@@ -49,7 +49,7 @@ export function StartDraftButton({ pluginId = null }: { pluginId?: string | null
 
   return (
     <div style={{ marginTop: 12 }}>
-      <button type="button" onClick={() => void start()} disabled={busy} style={buttonStyle}>
+      <button type="button" onClick={() => void start()} disabled={busy} className="button primary">
         {busy ? '正在建立草稿…' : pendingKey ? '重试新建草稿' : '写一篇评测'}
       </button>
       {error ? <ErrorNotice error={error} onDismiss={() => setError(null)} /> : null}

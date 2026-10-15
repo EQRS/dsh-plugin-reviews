@@ -16,7 +16,7 @@ export default async function NotificationsPage() {
   if (!isAuthenticated(ctx)) redirect('/onboarding?next=/me/notifications');
 
   return (
-    <main style={{ maxWidth: 1200, margin: '0 auto', padding: '16px' }}>
+    <main style={{ maxWidth: 1200, margin: '0 auto', padding: 'var(--space-4)' }}>
       <NotificationList />
     </main>
   );

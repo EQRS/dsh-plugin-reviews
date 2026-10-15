@@ -32,8 +32,8 @@ export default async function MePage() {
   if (ctx.userId === null) {
     return (
       <div>
-        <h1 style={{ fontSize: 22 }}>我的</h1>
-        <p style={{ color: '#526174' }}>
+        <h1>我的</h1>
+        <p className="muted">
           需要登录。本切片未接入真实 GitHub OAuth；开发环境可用{' '}
           <code>POST /api/session</code>（携 providerUserId / providerUsername）建立测试会话。
         </p>
@@ -64,7 +64,7 @@ export default async function MePage() {
 
   return (
     <div>
-      <h1 style={{ fontSize: 22 }}>我的评测</h1>
+      <h1>我的评测</h1>
 
       {/*
         写评测的入口在插件页（页面布局.md 第 5 节：插件详情的主要操作含"写评测"）。
@@ -72,37 +72,34 @@ export default async function MePage() {
         （见 validateForPublish 与 review_revisions.plugin_id NOT NULL），点到最后必然失败。
       */}
       <p style={{ marginTop: 12, fontSize: 14 }}>
-        <Link href="/plugins" style={{ color: '#2456B8' }}>
+        <Link href="/plugins">
           写一篇评测
         </Link>
-        <span style={{ color: '#526174' }}> —— 先在插件目录选一个插件，从它的详情页进入编辑器。</span>
+        <span className="muted"> —— 先在插件目录选一个插件，从它的详情页进入编辑器。</span>
       </p>
 
-      <section style={{ marginTop: 16 }}>
-        <h2 style={{ fontSize: 18 }}>草稿（{drafts.length}）</h2>
+      <section className="panel" style={{ marginTop: 16 }}>
+        <div className="section-head">
+          <h2>草稿（{drafts.length}）</h2>
+        </div>
         {drafts.length === 0 ? (
-          <p style={{ color: '#526174' }}>暂无草稿。到插件页点「写一篇评测」开始。</p>
+          <p className="empty" style={{ marginBottom: 0 }}>
+            暂无草稿。到插件页点「写一篇评测」开始。
+          </p>
         ) : (
-          <ul style={{ listStyle: 'none', padding: 0 }}>
+          <ul className="item-list">
             {drafts.map((d) => (
-              <li
-                key={d.draft_id}
-                style={{
-                  background: '#FFFFFF',
-                  border: '1px solid #DBE1EA',
-                  borderRadius: 10,
-                  padding: 12,
-                  marginBottom: 8,
-                }}
-              >
-                <div style={{ fontWeight: 600 }}>
-                  <Link href={`/me/drafts/${d.draft_id}`} style={{ color: '#2456B8', textDecoration: 'none' }}>
-                    {d.title && d.title.trim() !== '' ? d.title : '(尚未填写标题)'}
-                  </Link>
-                </div>
-                <div style={{ color: '#526174', fontSize: 14 }}>
-                  草稿 <code>{d.draft_id}</code> · 保存版本 {d.save_version} ·{' '}
-                  {formatDateTime(d.saved_at)}
+              <li key={d.draft_id} className="item">
+                <div className="item-body">
+                  <div style={{ fontWeight: 600 }}>
+                    <Link href={`/me/drafts/${d.draft_id}`}>
+                      {d.title && d.title.trim() !== '' ? d.title : '(尚未填写标题)'}
+                    </Link>
+                  </div>
+                  <div className="muted">
+                    草稿 <code>{d.draft_id}</code> · 保存版本 {d.save_version} ·{' '}
+                    {formatDateTime(d.saved_at)}
+                  </div>
                 </div>
               </li>
             ))}
@@ -110,12 +107,16 @@ export default async function MePage() {
         )}
       </section>
 
-      <section style={{ marginTop: 24 }}>
-        <h2 style={{ fontSize: 18 }}>提交记录（{subs.length}）</h2>
+      <section className="panel" style={{ marginTop: 24 }}>
+        <div className="section-head">
+          <h2>提交记录（{subs.length}）</h2>
+        </div>
         {subs.length === 0 ? (
-          <p style={{ color: '#526174' }}>暂无提交。</p>
+          <p className="empty" style={{ marginBottom: 0 }}>
+            暂无提交。
+          </p>
         ) : (
-          <ul style={{ listStyle: 'none', padding: 0 }}>
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
             {subs.map((s) => (
               <li key={s.submission_id} style={{ marginBottom: 8 }}>
                 <code>{s.submission_id}</code> · {submissionStateLabels[s.processing_state]} ·{' '}
@@ -126,7 +127,7 @@ export default async function MePage() {
         )}
       </section>
 
-      <p style={{ marginTop: 24, fontSize: 14, color: '#526174' }}>
+      <p className="muted" style={{ marginTop: 24 }}>
         公开状态与提交阶段分别表达：提交显示"已发布"不代表内容当前仍公开（撤回/隐藏另行判断）。
       </p>
     </div>

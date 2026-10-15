@@ -54,15 +54,16 @@ export async function GET(request: Request): Promise<Response> {
     if (errRes.status === 503) {
       return new Response(
         `<!doctype html><meta charset="utf-8"><title>GitHub 登录未配置</title>
-         <div style="font-family:system-ui;max-width:640px;margin:80px auto;line-height:1.7">
+         <body style="margin:0;background:#111318;color:#ffffff;font-family:system-ui;line-height:1.7">
+         <div style="max-width:640px;margin:80px auto;padding:0 24px">
            <h1 style="font-size:20px">GitHub 登录尚未配置</h1>
            <p>本站还没配置 GitHub OAuth 凭据，因此暂时无法用 GitHub 账号登录。</p>
            <p>需要在部署配置里提供 <code>GITHUB_CLIENT_ID</code>、<code>GITHUB_CLIENT_SECRET</code>
               与 <code>GITHUB_REDIRECT_URI</code>（回调地址填
               <code>http://127.0.0.1:3100/api/auth/github/callback</code>）。</p>
-           <p style="color:#526174;font-size:14px">追踪号：${requestId}</p>
-           <p><a href="/">返回首页</a></p>
-         </div>`,
+           <p style="color:#8c9199;font-size:14px">追踪号：${requestId}</p>
+           <p><a href="/" style="color:#8ab4f8">返回首页</a></p>
+         </div></body>`,
         { status: 503, headers: { 'content-type': 'text/html; charset=utf-8', 'x-request-id': requestId } },
       );
     }

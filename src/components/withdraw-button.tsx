@@ -18,7 +18,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ApiError, ErrorNotice, apiFetch, buttonStyle, inputStyle, newRequestKey, secondaryButtonStyle } from './api-client';
+import { ApiError, ErrorNotice, apiFetch, newRequestKey } from './api-client';
 
 export function WithdrawButton({
   reviewId,
@@ -64,13 +64,9 @@ export function WithdrawButton({
     return (
       <div
         role="status"
+        className="notice success"
         style={{
-          background: '#F0F7F2',
-          border: '1px solid #A9D5B8',
-          borderRadius: 8,
-          padding: 10,
           fontSize: 13,
-          color: '#1E5B32',
         }}
       >
         {done}
@@ -78,7 +74,7 @@ export function WithdrawButton({
           <button
             type="button"
             onClick={() => router.refresh()}
-            style={{ background: 'none', border: 'none', color: '#2456B8', cursor: 'pointer', padding: 0, fontSize: 13 }}
+            className="link-btn"
           >
             刷新页面
           </button>
@@ -89,7 +85,7 @@ export function WithdrawButton({
 
   if (!open) {
     return (
-      <button type="button" onClick={() => setOpen(true)} style={{ ...secondaryButtonStyle, fontSize: 13, padding: '6px 10px' }}>
+      <button type="button" onClick={() => setOpen(true)} className="button">
         撤回这篇评测
       </button>
     );
@@ -97,7 +93,7 @@ export function WithdrawButton({
 
   return (
     <div>
-      <label htmlFor={`withdraw-reason-${reviewId}`} style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+      <label htmlFor={`withdraw-reason-${reviewId}`} style={{ fontSize: 13, marginBottom: 4 }}>
         撤回原因（可选）
       </label>
       <input
@@ -106,9 +102,9 @@ export function WithdrawButton({
         value={reason}
         onChange={(e) => setReason(e.target.value)}
         placeholder="例如：数据有误，先撤下"
-        style={{ ...inputStyle, fontSize: 13, padding: '6px 8px' }}
+        style={{ width: '100%', fontSize: 13 }}
       />
-      <p style={{ color: '#526174', fontSize: 12, margin: '6px 0' }}>
+      <p className="muted" style={{ fontSize: 12, margin: '6px 0' }}>
         撤回后读者看不到这篇评测（显示「作者已撤回」）。**内容不会被删除**，
         历史修订留在库里；想重新公开需要修改后重新提交审核。
       </p>
@@ -118,7 +114,7 @@ export function WithdrawButton({
           type="button"
           onClick={() => void submit()}
           disabled={busy}
-          style={{ ...buttonStyle, fontSize: 13, padding: '6px 10px' }}
+          className="button primary"
         >
           {busy ? '撤回中…' : '确认撤回'}
         </button>
@@ -129,7 +125,7 @@ export function WithdrawButton({
             setError(null);
           }}
           disabled={busy}
-          style={{ ...secondaryButtonStyle, fontSize: 13, padding: '6px 10px' }}
+          className="button"
         >
           取消
         </button>

@@ -20,7 +20,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ApiError, ErrorNotice, apiFetch, buttonStyle, inputStyle, newRequestKey } from './api-client';
+import { ApiError, ErrorNotice, apiFetch, newRequestKey } from './api-client';
 
 interface AcceptedPlugin {
   pluginId: string;
@@ -71,7 +71,7 @@ export function PluginSubmitForm() {
 
   return (
     <form onSubmit={submit}>
-      <label htmlFor="repo-url" style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}>
+      <label htmlFor="repo-url">
         GitHub 仓库链接
       </label>
       <input
@@ -80,24 +80,24 @@ export function PluginSubmitForm() {
         value={url}
         onChange={(e) => setUrl(e.target.value)}
         placeholder="https://github.com/owner/repo 或带子目录路径"
-        style={inputStyle}
+        style={{ width: '100%' }}
         required
       />
-      <p style={{ color: '#526174', fontSize: 13 }}>
+      <p className="muted" style={{ fontSize: 13 }}>
         收录检查要求：仓库可访问、对应 <code>package.json</code> 声明了 <code>dsh.bundle</code>、且引用的配置文件存在。
         任一条不满足都会被拒绝，**不会在目录里留下条目**；已经在目录里的插件再提交一次，
         只会刷新它的资料，不会产生第二条。
       </p>
 
       {error ? <ErrorNotice error={error} onDismiss={() => setError(null)} /> : null}
-      {notice ? <p style={{ color: '#1E5B32' }}>{notice}</p> : null}
+      {notice ? <p className="notice success">{notice}</p> : null}
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <button type="submit" disabled={busy || url.trim() === ''} style={buttonStyle}>
+        <button type="submit" disabled={busy || url.trim() === ''} className="button primary">
           {busy ? '收录中…' : pendingKey ? '重试收录' : '提交收录'}
         </button>
         {pendingKey ? (
-          <span style={{ color: '#8A6D1C', fontSize: 13 }}>
+          <span style={{ color: 'var(--warn-ink)', fontSize: 13 }}>
             重试将复用同一个请求标识；如要换一个链接，请点"重新开始"。
           </span>
         ) : null}
@@ -108,7 +108,7 @@ export function PluginSubmitForm() {
               setPendingKey(null);
               setError(null);
             }}
-            style={{ background: 'none', border: 'none', color: '#2456B8', cursor: 'pointer', padding: 0 }}
+            className="link-btn"
           >
             重新开始
           </button>

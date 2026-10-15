@@ -40,40 +40,37 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ p
 
   return (
     <div>
-      <h1 style={{ fontSize: 24 }}>
+      <h1>
         {plugin.displayName ?? plugin.repository.fullName}
         {plugin.pluginPath === '.' ? '' : ` / ${plugin.pluginPath}`}
       </h1>
       {plugin.displayName ? (
-        <p style={{ color: '#8A94A6', fontSize: 13, marginTop: -8 }}>
+        <p style={{ color: 'var(--faint)', fontSize: 13, marginTop: -8 }}>
           {plugin.repository.fullName}
           {plugin.pluginPath === '.' ? '' : ` / ${plugin.pluginPath}`}
         </p>
       ) : null}
 
       {/* 简介：没有就明说"暂无简介"，不留空行（本地旧条目正是这种情形） */}
-      <p style={{ color: '#111827' }}>{plugin.description ?? '暂无简介'}</p>
+      <p style={{ color: 'var(--ink)' }}>{plugin.description ?? '暂无简介'}</p>
 
       <p>
         {/* 用途标签来自 GitHub topics；本切片还没有中文分类字典，无标签即"未分类" */}
         {(plugin.topics.length > 0 ? plugin.topics : ['未分类']).map((t) => (
-          <span
-            key={t}
-            style={{ background: '#EEF3FF', color: '#2456B8', borderRadius: 4, padding: '2px 8px', fontSize: 13, marginRight: 6 }}
-          >
+          <span key={t} className="tag site">
             {t}
           </span>
         ))}
         {plugin.repository.isArchived ? (
-          <span style={{ background: '#FFF9E8', color: '#8A6D1C', borderRadius: 4, padding: '2px 8px', fontSize: 13 }}>
+          <span className="tag warn">
             已归档
           </span>
         ) : null}
       </p>
 
-      <p style={{ color: '#526174' }}>
+      <p className="muted">
         仓库：{' '}
-        <a href={plugin.repository.htmlUrl} style={{ color: '#2456B8' }}>
+        <a href={plugin.repository.htmlUrl}>
           {plugin.repository.htmlUrl}
         </a>
         <br />
@@ -91,8 +88,10 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ p
         {formatDateTimeOr(plugin.repoUpdatedAt, '未知')}
       </p>
 
-      <section style={{ marginTop: 24 }}>
-        <h2 style={{ fontSize: 20 }}>本站评测</h2>
+      <section className="panel" style={{ marginTop: 24 }}>
+        <div className="section-head">
+          <h2>本站评测</h2>
+        </div>
 
         {/*
           设计口径（页面布局.md 第 5 节、实施顺序与验收.md 创作行）是"**从插件页写评测**"。
@@ -100,18 +99,20 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ p
           是 NOT NULL —— 不带插件的草稿永远提交不出去（点完才发现，是死路）。
         */}
         {ctx.userId === null ? (
-          <p style={{ color: '#526174' }}>登录后可以在这里写评测（开发环境可用页面顶部的「测试登录」）。</p>
+          <p className="muted">登录后可以在这里写评测（开发环境可用页面顶部的「测试登录」）。</p>
         ) : (
           <StartDraftButton pluginId={plugin.pluginId} />
         )}
 
         {reviews.length === 0 ? (
-          <p style={{ color: '#526174' }}>暂无评测。</p>
+          <p className="empty" style={{ marginBottom: 0 }}>
+            暂无评测。
+          </p>
         ) : (
-          <ul style={{ listStyle: 'none', padding: 0 }}>
+          <ul className="item-list">
             {reviews.map((r) => (
-              <li key={r.review_id} style={{ marginBottom: 6 }}>
-                <Link href={`/reviews/${r.review_id}`} style={{ color: '#2456B8' }}>
+              <li key={r.review_id} className="item">
+                <Link href={`/reviews/${r.review_id}`}>
                   {r.title}
                 </Link>
               </li>
@@ -121,7 +122,7 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ p
       </section>
 
       <p style={{ marginTop: 24 }}>
-        <Link href="/plugins" style={{ color: '#526174' }}>
+        <Link href="/plugins" className="muted">
           ← 返回插件目录
         </Link>
       </p>

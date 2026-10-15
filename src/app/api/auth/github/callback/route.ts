@@ -26,12 +26,13 @@ export const runtime = 'nodejs';
 function htmlError(message: string, requestId: string, status: number): Response {
   return new Response(
     `<!doctype html><meta charset="utf-8"><title>登录未完成</title>
-     <div style="font-family:system-ui;max-width:640px;margin:80px auto;line-height:1.7">
+     <body style="margin:0;background:#111318;color:#ffffff;font-family:system-ui;line-height:1.7">
+     <div style="max-width:640px;margin:80px auto;padding:0 24px">
        <h1 style="font-size:20px">登录未完成</h1>
        <p>${message}</p>
-       <p style="color:#526174;font-size:14px">追踪号：${requestId}</p>
-       <p><a href="/">返回首页</a> · <a href="/api/auth/github/start">重新登录</a></p>
-     </div>`,
+       <p style="color:#8c9199;font-size:14px">追踪号：${requestId}</p>
+       <p><a href="/" style="color:#8ab4f8">返回首页</a> · <a href="/api/auth/github/start" style="color:#8ab4f8">重新登录</a></p>
+     </div></body>`,
     { status, headers: { 'content-type': 'text/html; charset=utf-8', 'x-request-id': requestId } },
   );
 }
