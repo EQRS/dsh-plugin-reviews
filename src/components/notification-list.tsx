@@ -79,22 +79,26 @@ export function NotificationList() {
   };
 
   return (
-    <div>
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
-        <h1 style={{ fontSize: 22, margin: 0 }}>通知</h1>
-        {data !== null ? <span className="muted">未读 {data.unreadCount} 条</span> : null}
-        <label className="muted" style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 14 }}>
-          <input type="checkbox" checked={onlyUnread} onChange={(e) => setOnlyUnread(e.target.checked)} />
-          只看未读
-        </label>
+    <div className="panel">
+      {/* 工具栏：左侧是状态与筛选，右侧是批量操作（都在同一条 section-head 上，不再把按钮甩到最右边） */}
+      <div className="section-head" style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          {data !== null ? (
+            <span className={data.unreadCount > 0 ? 'tag site' : 'tag'}>未读 {data.unreadCount}</span>
+          ) : null}
+          <label
+            className="muted"
+            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, marginBottom: 0, fontWeight: 400 }}
+          >
+            <input type="checkbox" checked={onlyUnread} onChange={(e) => setOnlyUnread(e.target.checked)} />
+            只看未读
+          </label>
+        </div>
         <button
           type="button"
           onClick={() => void markAllRead()}
           disabled={busy || data === null || data.unreadCount === 0}
           className="button"
-          style={{
-            marginLeft: 'auto',
-          }}
         >
           全部标为已读
         </button>
@@ -103,9 +107,13 @@ export function NotificationList() {
       {error ? <ErrorNotice error={error} onDismiss={() => setError(null)} /> : null}
 
       {data === null ? (
-        <p className="muted">正在读取通知…</p>
+        <p className="muted" style={{ marginBottom: 0 }}>正在读取通知…</p>
       ) : data.items.length === 0 ? (
-        <p className="muted">{onlyUnread ? '没有未读通知。' : '还没有通知。'}</p>
+        <p className="empty" style={{ marginBottom: 0 }}>
+          {onlyUnread
+            ? '没有未读通知。'
+            : '还没有通知。别人评论你的评测、或回复你的评论时，会出现在这里。'}
+        </p>
       ) : (
         <ul className="item-list">
           {data.items.map((n) => (

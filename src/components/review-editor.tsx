@@ -81,6 +81,18 @@ interface SubmitResult {
   taskId: string | null;
 }
 
+/**
+ * 上传后**仍在处理中**的附件。
+ * 媒体处理是两段式的（登记 → 收字节 → 生成展示图），所以 PUT 返回 `pending`/`processing`
+ * 是正常中间态，不是失败；界面必须留着这条记录，让用户能继续查状态。
+ */
+interface PendingAttachment {
+  attachmentId: string;
+  filename: string;
+  state: AttachmentView['processingState'];
+  reason: string | null;
+}
+
 const ALLOWED_MIME = ['image/png', 'image/jpeg', 'image/webp'];
 const MAX_BYTES = 10 * 1024 * 1024;
 
@@ -254,7 +266,44 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
     }
   };
 
-  /** 图片上传：登记 → PUT 字节 → 把 displayUrl 插到光标处。 */
+  /** 上传后仍在处理中的附件（用于"重新查询状态"）。 */
+  const [pendingAttachment, setPendingAttachment] = useState<PendingAttachment | null>(null);
+
+  /**
+   * 查一次附件的真实状态（`GET /api/attachments/{id}`）。
+   *
+   * 这个接口此前**前端完全没有入口**：PUT 返回未就绪时，界面直接抛错放弃，
+   * 于是"处理中"被当成失败，用户只能重新选文件、把登记与传字节再走一遍。
+   * 现在按状态查询：就绪就插入正文，没就绪就把状态与原因留在界面上。
+   */
+  const queryAttachment = async (attachmentId: string, filename: string) => {
+    setUploading(true);
+    setError(null);
+    try {
+      const view = await apiFetch<AttachmentView>(
+        `/api/attachments/${encodeURIComponent(attachmentId)}`,
+        { cache: 'no-store' },
+      );
+      if (view.processingState === 'ready' && view.displayUrl) {
+        insertAtCursor(`![${filename}](${view.displayUrl})`);
+        setSaved(`图片已插入正文：${view.displayUrl}`);
+        setPendingAttachment(null);
+        return;
+      }
+      setPendingAttachment({
+        attachmentId,
+        filename,
+        state: view.processingState,
+        reason: view.lastErrorCode ?? null,
+      });
+    } catch (e) {
+      setError(e as ApiError);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  /** 图片上传：登记 → PUT 字节 → 就绪则把 displayUrl 插到光标处，未就绪则留下记录可继续查。 */
   const onUpload = async (file: File) => {
     setUploading(true);
     setError(null);
@@ -288,19 +337,32 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
         },
       );
 
-      if (ready.processingState !== 'ready' || !ready.displayUrl) {
-        // 未就绪就**不**写进正文：写进去会得到一个坏图片链接。
+      if (ready.processingState === 'ready' && ready.displayUrl) {
+        insertAtCursor(`![${file.name}](${ready.displayUrl})`);
+        setSaved(`图片已插入正文：${ready.displayUrl}`);
+        setPendingAttachment(null);
+        return;
+      }
+
+      if (ready.processingState === 'failed') {
+        // 终态失败：查状态也救不回来，如实给出原因（换一张再试）。
         throw new ApiError(
           {
             code: 'input_invalid',
-            message: `图片未就绪（状态：${ready.processingState}${ready.lastErrorCode ? `，原因：${ready.lastErrorCode}` : ''}），已跳过插入。`,
+            message: `图片处理失败${ready.lastErrorCode ? `（原因：${ready.lastErrorCode}）` : ''}。请换一张再试。`,
           },
           400,
         );
       }
 
-      insertAtCursor(`![${file.name}](${ready.displayUrl})`);
-      setSaved(`图片已插入正文：${ready.displayUrl}`);
+      // 还在处理中：**不是失败**。留着这条记录，让用户能查状态，而不是只能重选文件重走一遍。
+      setPendingAttachment({
+        attachmentId: registered.attachmentId,
+        filename: file.name,
+        state: ready.processingState,
+        reason: ready.lastErrorCode ?? null,
+      });
+      setSaved(null);
     } catch (e) {
       setError(e as ApiError);
     } finally {
@@ -433,6 +495,31 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
               </button>
             </span>
           </div>
+
+          {/* 处理中的附件：可继续查状态（接的就是 GET /api/attachments/{id}）。 */}
+          {pendingAttachment ? (
+            <div className="notice" style={{ marginTop: 12 }}>
+              <div>
+                图片「{pendingAttachment.filename}」还在处理中（状态：{pendingAttachment.state}
+                {pendingAttachment.reason ? `，原因：${pendingAttachment.reason}` : ''}）。 处理完成后点「重新查询状态」
+                即可插入正文；也可以继续写，稍后再回来查。
+              </div>
+              <div style={{ marginTop: 6, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="link-btn"
+                  disabled={uploading}
+                  onClick={() => void queryAttachment(pendingAttachment.attachmentId, pendingAttachment.filename)}
+                >
+                  {uploading ? '正在查询…' : '重新查询状态'}
+                </button>
+                <button type="button" className="link-btn muted" onClick={() => setPendingAttachment(null)}>
+                  先不管它
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           <textarea
             id="body"
             ref={bodyRef}

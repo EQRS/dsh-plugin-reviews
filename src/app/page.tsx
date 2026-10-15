@@ -75,13 +75,9 @@ export default async function HomePage() {
 
   return (
     <div>
-      {/* 英雄区：大字标题 + 搜索 + 分类（参照站的 home-hero 版式） */}
+      {/* 英雄区：站名作为主标题（放大），下面直接是搜索与分类 —— 不再有眉标与说明段落 */}
       <section className="home-hero">
-        <span className="section-eyebrow">DSH 插件测评</span>
-        <h1 className="home-title">找 DSH 插件</h1>
-        <p className="home-lead">
-          本站独立收录插件，<strong>收录 ≠ 已实测可用</strong>。评测由社区与站点分别撰写，公开前都经过人工审核。
-        </p>
+        <h1 className="home-title">DSH 插件评测</h1>
 
         {/* 搜索入口：GET 到目录页，条件留在 URL 里（目录页负责筛选与分页） */}
         <form action="/plugins" method="get" className="search home-search">

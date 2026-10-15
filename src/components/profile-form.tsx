@@ -16,7 +16,17 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ApiError, ErrorNotice, apiFetch, newRequestKey } from './api-client';
 
-export function ProfileForm({ initialNickname, returnTo }: { initialNickname: string; returnTo: string }) {
+export function ProfileForm({
+  initialNickname,
+  returnTo,
+  mode = 'onboarding',
+}: {
+  initialNickname: string;
+  returnTo: string;
+  /** onboarding = 新用户落地（保存后进站、可跳过）；settings = 个人设置（只保存并回到来源页）。 */
+  mode?: 'onboarding' | 'settings';
+}) {
+  const isOnboarding = mode === 'onboarding';
   const router = useRouter();
   const [nickname, setNickname] = useState(initialNickname);
   const [busy, setBusy] = useState(false);
@@ -65,18 +75,26 @@ export function ProfileForm({ initialNickname, returnTo }: { initialNickname: st
         style={{ width: '100%' }}
       />
       <p className="muted" style={{ fontSize: 13 }}>
-        这是你在这里唯一的公开身份：评测与评论的署名都用它。之后可以在「我的」页面再改。
+        {isOnboarding
+          ? '这是你在这里唯一的公开身份：评测与评论的署名都用它。之后可以在「我的」页面再改。'
+          : '这是你在这里唯一的公开身份：评测与评论的署名都用它；改完立刻生效。'}
       </p>
 
       {error ? <ErrorNotice error={error} onDismiss={() => setError(null)} /> : null}
 
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
         <button type="submit" disabled={busy} className="button primary">
-          {busy ? '保存中…' : '保存并进入网站'}
+          {busy ? '保存中…' : isOnboarding ? '保存并进入网站' : '保存'}
         </button>
-        <a href={returnTo} style={{ fontSize: 14 }}>
-          跳过，直接进入
-        </a>
+        {isOnboarding ? (
+          <a href={returnTo} style={{ fontSize: 14 }}>
+            跳过，直接进入
+          </a>
+        ) : (
+          <a href={returnTo} style={{ fontSize: 14 }} className="muted">
+            ← 返回
+          </a>
+        )}
       </div>
     </form>
   );

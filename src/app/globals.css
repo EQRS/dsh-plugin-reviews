@@ -72,7 +72,10 @@
   --width-narrow: 920px;              /* 参照 --container-max-narrow */
   --width-reading: 760px;
   --header-height: 72px;
-  --target: 44px;                     /* 主要点击区域下限 */
+  --target: 44px;                     /* 无障碍要求的点击区域下限（**视觉高度**见下一行） */
+  /* 控件视觉高度。主人要求"按钮放小一点、和其他元素和谐"，所以视觉上收了一档；
+     语义上仍以 --target 作为"最小可点区域"的规范值，两者刻意分开记录。 */
+  --control-height: 38px;
 
   /* 动效与阴影（逐项对齐参照） */
   --ease-smooth: cubic-bezier(0.16, 1, 0.3, 1);
@@ -191,7 +194,7 @@ p {
   margin-top: 0;
 }
 h1 {
-  margin-bottom: 12px;
+  margin-bottom: 20px;
   color: var(--bright);
   font-family: var(--font-heading);
   font-size: clamp(2.1rem, 3.6vw, 3.1rem);
@@ -258,22 +261,35 @@ p {
 /* ---------------------------------------------------------------- 页头导航 */
 
 /* 固定深色页头：72px，半透明底、无 backdrop-filter
-   （参照注释：模糊的固定页头会被重绘拖慢，不透明底更稳） */
+   （参照注释：模糊的固定页头会被重绘拖慢，不透明底更稳）
+   用 flex + align-items:center 让导航真正居中：导航外层还有一层包裹 div（session-nav 的根节点），
+   只靠 `.header-inner{height:100%}` 是撑不起来的——那会让整条导航贴在栏顶。 */
 .site-header {
   position: fixed;
   top: 0;
   right: 0;
   left: 0;
   z-index: 1000;
+  display: flex;
+  align-items: center;
   height: var(--header-height);
   border-bottom: 1px solid var(--line);
   background: rgba(17, 19, 24, 0.94);
 }
 
+/* 页头内的包裹层撑满宽度（否则 max-width + margin:auto 的导航无法居中） */
+.site-header > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 页头三段式：品牌（左）· 导航（**正中**）· 账户（右）。
+   用 grid 的 1fr auto 1fr 而不是 space-between —— 后者只在两侧等宽时才"看起来居中"，
+   品牌短、账户宽的时候导航会被挤到 LOGO 旁边（实测就是这样）。 */
 .header-inner {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
   gap: 20px;
   width: 100%;
   max-width: var(--width-content);
@@ -285,6 +301,7 @@ p {
 .brand {
   display: flex;
   align-items: center;
+  justify-self: start;
   color: var(--ink) !important;
   font-family: var(--font-heading);
   font-size: 1.1rem;
@@ -298,21 +315,23 @@ p {
   color: var(--ink) !important;
 }
 
-/* 主导航：药丸分段控件（参照 .view-segmented-control + .segmented-btn） */
+/* 主导航：药丸分段控件（参照 .view-segmented-control + .segmented-btn），
+   尺寸按主人要求再收小一档（参照站的分段按钮也是这个量级）。 */
 .main-nav {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 4px;
+  justify-self: center;
+  gap: 1px;
+  padding: 3px;
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
   background: var(--surface);
 }
 .main-nav a {
-  padding: 6px 16px;
+  padding: 4px 12px;
   border-radius: var(--radius-pill);
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   white-space: nowrap;
   transition: all var(--transition-fast);
@@ -331,8 +350,8 @@ p {
 .account {
   display: flex;
   align-items: center;
+  justify-self: end;
   gap: 10px;
-  margin-left: auto;
   font-size: 14px;
 }
 .account-chip {
@@ -361,6 +380,22 @@ p {
   color: var(--on-primary);
   font-size: 12px;
   font-weight: 700;
+}
+
+/* 页头里的通知铃铛：圆形图标按钮 + 贴在右上角的未读角标（角标不再占用行内宽度） */
+.nav-bell {
+  position: relative;
+}
+.nav-bell .badge-count {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 18px;
+  padding: 0 4px;
+  border: 2px solid var(--bg);
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
 }
 
 /* 圆形图标按钮（参照 .nav-icon-btn；窗口/账户区的次级动作） */
@@ -401,40 +436,21 @@ p {
   font-size: 13px;
 }
 
-/* 区块眉标（参照 .section-eyebrow：小字 + 宽字距 + 强调色） */
-.section-eyebrow {
-  display: block;
-  margin-bottom: 8px;
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-}
-
-/* 首页英雄区（参照 .home-hero / .article-main-title / .article-lead-subtitle）：
-   大字展示标题直接落在深色底上，不套面板——这是参照站最显眼的一条视觉语言。 */
+/* 首页英雄区（参照 .home-hero / .article-main-title）：
+   站名作为大字标题直接落在深色底上，不套面板——这是参照站最显眼的一条视觉语言。
+   说明段落与眉标按主人的要求去掉了，标题下面是搜索与分类。 */
 .home-hero {
   padding: 8px 0 36px;
 }
 .home-title {
   max-width: 22ch;
-  margin-bottom: 18px;
+  margin-bottom: 28px;
   color: var(--bright);
   font-family: var(--font-heading);
   font-size: clamp(2.4rem, 6.2vw, 4.1rem);
   font-weight: 700;
   letter-spacing: -0.04em;
   line-height: 1.02;
-}
-.home-lead {
-  max-width: 44rem;
-  margin-bottom: 30px;
-  color: var(--muted);
-  font-size: clamp(1rem, 1.5vw, 1.15rem);
-  line-height: 1.62;
-}
-.home-lead strong {
-  color: var(--ink);
 }
 .home-search {
   max-width: 640px;
@@ -452,6 +468,14 @@ p {
 }
 .panel + .panel {
   margin-top: 20px;
+}
+
+/* 网格布局里的面板由 gap 控距，不能再叠加 `.panel + .panel` 的纵向外边距：
+   右栏 `.panel` 紧跟左栏 `.panel` 时会被整体推下去，两个面板的圆角就错开了（实测 20px 偏移）。 */
+.twocol > .panel + .panel,
+.catalog-layout > .panel + .panel,
+.read-layout > .panel + .panel {
+  margin-top: 0;
 }
 .panel h1,
 .panel h2 {
@@ -503,6 +527,47 @@ p {
   align-items: start;
 }
 
+/* 个人中心布局：左侧栏目导航 + 右侧内容（页面布局.md §10「桌面左侧导航，右侧内容」）。
+   侧栏在滚动时吸顶，长内容列滚动时栏目始终可见。
+   gap 用 40px（比目录页宽）：个人中心的侧栏是"栏目"而不是"筛选器"，需要和正文明显分开，
+   24px 在 1440 宽的屏上看起来像贴在一起。 */
+.me-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 40px;
+  align-items: start;
+}
+.me-side {
+  position: sticky;
+  top: calc(var(--header-height) + 24px);
+}
+
+/* 统计条（参照站 .summary 的做法：一排小面板 + 大数字）。
+   数字全部来自真实查询，不做"估算"或占位。 */
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.stat {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.stat .stat-value {
+  font-family: var(--font-heading);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+.stat .stat-label {
+  color: var(--faint);
+  font-size: 12px;
+}
+
 /* ------------------------------------------------------------------ 控件 */
 
 /* 按钮：药丸形；主按钮用强调色底 + 深蓝字（参照 .btn-primary-action） */
@@ -512,13 +577,13 @@ button.button {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: var(--target);
-  padding: 10px 18px;
+  min-height: var(--control-height);
+  padding: 7px 15px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-pill);
   background: var(--surface);
   color: var(--ink);
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
   line-height: 1.4;
   text-decoration: none;
@@ -550,13 +615,14 @@ button:disabled {
 }
 /* 原生 button（导航里的登出/测试登录）与 .button 同族；.link-btn 走链接态，不套药丸 */
 button:not(.button):not(.icon-btn):not(.filters a):not(.link-btn) {
-  padding: 8px 14px;
+  padding: 7px 14px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-pill);
   background: var(--surface);
   color: var(--ink);
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
+  min-height: var(--control-height);
   transition: all var(--transition-fast);
 }
 button:not(.button):not(.icon-btn):not(.filters a):not(.link-btn):hover:not(:disabled) {
@@ -567,9 +633,9 @@ button:not(.button):not(.icon-btn):not(.filters a):not(.link-btn):hover:not(:dis
 input,
 select,
 textarea {
-  min-height: var(--target);
+  min-height: var(--control-height);
   max-width: 100%;
-  padding: 10px 14px;
+  padding: 8px 12px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.04);
@@ -639,6 +705,10 @@ label {
   background: var(--warn-bg);
   color: var(--warn-ink);
 }
+.tag.danger {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
 
 /* 筛选 chip（链接形态：无 JS 也让条件留在 URL） */
 .filters {
@@ -647,7 +717,7 @@ label {
   align-items: center;
   gap: 8px;
   margin-bottom: var(--space-4);
-  font-size: 14px;
+  font-size: 13px;
 }
 .filters .group-label {
   margin-right: 2px;
@@ -656,7 +726,7 @@ label {
   font-weight: 600;
 }
 .filters a {
-  padding: 6px 14px;
+  padding: 5px 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
   color: var(--muted);
@@ -986,8 +1056,13 @@ label {
 
 @media (max-width: 900px) {
   .twocol,
-  .catalog-layout {
+  .catalog-layout,
+  .me-layout {
     grid-template-columns: minmax(0, 1fr);
+  }
+  /* 单列时侧栏不再吸顶（否则会盖住正文） */
+  .me-side {
+    position: static;
   }
   .brand {
     font-size: 1rem;
@@ -1007,13 +1082,24 @@ label {
   :root {
     --header-height: 64px;
   }
-  /* 页头换行：品牌 + 账户一行，主导航落到第二行铺满 */
+  /* 手机上导航会折成两行，页头不能死守 64px —— 否则内容溢出、边框线切在导航上 */
+  .site-header {
+    height: auto;
+    min-height: var(--header-height);
+  }
+  /* 页头换行：品牌 + 账户一行，主导航落到第二行铺满。
+     手机上退回 flex（桌面那种三段式网格放不下一行两个换行组）。 */
   .header-inner {
+    display: flex;
     flex-wrap: wrap;
     align-content: center;
+    justify-content: space-between;
     padding: 8px 16px;
     height: auto;
     min-height: var(--header-height);
+  }
+  .account {
+    margin-left: auto;
   }
   .main-nav {
     order: 3;

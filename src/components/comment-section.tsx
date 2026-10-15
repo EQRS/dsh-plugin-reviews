@@ -53,8 +53,11 @@ interface SessionData {
   testLoginEnabled: boolean;
 }
 
-/** 展开状态：undefined = 没展开过；null = 加载中；对象 = 已加载。 */
-type ReplyState = { items: CommentView[]; total: number } | null;
+/** 展开状态：undefined = 没展开过；null = 正在读第一页；对象 = 已加载（items 为**累计**已取到的页）。 */
+type ReplyState = { items: CommentView[]; total: number; page: number } | null;
+
+/** 组内回复每页条数：后端只接受 10 / 20 / 50（PaginationDefaults.allowed_page_sizes）。 */
+const REPLY_PAGE_SIZE = 50;
 
 /** 单条评论的时间与署名行（顶层与回复共用，避免两处格式漂移）。 */
 function CommentMeta({ comment }: { comment: CommentView }) {
@@ -92,6 +95,8 @@ export function CommentSection({ contentId }: { contentId: string }) {
   // 回复相关
   const [expanded, setExpanded] = useState<Record<string, ReplyState>>({});
   const [replyTo, setReplyTo] = useState<{ commentId: string; authorId: string } | null>(null);
+  /** 正在"加载更多"的讨论组 id（与首次加载区分：首次加载时整组显示"正在读取回复…"）。 */
+  const [loadingMore, setLoadingMore] = useState<string | null>(null);
 
   // 编辑相关：一次只编辑一条（同时开两个编辑框只会让人改错）
   const [editing, setEditing] = useState<{ commentId: string; body: string } | null>(null);
@@ -128,23 +133,50 @@ export function CommentSection({ contentId }: { contentId: string }) {
     void loadComments();
   }, [loadComments]);
 
-  /** 懒加载某个顶层讨论组的回复。 */
+  /**
+   * 懒加载某个顶层讨论组的回复。
+   *
+   * `page > 1` 表示"加载更多"：**追加**已取到的页，而不是替换
+   * （替换会把用户刚看过的回复顶掉，等于每点一次就重来）。
+   * 此前这里写死 `page=1&page_size=50`，于是**超过 50 条的讨论组第 51 条起永远看不到** ——
+   * 而两级评论是本切片的核心交付，故改成可继续翻页。
+   */
   const loadReplies = useCallback(
-    async (rootCommentId: string) => {
-      setExpanded((prev) => ({ ...prev, [rootCommentId]: null }));
+    async (rootCommentId: string, page = 1) => {
+      if (page === 1) {
+        setExpanded((prev) => ({ ...prev, [rootCommentId]: null }));
+      } else {
+        setLoadingMore(rootCommentId);
+      }
       try {
         const result = await apiFetch<PageResult<CommentView>>(
-          `/api/content/${encodeURIComponent(contentId)}/comments/${encodeURIComponent(rootCommentId)}/replies?page=1&page_size=50`,
+          `/api/content/${encodeURIComponent(contentId)}/comments/${encodeURIComponent(rootCommentId)}/replies?page=${page}&page_size=${REPLY_PAGE_SIZE}`,
           { cache: 'no-store' },
         );
-        setExpanded((prev) => ({ ...prev, [rootCommentId]: { items: result.items, total: result.total } }));
-      } catch (e) {
         setExpanded((prev) => {
-          const next = { ...prev };
-          delete next[rootCommentId];
-          return next;
+          const already = page === 1 ? [] : (prev[rootCommentId]?.items ?? []);
+          return {
+            ...prev,
+            [rootCommentId]: {
+              items: [...already, ...result.items],
+              total: result.total,
+              page: result.page,
+            },
+          };
         });
+      } catch (e) {
+        // 第一页失败 = 整组打不开，退回未展开状态；
+        // "加载更多"失败则**保留已取到的内容**，只把错误报出来（不能把已看到的抹掉）。
+        if (page === 1) {
+          setExpanded((prev) => {
+            const next = { ...prev };
+            delete next[rootCommentId];
+            return next;
+          });
+        }
         setError(e as ApiError);
+      } finally {
+        setLoadingMore(null);
       }
     },
     [contentId],
@@ -356,9 +388,18 @@ export function CommentSection({ contentId }: { contentId: string }) {
                           <CommentBody comment={r} />
                         </li>
                       ))}
-                      {group.total > group.items.length ? (
-                        <li className="muted" style={{ paddingLeft: 10, fontSize: 13 }}>
-                          （还有 {group.total - group.items.length} 条回复未显示）
+                      {group.items.length < group.total ? (
+                        <li style={{ paddingLeft: 10 }}>
+                          <button
+                            type="button"
+                            className="link-btn"
+                            disabled={loadingMore === c.commentId}
+                            onClick={() => void loadReplies(c.commentId, group.page + 1)}
+                          >
+                            {loadingMore === c.commentId
+                              ? '正在读取…'
+                              : `加载更多回复（还有 ${group.total - group.items.length} 条）`}
+                          </button>
                         </li>
                       ) : null}
                     </ul>
