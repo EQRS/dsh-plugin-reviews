@@ -43,7 +43,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           {children}
         </main>
         <footer className="footer">
-          本页是最小功能切片的演示载体，不是完整站点；未实现范围见 README-切片说明.md。
+          本页是最小功能切片的演示载体，不是完整站点；未实现范围见 docs/README-切片说明.md。
         </footer>
       </body>
     </html>
