@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { formatDateTime } from '@/packages/common/time';
-import { ApiError, ErrorNotice, apiFetch, buttonStyle, inputStyle, newRequestKey } from './api-client';
+import { ApiError, ErrorNotice, apiFetch, newRequestKey } from './api-client';
 
 interface SettingDefinition {
   key: string;
@@ -110,22 +110,22 @@ export function AdminSettingsForm() {
   };
 
   return (
-    <section style={{ marginTop: 32, borderTop: '1px solid #DBE1EA', paddingTop: 16 }}>
+    <section style={{ marginTop: 32, borderTop: '1px solid var(--line)', paddingTop: 16 }}>
       <h2 style={{ fontSize: 18 }}>业务设置</h2>
-      <p style={{ color: '#526174', fontSize: 14 }}>
+      <p className="muted">
         这里只列出**真的会被读取**的参数；改完留一条修订记录（含原因与完整生效快照）。
         媒体限额、草稿自动保存间隔等仍是模块内常量，尚未接入（见差距盘点）。
       </p>
 
       {error ? <ErrorNotice error={error} onDismiss={() => setError(null)} /> : null}
-      {notice ? <p style={{ color: '#1E5B32', fontSize: 14 }}>{notice}</p> : null}
+      {notice ? <p className="notice success">{notice}</p> : null}
 
       {data === null ? (
-        <p style={{ color: '#526174' }}>正在读取配置…</p>
+        <p className="muted">正在读取配置…</p>
       ) : (
         <>
           {data.unknownKeys.length > 0 ? (
-            <p style={{ color: '#8A6D1C', fontSize: 14 }}>
+            <p className="notice warn">
               注意：库里有 {data.unknownKeys.length} 个不在清单里的键（{data.unknownKeys.join('、')}
               ），它们不会生效，也不会被本页修改。
             </p>
@@ -133,7 +133,7 @@ export function AdminSettingsForm() {
 
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
             <thead>
-              <tr style={{ textAlign: 'left', color: '#526174' }}>
+              <tr style={{ textAlign: 'left', color: 'var(--muted)' }}>
                 <th style={{ padding: '6px 4px' }}>参数</th>
                 <th style={{ padding: '6px 4px' }}>当前生效</th>
                 <th style={{ padding: '6px 4px' }}>新值</th>
@@ -141,11 +141,11 @@ export function AdminSettingsForm() {
             </thead>
             <tbody>
               {data.definitions.map((def) => (
-                <tr key={def.key} style={{ borderTop: '1px solid #DBE1EA', verticalAlign: 'top' }}>
+                <tr key={def.key} style={{ borderTop: '1px solid var(--line)', verticalAlign: 'top' }}>
                   <td style={{ padding: '8px 4px', maxWidth: 420 }}>
                     <div style={{ fontWeight: 600 }}>{def.label}</div>
-                    <div style={{ color: '#526174' }}>{def.description}</div>
-                    <div style={{ color: '#8A6D1C', fontSize: 13 }}>
+                    <div className="muted">{def.description}</div>
+                    <div style={{ color: 'var(--warn-ink)', fontSize: 13 }}>
                       默认 {String(def.defaultValue)}
                       {def.unit ?? ''}
                       {def.min !== undefined ? ` · 范围 ${def.min}–${def.max}` : ''} · {def.key}
@@ -162,7 +162,7 @@ export function AdminSettingsForm() {
                         aria-label={def.label}
                         value={draft[def.key] === true || draft[def.key] === 'true' ? 'true' : 'false'}
                         onChange={(e) => setDraft({ ...draft, [def.key]: e.target.value })}
-                        style={inputStyle}
+                        style={{ width: '100%' }}
                       >
                         <option value="true">开</option>
                         <option value="false">关</option>
@@ -172,7 +172,7 @@ export function AdminSettingsForm() {
                         aria-label={def.label}
                         value={String(draft[def.key] ?? '')}
                         onChange={(e) => setDraft({ ...draft, [def.key]: e.target.value })}
-                        style={{ ...inputStyle, width: 120 }}
+                        style={{ width: 120 }}
                       />
                     )}
                   </td>
@@ -187,20 +187,20 @@ export function AdminSettingsForm() {
               placeholder="修改原因（必填，会进修订记录）"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              style={{ ...inputStyle, flex: '1 1 260px' }}
+              style={{ flex: '1 1 260px' }}
             />
-            <button type="button" disabled={busy || reason.trim().length === 0} onClick={() => void save()} style={buttonStyle}>
+            <button type="button" disabled={busy || reason.trim().length === 0} onClick={() => void save()} className="button primary">
               {busy ? '保存中…' : '保存'}
             </button>
           </div>
 
           <h3 style={{ fontSize: 16, marginTop: 24 }}>修改记录（最近 {data.history.length} 条）</h3>
           {data.history.length === 0 ? (
-            <p style={{ color: '#526174', fontSize: 14 }}>还没有修改记录。</p>
+            <p className="muted">还没有修改记录。</p>
           ) : (
             <ul style={{ listStyle: 'none', padding: 0, fontSize: 14 }}>
               {data.history.map((r) => (
-                <li key={r.revisionId} style={{ marginBottom: 8, color: '#526174' }}>
+                <li key={r.revisionId} className="muted" style={{ marginBottom: 8 }}>
                   #{r.revisionNumber} · {formatDateTime(r.createdAt)} · {r.changedByName ?? '（未知）'} · {r.reason}
                 </li>
               ))}

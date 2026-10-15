@@ -31,10 +31,8 @@ import {
   ErrorNotice,
   SuccessNotice,
   apiFetch,
-  buttonStyle,
   inputStyle,
   newRequestKey,
-  secondaryButtonStyle,
 } from './api-client';
 
 type VersionValue = { kind: 'unknown' } | { kind: 'known'; value: string };
@@ -81,6 +79,18 @@ interface SubmitResult {
   reviewId: string;
   processingState: 'pending';
   taskId: string | null;
+}
+
+/**
+ * 上传后**仍在处理中**的附件。
+ * 媒体处理是两段式的（登记 → 收字节 → 生成展示图），所以 PUT 返回 `pending`/`processing`
+ * 是正常中间态，不是失败；界面必须留着这条记录，让用户能继续查状态。
+ */
+interface PendingAttachment {
+  attachmentId: string;
+  filename: string;
+  state: AttachmentView['processingState'];
+  reason: string | null;
 }
 
 const ALLOWED_MIME = ['image/png', 'image/jpeg', 'image/webp'];
@@ -133,7 +143,7 @@ function VersionField({
           style={{ ...inputStyle, marginTop: 6 }}
         />
       ) : (
-        <div style={{ color: '#526174', fontSize: 13 }}>未知版本是可以的，不是退回理由。</div>
+        <div className="muted" style={{ fontSize: 13 }}>未知版本是可以的，不是退回理由。</div>
       )}
     </div>
   );
@@ -256,7 +266,44 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
     }
   };
 
-  /** 图片上传：登记 → PUT 字节 → 把 displayUrl 插到光标处。 */
+  /** 上传后仍在处理中的附件（用于"重新查询状态"）。 */
+  const [pendingAttachment, setPendingAttachment] = useState<PendingAttachment | null>(null);
+
+  /**
+   * 查一次附件的真实状态（`GET /api/attachments/{id}`）。
+   *
+   * 这个接口此前**前端完全没有入口**：PUT 返回未就绪时，界面直接抛错放弃，
+   * 于是"处理中"被当成失败，用户只能重新选文件、把登记与传字节再走一遍。
+   * 现在按状态查询：就绪就插入正文，没就绪就把状态与原因留在界面上。
+   */
+  const queryAttachment = async (attachmentId: string, filename: string) => {
+    setUploading(true);
+    setError(null);
+    try {
+      const view = await apiFetch<AttachmentView>(
+        `/api/attachments/${encodeURIComponent(attachmentId)}`,
+        { cache: 'no-store' },
+      );
+      if (view.processingState === 'ready' && view.displayUrl) {
+        insertAtCursor(`![${filename}](${view.displayUrl})`);
+        setSaved(`图片已插入正文：${view.displayUrl}`);
+        setPendingAttachment(null);
+        return;
+      }
+      setPendingAttachment({
+        attachmentId,
+        filename,
+        state: view.processingState,
+        reason: view.lastErrorCode ?? null,
+      });
+    } catch (e) {
+      setError(e as ApiError);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  /** 图片上传：登记 → PUT 字节 → 就绪则把 displayUrl 插到光标处，未就绪则留下记录可继续查。 */
   const onUpload = async (file: File) => {
     setUploading(true);
     setError(null);
@@ -290,19 +337,32 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
         },
       );
 
-      if (ready.processingState !== 'ready' || !ready.displayUrl) {
-        // 未就绪就**不**写进正文：写进去会得到一个坏图片链接。
+      if (ready.processingState === 'ready' && ready.displayUrl) {
+        insertAtCursor(`![${file.name}](${ready.displayUrl})`);
+        setSaved(`图片已插入正文：${ready.displayUrl}`);
+        setPendingAttachment(null);
+        return;
+      }
+
+      if (ready.processingState === 'failed') {
+        // 终态失败：查状态也救不回来，如实给出原因（换一张再试）。
         throw new ApiError(
           {
             code: 'input_invalid',
-            message: `图片未就绪（状态：${ready.processingState}${ready.lastErrorCode ? `，原因：${ready.lastErrorCode}` : ''}），已跳过插入。`,
+            message: `图片处理失败${ready.lastErrorCode ? `（原因：${ready.lastErrorCode}）` : ''}。请换一张再试。`,
           },
           400,
         );
       }
 
-      insertAtCursor(`![${file.name}](${ready.displayUrl})`);
-      setSaved(`图片已插入正文：${ready.displayUrl}`);
+      // 还在处理中：**不是失败**。留着这条记录，让用户能查状态，而不是只能重选文件重走一遍。
+      setPendingAttachment({
+        attachmentId: registered.attachmentId,
+        filename: file.name,
+        state: ready.processingState,
+        reason: ready.lastErrorCode ?? null,
+      });
+      setSaved(null);
     } catch (e) {
       setError(e as ApiError);
     } finally {
@@ -336,7 +396,7 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
         <h1 style={{ fontSize: 22 }}>无法打开草稿</h1>
         <ErrorNotice error={error} onDismiss={() => setError(null)} />
         <p>
-          <Link href="/me" style={{ color: '#2456B8' }}>
+          <Link href="/me" style={{ color: 'var(--accent)' }}>
             ← 返回我的评测
           </Link>
         </p>
@@ -347,7 +407,7 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
   return (
     <div>
       <h1 style={{ fontSize: 22, marginBottom: 4 }}>编辑评测草稿</h1>
-      <p style={{ color: '#526174', fontSize: 14, marginTop: 0 }}>
+      <p className="muted" style={{ fontSize: 14, marginTop: 0 }}>
         草稿 <code>{draftId}</code> · 保存版本 <strong>{saveVersion}</strong> · 正文 {payloadPreview.chars} 字 /{' '}
         {payloadPreview.segments} 段
       </p>
@@ -359,26 +419,23 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
       */}
       {draft ? (
         draft.pluginId ? (
-          <p style={{ color: '#526174', fontSize: 14 }}>
+          <p className="muted" style={{ fontSize: 14 }}>
             关联插件：
-            <Link href={`/plugins/${draft.pluginId}`} style={{ color: '#2456B8' }}>
+            <Link href={`/plugins/${draft.pluginId}`} style={{ color: 'var(--accent)' }}>
               {draft.pluginId}
             </Link>
           </p>
         ) : (
           <div
+            className="notice warn"
             style={{
-              background: '#FFF7E6',
-              border: '1px solid #F0C36D',
-              borderRadius: 10,
-              padding: 12,
               fontSize: 14,
             }}
           >
             <strong>这份草稿还没有关联插件，无法提交审核。</strong>
             <br />
             请到插件目录打开对应插件页，用那里的「写一篇评测」新建草稿（已保存的正文不会丢，可复制过去）。
-            <Link href="/plugins" style={{ color: '#2456B8', marginLeft: 8 }}>
+            <Link href="/plugins" style={{ color: 'var(--accent)', marginLeft: 8 }}>
               去插件目录 →
             </Link>
           </div>
@@ -397,7 +454,7 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
       ) : null}
 
       <div style={{ display: 'grid', gap: 16, marginTop: 16 }}>
-        <div style={{ background: '#FFFFFF', border: '1px solid #DBE1EA', borderRadius: 10, padding: 16 }}>
+        <div className="panel">
           <label htmlFor="title" style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}>
             标题
           </label>
@@ -409,10 +466,10 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
             placeholder="例如：某插件的实测体验"
             style={inputStyle}
           />
-          <p style={{ color: '#526174', fontSize: 13 }}>标题可以留空（草稿允许未写完），提交时才有必填校验。</p>
+          <p className="muted" style={{ fontSize: 13 }}>标题可以留空（草稿允许未写完），提交时才有必填校验。</p>
         </div>
 
-        <div style={{ background: '#FFFFFF', border: '1px solid #DBE1EA', borderRadius: 10, padding: 16 }}>
+        <div className="panel">
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
             <label htmlFor="body" style={{ fontWeight: 600 }}>
               Markdown 正文
@@ -432,12 +489,37 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
                 type="button"
                 disabled={uploading}
                 onClick={() => fileRef.current?.click()}
-                style={secondaryButtonStyle}
+                className="button"
               >
                 {uploading ? '上传中…' : '插入图片'}
               </button>
             </span>
           </div>
+
+          {/* 处理中的附件：可继续查状态（接的就是 GET /api/attachments/{id}）。 */}
+          {pendingAttachment ? (
+            <div className="notice" style={{ marginTop: 12 }}>
+              <div>
+                图片「{pendingAttachment.filename}」还在处理中（状态：{pendingAttachment.state}
+                {pendingAttachment.reason ? `，原因：${pendingAttachment.reason}` : ''}）。 处理完成后点「重新查询状态」
+                即可插入正文；也可以继续写，稍后再回来查。
+              </div>
+              <div style={{ marginTop: 6, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="link-btn"
+                  disabled={uploading}
+                  onClick={() => void queryAttachment(pendingAttachment.attachmentId, pendingAttachment.filename)}
+                >
+                  {uploading ? '正在查询…' : '重新查询状态'}
+                </button>
+                <button type="button" className="link-btn muted" onClick={() => setPendingAttachment(null)}>
+                  先不管它
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           <textarea
             id="body"
             ref={bodyRef}
@@ -449,24 +531,24 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
           />
         </div>
 
-        <div style={{ background: '#FFFFFF', border: '1px solid #DBE1EA', borderRadius: 10, padding: 16 }}>
+        <div className="panel">
           <h2 style={{ fontSize: 16, marginTop: 0 }}>被测版本</h2>
           <VersionField label="被测插件版本" value={pluginVersion} onChange={setPluginVersion} />
           <VersionField label="被测 DSH 版本" value={dshVersion} onChange={setDshVersion} />
         </div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button type="button" onClick={() => void onSave()} disabled={busy} style={buttonStyle}>
+          <button type="button" onClick={() => void onSave()} disabled={busy} className="button primary">
             {busy ? '处理中…' : '保存'}
           </button>
-          <button type="button" onClick={() => void onSubmit()} disabled={busy} style={secondaryButtonStyle}>
+          <button type="button" onClick={() => void onSubmit()} disabled={busy} className="button">
             提交审核
           </button>
-          <button type="button" onClick={() => void load()} disabled={busy} style={{ background: 'none', border: 'none', color: '#2456B8', cursor: 'pointer' }}>
+          <button type="button" onClick={() => void load()} disabled={busy} className="link-btn">
             放弃改动并重新载入
           </button>
         </div>
-        <p style={{ color: '#526174', fontSize: 13 }}>
+        <p className="muted" style={{ fontSize: 13 }}>
           「提交审核」会先保存、再生成不可变快照并进入待检查状态；提交后的正文不能在草稿里改写。
         </p>
       </div>

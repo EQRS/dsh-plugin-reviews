@@ -1,7 +1,7 @@
 -- 0001_baseline.sql
 -- DSH Plugin Review · 最小功能切片基线
 --
--- 权威结构以本目录的 SQL 为准（见 README-切片说明.md §迁移策略）。
+-- 权威结构以本目录的 SQL 为准（见 docs/README-切片说明.md §迁移策略）。
 -- 约定（数据库模型第 1 节 / 架构第 55 节）：
 --   ID  = 规范小写 UUIDv7 的 TEXT
 --   T   = TEXT

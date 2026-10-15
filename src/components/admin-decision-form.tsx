@@ -19,7 +19,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ApiError, ErrorNotice, apiFetch, buttonStyle, inputStyle, newRequestKey, secondaryButtonStyle } from './api-client';
+import { ApiError, ErrorNotice, apiFetch, newRequestKey } from './api-client';
 
 interface DecideResult {
   state: string;
@@ -96,13 +96,9 @@ export function AdminDecisionForm({
     return (
       <div
         role={done.ok ? 'status' : 'alert'}
+        className={done.ok ? 'notice success' : 'notice danger'}
         style={{
-          background: done.ok ? '#F0F7F2' : '#FFF7E6',
-          border: `1px solid ${done.ok ? '#A9D5B8' : '#F0C36D'}`,
-          borderRadius: 8,
-          padding: 10,
           fontSize: 13,
-          color: done.ok ? '#1E5B32' : '#7A5B12',
           maxWidth: 360,
         }}
       >
@@ -114,7 +110,7 @@ export function AdminDecisionForm({
               setDone(null);
               router.refresh();
             }}
-            style={{ background: 'none', border: 'none', color: '#2456B8', cursor: 'pointer', padding: 0, fontSize: 13 }}
+            className="link-btn"
           >
             刷新列表
           </button>
@@ -130,14 +126,14 @@ export function AdminDecisionForm({
         value={reason}
         onChange={(e) => setReason(e.target.value)}
         placeholder="处理原因（必填，会记入处理记录）"
-        style={{ ...inputStyle, fontSize: 13, padding: '6px 8px' }}
+        style={{ width: '100%', fontSize: 13 }}
       />
       <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
         <button
           type="button"
           onClick={() => void decide('approve')}
           disabled={busy !== null}
-          style={{ ...buttonStyle, padding: '6px 10px', fontSize: 13 }}
+          className="button primary"
         >
           {busy === 'approve' ? '处理中…' : '通过并发布'}
         </button>
@@ -145,7 +141,7 @@ export function AdminDecisionForm({
           type="button"
           onClick={() => void decide('needs_changes')}
           disabled={busy !== null}
-          style={{ ...secondaryButtonStyle, padding: '6px 10px', fontSize: 13 }}
+          className="button"
         >
           {busy === 'needs_changes' ? '处理中…' : '需修改'}
         </button>

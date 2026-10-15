@@ -13,12 +13,12 @@ export default async function NotFound() {
   const headerList = await headers();
   const requestId = headerList.get('x-request-id');
 
-  const linkStyle = { color: '#2456B8' } as const;
+  const linkStyle = { color: 'var(--accent)' } as const;
 
   return (
-    <div style={{ background: '#FFFFFF', border: '1px solid #DBE1EA', borderRadius: 10, padding: 20, maxWidth: 720 }}>
-      <h1 style={{ fontSize: 20, margin: '0 0 8px' }}>找不到这个页面</h1>
-      <p style={{ color: '#526174', margin: '0 0 12px' }}>
+    <div className="panel" style={{ maxWidth: 720 }}>
+      <h1 style={{ marginBottom: 8 }}>找不到这个页面</h1>
+      <p className="muted" style={{ marginBottom: 12 }}>
         地址可能写错了，或者它指向的内容已经被作者撤回 / 被隐藏。
         <strong>撤回或隐藏不是删除</strong>：原作者仍能在「我的」里看到自己的草稿与历史。
       </p>
@@ -37,7 +37,7 @@ export default async function NotFound() {
         </Link>
       </p>
       {requestId ? (
-        <p style={{ color: '#526174', fontSize: 14, marginTop: 12, marginBottom: 0 }}>
+        <p className="muted" style={{ marginTop: 12, marginBottom: 0 }}>
           本次请求编号：<code style={{ fontFamily: 'ui-monospace, Consolas, monospace' }}>{requestId}</code>（服务端日志里是同一行）
         </p>
       ) : null}

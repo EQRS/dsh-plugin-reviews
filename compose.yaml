@@ -16,7 +16,7 @@
 # ⚠️ 数据目录属主与容器内 UID 必须对得上，否则容器里的 dsh 用户写不进库。
 #    镜像里固定是 10001:10001；**但宿主目录的属主往往是别的号**（本机线上是 989:989），
 #    所以三个服务都接受 `DSH_REVIEW_UID` / `DSH_REVIEW_GID` 覆盖 —— 这样"换部署方式"
-#    不必去动主人的数据属主，systemd 与 compose 随时可以互相接管。见 deploy/README.md。
+#    不必去动主人的数据属主，systemd 与 compose 随时可以互相接管。见 docs/部署-README.md。
 
 name: dsh-plugin-review
 

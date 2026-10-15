@@ -9,7 +9,7 @@
  * 把状态改成 `approved` 就结束了 —— **没有任何东西去发布**。
  * 真人点「通过」之后内容永远不公开，而两个验收脚本都在"通过"之后**直接调用 `publishReview`**，
  * 把这条缝盖住了：单测全绿、验收全绿，页面上的主路径却是断的。
- * 这与"worker handlers 是空注册表"是同一类问题（见 README-切片说明.md §5）。
+ * 这与"worker handlers 是空注册表"是同一类问题（见 docs/README-切片说明.md §5）。
  *
  * worker 的 `review_check` 处理器在**自动检查通过**时会入队 `review_publish`
  * （见 `src/worker/handlers.ts`）。人工通过是另一条通向 `approved` 的路，

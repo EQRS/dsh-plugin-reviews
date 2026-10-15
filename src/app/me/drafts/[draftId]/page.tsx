@@ -19,10 +19,8 @@ export default async function DraftEditorPage({ params }: { params: Promise<{ dr
     return (
       <div>
         <h1 style={{ fontSize: 22 }}>需要登录</h1>
-        <p style={{ color: '#526174' }}>编辑草稿需要登录。请使用页面顶部的登录入口。</p>
-        <Link href="/me" style={{ color: '#2456B8' }}>
-          ← 返回我的评测
-        </Link>
+        <p className="muted">编辑草稿需要登录。请使用页面顶部的登录入口。</p>
+        <Link href="/me">← 返回我的评测</Link>
       </div>
     );
   }

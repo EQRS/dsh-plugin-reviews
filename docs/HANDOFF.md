@@ -21,7 +21,7 @@
 **已部署到一台 Linux VPS 并在线上又跑通一次真实登录**（2026-10-13）：
 **http://5.231.26.36** —— web + worker 双 systemd 常驻、跑在 `dsh` 用户下、全新空库
 （因此 `BOOTSTRAP_ADMIN_GITHUB_ID` 真的生效，第一次登录即管理员）。步骤与坑见
-[deploy/README.md](deploy/README.md)。**仍是 HTTP、没有备份、没上域名**。
+[部署-README.md](部署-README.md)。**仍是 HTTP、没有备份、没上域名**。
 
 **第三轮补掉的是"页面上的洞"**（§1.2 第 16、17 条）：后台审核按钮、作者撤回按钮、评论回复、
 `/onboarding`、首个管理员指定方式 —— 以及一个真正的断点：**人工通过之后没有任何东西去发布**。
@@ -123,20 +123,20 @@
 | 真实 GitHub 收录 | 成功收录 `packages/bundle/base` | 见 §5.1 |
 | 浏览器真登录（测试通道） | 导航栏变为真实用户 ID + 登出 | 见 §5.2 |
 | **真实 GitHub OAuth 往返** | **通过**（真账号 `liceses` → 授权 → 回调建号 → onboarding → 提为管理员） | 见 §5.4 |
-| **线上部署（Linux VPS）** | **通过**：http://5.231.26.36 ，web+worker 双 systemd，真机登录后 `users=1 role=admin` | 见 [deploy/README.md](deploy/README.md) |
+| **线上部署（Linux VPS）** | **通过**：http://5.231.26.36 ，web+worker 双 systemd，真机登录后 `users=1 role=admin` | 见 [部署-README.md](部署-README.md) |
 | 凭据预检（假 code 换 token） | `bad_verification_code`（= 凭据配对正确） | 见 §5.4 第 3 步 |
 | **健康检查 `/api/health`** | **通过**（16 条新测试）：结构坏了 503、公网 body 不含逐项检查、`?worker=1` 才把 worker 算进结论 | `tests/health.test.ts` |
 | **worker 运行时心跳** | **通过（正反两向真跑）**：worker 起来后心跳新鲜、`diagnose` 显示 ok；停掉且阈值压到 1 秒 → 判 dead、退出码 1 | `migrations/0004`、`scripts/worker-healthcheck.mjs` |
 | **访问日志（每请求一行，含状态码与耗时）** | **通过**：生产下打出 `http_request` 行（200/404/400 都验过），`/api/health` 与 `/_next/*` 静音；`request_id` 与响应头/响应体**同一个号** | `server.mjs` + `tests`… 见 §4.5 相关坑 |
 | **未捕获异常链路（digest 闭环）** | **通过**：故意抛异常的页面 → HTTP 500 → `request_error` 日志含 `path`/`digest`/`stack`，用户错误页上显示**同一个** digest（浏览器实测） | `src/instrumentation*.ts`、`src/app/error.tsx` |
 | **中文 404 / 错误页** | **通过**：404 页含中文说明、三个入口与本次 `request_id`；错误页含 digest、重试、回首页 | `src/app/not-found.tsx`、`error.tsx`、`global-error.tsx` |
-| **线上已带可观测性** | **通过（2026-10-13 21:22 重启后实测）**：线上 `/api/health` 200 `schema 0004`、访问日志 `http_request` 有行、启动自检有行、worker 心跳 3 秒前、中文 404 生效、无 error 级日志 | `deploy/README.md` §当前线上状态 |
+| **线上已带可观测性** | **通过（2026-10-13 21:22 重启后实测）**：线上 `/api/health` 200 `schema 0004`、访问日志 `http_request` 有行、启动自检有行、worker 心跳 3 秒前、中文 404 生效、无 error 级日志 | `部署-README.md` §当前线上状态 |
 | **插件目录：搜索 / 筛选 / 排序 / 分页** | **通过**：搜索命中名称·仓库·简介三字段；`q=%` 与 `q=_` 得 **0 条**（转义生效，不匹配全表）；标签筛选、`has_reviews` 三态、两种空状态文案不同、越界页单独提示、未知 id → 404 | `tests/catalog-browse.test.ts`（12 条）+ `node scripts/acceptance-catalog-browse.mjs`（**10/10**，对运行中的服务发真请求） |
 | **目录卡片真实资料（迁移 0005）** | **通过（真 GitHub）**：回填 `deepseek-ai/deepseek-harness / packages/bundle/base` 后，库里真有 `display_name=@deepseek-ai/dsh-base`、`manifest_version=0.2.1-alpha.2`、`topics=["ai-agents","cordis","dsh","dsh-plugin"]`、owner 头像 URL、仓库更新时间 | `npx tsx scripts/backfill-plugin-info.mjs --apply`，结果见 README §验收脚本 |
 | **时区修正** | **通过**：全站时间改用固定 `Asia/Shanghai` 格式化（原先用 `toLocaleString('zh-CN')` = 服务器本地时区，线上 UTC 会**整体差 8 小时**） | `src/packages/common/time.ts`，7 处调用点已替换 |
 | **请求频控（迁移 0006）** | **通过**：评论变更 5/分/用户（合并计数）、插件提交 10/时/用户；超限 **429 + `retry_after_seconds`**；**同键同内容重放不占额度且返回原结果**；同键换正文给 409；并发 20 次恰好放过 5 次 | `tests/rate-limit.test.ts`（13 条）+ `npx tsx scripts/acceptance-rate-limit.mjs`（**12/12**，真 HTTP） |
-| **频控已上线上（2026-10-13 22:29）** | **通过（能验的部分）**：`/api/health` → `schema_version 0006_rate_limiter.sql`；`selfcheck` → `missingTables: []`、`problems: []`；三个页面 200；近 200 行日志 **0 条 error**。**未验**："打满 6 次拿 429" 需真人登录（生产关掉了测试登录通道）| `deploy/README.md` §当前线上状态 |
-| **自动发现上线并完成第一波入库（2026-10-14 17:41）** | **通过**：worker 启动日志 `handler_count: 5` / `scheduled_tasks: true` / 已排入 `daily:2026-10-14`；第一波 `plugins_found 9 / accepted 9 / created 9`、第二波再 9 条 → 线上目录 **17 个真实插件**；`selfcheck` schema 0007、`missingTables: []`；页面"共 17 个条目"、`?q=dsh` 命中 16；审计 18 条全是 `actor_kind='system'` | `logs`（worker journal）+ `deploy/README.md` §当前线上状态 |
+| **频控已上线上（2026-10-13 22:29）** | **通过（能验的部分）**：`/api/health` → `schema_version 0006_rate_limiter.sql`；`selfcheck` → `missingTables: []`、`problems: []`；三个页面 200；近 200 行日志 **0 条 error**。**未验**："打满 6 次拿 429" 需真人登录（生产关掉了测试登录通道）| `部署-README.md` §当前线上状态 |
+| **自动发现上线并完成第一波入库（2026-10-14 17:41）** | **通过**：worker 启动日志 `handler_count: 5` / `scheduled_tasks: true` / 已排入 `daily:2026-10-14`；第一波 `plugins_found 9 / accepted 9 / created 9`、第二波再 9 条 → 线上目录 **17 个真实插件**；`selfcheck` schema 0007、`missingTables: []`；页面"共 17 个条目"、`?q=dsh` 命中 16；审计 18 条全是 `actor_kind='system'` | `logs`（worker journal）+ `部署-README.md` §当前线上状态 |
 
 端到端脚本覆盖：登录 → 会话接口 → 收录真实插件 → 建草稿 → 保存 → **过期版本被拒** → 提交(pending)
 → **真 worker 进程** → `published` → 公开修订指针切换 → 匿名可读 → 发评论 → worker 发布

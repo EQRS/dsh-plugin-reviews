@@ -31,6 +31,14 @@ export class ApiError extends Error {
   readonly code: string;
   readonly status: number;
   readonly fields: BusinessError['fields'];
+  /**
+   * 后端附带的机器可读上下文（例如频控的 `retry_after_seconds`）。
+   *
+   * 此前这里把它丢掉了 —— 后端明明算好了"还要等几秒"（`rate-limit.ts` 写入
+   * `context.retry_after_seconds`），界面却只能说一句"操作失败"，用户无从知道等多久。
+   * 现在原样保留，由界面按需使用（不参与流程判断：流程判断仍然只看 `code`）。
+   */
+  readonly context?: Record<string, string | number | boolean | null>;
 
   constructor(error: BusinessError, status: number) {
     // 原样保留后端 message —— 界面直接显示这句话，不做二次加工。
@@ -39,6 +47,13 @@ export class ApiError extends Error {
     this.code = error.code;
     this.status = status;
     this.fields = error.fields;
+    this.context = error.context;
+  }
+
+  /** 被频控时服务端给出的等待秒数（没有就是 null）。 */
+  retryAfterSeconds(): number | null {
+    const raw = this.context?.['retry_after_seconds'];
+    return typeof raw === 'number' && raw > 0 ? raw : null;
   }
 
   /** 把字段级错误拼成一行可读提示（后端已给出稳定字段路径）。 */
@@ -102,32 +117,30 @@ export function newRequestKey(): string {
   return `rk-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-/** 统一的错误提示条。 */
+/** 统一的错误提示条（失败=红系；语义与"警告/提示"分开）。 */
 export function ErrorNotice({ error, onDismiss }: { error: ApiError; onDismiss?: () => void }) {
   const fields = error.describeFields();
+  // 频控是**可解释**的失败：服务端已经算好还要等几秒，就必须说出来，
+  // 否则用户只会反复点、反复失败（`docs/验收纪律.md`：不装作成功，也不隐瞒原因）。
+  const waitSeconds = error.retryAfterSeconds();
   return (
     <div
       role="alert"
+      className="notice danger"
       style={{
-        background: '#FDF2F2',
-        border: '1px solid #F5B5B5',
-        borderRadius: 8,
-        padding: '10px 12px',
         margin: '12px 0',
-        color: '#8A1C1C',
         fontSize: 14,
       }}
     >
       <div>
         <strong>操作失败</strong>（<code>{error.code}</code>）：{error.message}
       </div>
+      {waitSeconds !== null ? (
+        <div style={{ marginTop: 4 }}>建议等待约 {waitSeconds} 秒后重试（服务端给出的等待时长）。</div>
+      ) : null}
       {fields ? <div style={{ marginTop: 4 }}>字段问题：{fields}</div> : null}
       {onDismiss ? (
-        <button
-          type="button"
-          onClick={onDismiss}
-          style={{ marginTop: 6, background: 'none', border: 'none', color: '#8A1C1C', cursor: 'pointer', padding: 0 }}
-        >
+        <button type="button" onClick={onDismiss} className="link-btn danger" style={{ marginTop: 6 }}>
           知道了
         </button>
       ) : null}
@@ -135,18 +148,14 @@ export function ErrorNotice({ error, onDismiss }: { error: ApiError; onDismiss?:
   );
 }
 
-/** 成功提示条。 */
+/** 成功提示条（成功=绿系）。 */
 export function SuccessNotice({ children }: { children: React.ReactNode }) {
   return (
     <div
       role="status"
+      className="notice success"
       style={{
-        background: '#F0F7F2',
-        border: '1px solid #A9D5B8',
-        borderRadius: 8,
-        padding: '10px 12px',
         margin: '12px 0',
-        color: '#1E5B32',
         fontSize: 14,
       }}
     >
@@ -156,8 +165,8 @@ export function SuccessNotice({ children }: { children: React.ReactNode }) {
 }
 
 export const buttonStyle: React.CSSProperties = {
-  background: '#2456B8',
-  color: '#FFFFFF',
+  background: 'var(--accent)',
+  color: 'var(--on-primary)',
   border: 'none',
   borderRadius: 6,
   padding: '8px 14px',
@@ -166,9 +175,9 @@ export const buttonStyle: React.CSSProperties = {
 };
 
 export const secondaryButtonStyle: React.CSSProperties = {
-  background: '#FFFFFF',
-  color: '#2456B8',
-  border: '1px solid #2456B8',
+  background: 'var(--surface)',
+  color: 'var(--accent)',
+  border: '1px solid var(--accent)',
   borderRadius: 6,
   padding: '8px 14px',
   cursor: 'pointer',
@@ -178,7 +187,7 @@ export const secondaryButtonStyle: React.CSSProperties = {
 export const inputStyle: React.CSSProperties = {
   width: '100%',
   boxSizing: 'border-box',
-  border: '1px solid #DBE1EA',
+  border: '1px solid var(--line-strong)',
   borderRadius: 6,
   padding: '8px 10px',
   fontSize: 15,

@@ -50,7 +50,7 @@ export const DISCOVERY_DEFAULTS = {
  * 一轮发现的典型开销 ≈ 每仓库 2-3 次 + 每个收录 3 次，30 个插件的预算在未认证下必然撞 403。
  * 与其撞上限流再失败，不如按配额给预算：小步走、当天多走几轮。
  *
- * （想要一次导得多，就在服务器 `.env.local` 里加一个**只读**的 `GITHUB_TOKEN` —— 见 deploy/README.md。）
+ * （想要一次导得多，就在服务器 `.env.local` 里加一个**只读**的 `GITHUB_TOKEN` —— 见 docs/部署-README.md。）
  */
 export function discoveryBudgetFor(env: Record<string, string | undefined>): {
   searchPages: number;
