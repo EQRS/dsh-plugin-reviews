@@ -1,16 +1,19 @@
 'use client';
 
 /**
- * 导航栏登录态（任务 7 第 1 项）。
+ * 导航栏登录态（任务 7 第 1 项）+ 页面布局.md §2 的顶栏结构：
+ * 左侧 站名 / 插件 / 评测（整合包还没有页面，不放死链），右侧 通知与账户。
  *
  * 状态**全部来自 `GET /api/session`**，不靠假设、也不靠本地猜测：
- *   - `authenticated` 决定显示"登录"还是"用户名 + 登出"；
+ *   - `authenticated` 决定显示"登录"还是"账户"；
  *   - `githubLoginConfigured` 为 false 时，GitHub 按钮**明说未配置**并禁用，
  *     不让用户点进一个 503 HTML 页面才算发现；
  *   - `testLoginEnabled` 为 true 时才出现测试登录入口（开发用，生产恒为 false）。
  *
  * 登录成功后不整页跳转刷新之外的额外状态同步：直接重取会话，
  * 避免"界面说登录了、服务端其实没会话"这种假状态。
+ *
+ * 视觉全部走 globals.css 的类名；这里不再出现内联颜色。
  */
 
 import Link from 'next/link';
@@ -91,105 +94,69 @@ export function SessionNav() {
 
   return (
     <div>
-      <nav style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', gap: 16, alignItems: 'center' }}>
-        <Link href="/" style={{ color: '#2456B8', fontWeight: 600, textDecoration: 'none' }}>
+      <nav className="header-inner" aria-label="全站导航">
+        <Link href="/" className="brand">
           DSH Plugin Review
         </Link>
-        <Link href="/plugins" style={{ color: '#526174', textDecoration: 'none' }}>
-          插件
-        </Link>
-        <Link href="/plugins/new" style={{ color: '#526174', textDecoration: 'none' }}>
-          收录插件
-        </Link>
-        <Link href="/reviews" style={{ color: '#526174', textDecoration: 'none' }}>
-          评测
-        </Link>
-        <Link href="/me" style={{ color: '#526174', textDecoration: 'none' }}>
-          我的
-        </Link>
+        <div className="main-nav">
+          <Link href="/plugins">插件</Link>
+          <Link href="/reviews">评测</Link>
+        </div>
 
-        {/* 登录态区域：靠 marginLeft:auto 推到右侧 */}
-        <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', fontSize: 14 }}>
+        <div className="account">
           {session === null ? (
-            <span style={{ color: '#526174' }}>正在读取登录状态…</span>
+            <span className="muted">正在读取登录状态…</span>
           ) : session.authenticated ? (
             <>
               <Link
                 href="/me/notifications"
-                style={{ color: '#2456B8', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
               >
                 通知
                 {unread !== null && unread > 0 ? (
-                  <span
-                    aria-label={`${unread} 条未读通知`}
-                    style={{
-                      background: '#B4232A',
-                      color: '#FFFFFF',
-                      borderRadius: 10,
-                      padding: '1px 7px',
-                      fontSize: 12,
-                      fontWeight: 600,
-                    }}
-                  >
+                  <span className="badge-count" aria-label={`${unread} 条未读通知`}>
                     {unread > 99 ? '99+' : unread}
                   </span>
                 ) : null}
               </Link>
-              <span style={{ color: '#526174' }}>
-                {session.userId}
-                {session.role === 'admin' ? '（管理员）' : ''}
-                {session.accountStatus === 'disabled' ? '（已禁用）' : ''}
-              </span>
-              <button
-                type="button"
-                onClick={() => void signOut()}
-                disabled={busy}
-                style={{ background: 'none', border: '1px solid #DBE1EA', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', color: '#526174' }}
-              >
+              <Link href="/me" className="account-chip" title={`账户 ${session.userId}`}>
+                <span className="truncate">
+                  {session.userId}
+                  {session.role === 'admin' ? '（管理员）' : ''}
+                  {session.accountStatus === 'disabled' ? '（已禁用）' : ''}
+                </span>
+              </Link>
+              <button type="button" onClick={() => void signOut()} disabled={busy}>
                 登出
               </button>
             </>
           ) : (
             <>
               {session.githubLoginConfigured ? (
-                <a
-                  href="/api/auth/github/start"
-                  style={{ background: '#2456B8', color: '#FFFFFF', borderRadius: 6, padding: '6px 12px', textDecoration: 'none' }}
-                >
+                <a href="/api/auth/github/start" className="button primary">
                   用 GitHub 登录
                 </a>
               ) : (
                 // 未配置时明说未配置，而不是给一个会返回 503 HTML 的链接。
                 <span
+                  className="account-chip"
                   title="服务端未设置 GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET"
-                  style={{
-                    background: '#F3F5F8',
-                    border: '1px dashed #DBE1EA',
-                    borderRadius: 6,
-                    padding: '6px 10px',
-                    color: '#8A6D1C',
-                    cursor: 'not-allowed',
-                  }}
+                  style={{ borderStyle: 'dashed', cursor: 'not-allowed', color: 'var(--warn-ink)' }}
                 >
                   GitHub 登录未配置
                 </span>
               )}
               {session.testLoginEnabled ? (
-                <button
-                  type="button"
-                  onClick={() => void signInForTest()}
-                  disabled={busy}
-                  style={{ background: '#FFFFFF', border: '1px solid #2456B8', color: '#2456B8', borderRadius: 6, padding: '5px 10px', cursor: 'pointer' }}
-                >
+                <button type="button" onClick={() => void signInForTest()} disabled={busy}>
                   {busy ? '登录中…' : '测试登录（开发）'}
                 </button>
               ) : null}
             </>
           )}
-        </span>
+        </div>
       </nav>
       {error ? (
-        <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+        <div className="header-inner">
           <ErrorNotice error={error} onDismiss={() => setError(null)} />
         </div>
       ) : null}
