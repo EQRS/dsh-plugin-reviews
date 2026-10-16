@@ -63,17 +63,10 @@ const DESTINATIONS: Destination[] = [
       </svg>
     ),
   },
-  {
-    href: '/me',
-    label: '我的',
-    match: ['/me', '/onboarding'],
-    icon: (
-      <svg {...STROKE}>
-        <circle cx="12" cy="8" r="3.6" />
-        <path d="M4.5 20a7.5 7.5 0 0 1 15 0" />
-      </svg>
-    ),
-  },
+  /*
+   * 原来第三个是「我的」。主人要求删掉：个人中心相关入口（评测/通知/个人设置/登出）
+   * 都收进右上角那个**侧边抽屉**里，底部只留"去哪里找内容"这两个目的地。
+   */
 ];
 
 export function BottomNav() {

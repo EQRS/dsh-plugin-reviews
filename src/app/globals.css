@@ -531,14 +531,7 @@ p {
   min-width: 0;
 }
 
-.footer {
-  max-width: var(--width-content);
-  margin: 0 auto;
-  padding: 20px 24px 40px;
-  border-top: 1px solid var(--line);
-  color: var(--faint);
-  font-size: 13px;
-}
+/* .footer 已随页脚删除（主人要求去掉下栏），不留死样式 */
 
 /* 首页英雄区（参照 .home-hero / .article-main-title）：
    站名作为大字标题直接落在深色底上，不套面板——这是参照站最显眼的一条视觉语言。
@@ -945,24 +938,34 @@ label {
   font-size: 12px;
   font-weight: 600;
 }
+/* 筛选胶囊：与 .tag 共用**同一套标准尺寸**（--chip-*）与 M3 filter chip 语言。
+   之前这里是另一套样式（36px 高、药丸底、选中用强调色实底），和全站 26px 的 chip 标准不一致
+   —— 主人要求"把这些胶囊修复一下"，指的就是这个不一致。 */
 .filters a {
-  padding: 5px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  color: var(--muted);
-  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--chip-height);
+  padding: 0 var(--chip-padding-x);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--chip-radius);
+  background: transparent;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--chip-font-size);
+  font-weight: 500;
   text-decoration: none;
-  transition: all var(--transition-fast);
+  transition: background-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+    border-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
 }
 .filters a:hover {
-  border-color: var(--line-strong);
-  color: var(--ink);
+  border-color: var(--md-sys-color-on-surface-variant);
+  color: var(--md-sys-color-on-surface);
 }
 .filters a.active {
   border-color: transparent;
-  background: var(--accent);
-  color: var(--on-primary);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+  box-shadow: none;
 }
 .filters .divider {
   color: var(--line);
@@ -2047,17 +2050,33 @@ aside h2 {
 .tag {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   height: var(--chip-height);
   margin: 0 6px 6px 0;
   padding: 0 var(--chip-padding-x);
   border: 1px solid var(--md-sys-color-outline-variant);
-  border-radius: var(--md-sys-shape-corner-small);
+  border-radius: var(--chip-radius);
   background: transparent;
   color: var(--md-sys-color-on-surface-variant);
   font-size: var(--chip-font-size);
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
+}
+
+/* 筛选区：每个"标签 + 一组胶囊"是一个整体（.filter-group）；
+   组内换行、组之间换行 —— 不再出现"排序:"标签被留在上一行、胶囊跑到下一行的情况。 */
+.filters.filter-groups {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
 }
 .tag.site {
   border-color: transparent;
@@ -2400,17 +2419,151 @@ input[type='search']:focus {
 :root {
   /* 桌面栅格留白 28px，手机端由下面的媒体查询收到 16px */
   --gutter: 28px;
-  /* 页面级返回按钮与下方内容的间距 —— **全站标准**（主人指定：页面标题/内容不要贴着返回入口）。
+/* 页面级返回按钮与下方内容的间距 —— **全站标准**（主人指定：页面标题/内容不要贴着返回入口）。
      所有 .back-link 都吃这个值，所以以后调一处即可全站一致。 */
   --gap-backlink: 32px;
   /* 固定顶栏与页面内容之间的间距 —— 也是全站标准（主人要求"标题离顶栏再远一点"） */
   --gap-header-content: 44px;
-  /* 胶囊（chip）标准尺寸 —— 主人要求比 M3 默认的 32dp 整体小一档，全站统一取这一组值。
-     改这里即改全站（.tag 与筛选 chip 都吃它）。 */
-  --chip-height: 26px;
-  --chip-padding-x: 10px;
+  /* 胶囊（chip）标准尺寸 —— **全站统一标准**，改这里即改全站。
+     主人两轮要求：先"整体缩小成一个标准"，再"再缩小一些、并修复居中" → 现值 22px。
+     所有胶囊（.tag / 筛选 / 分类 / 个人中心栏目 / 只看未读）都吃这三个变量。 */
+  --chip-height: 22px;
+  --chip-padding-x: 9px;
   --chip-font-size: 12px;
+  /* 胶囊圆角（M3 small = 8px）；独立一个变量便于统一调整 */
+  --chip-radius: var(--md-sys-shape-corner-small);
 }
+
+  /* 搜索行：输入框 + 放大镜按钮**同一行**（主人要求），不再换行占两行 */
+.search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.search input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* 放大镜按钮：M3 filled 图标按钮（主色底 + 圆形），与药丸输入框配对 */
+.search-go {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: var(--md-sys-shape-corner-full);
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+  cursor: pointer;
+  transition: background-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+}
+.search-go:hover {
+  background: color-mix(in srgb, var(--md-sys-color-primary) 92%, var(--md-sys-color-on-primary));
+}
+
+/* ------------------------------------------------------- 手机端侧边抽屉（M3）
+   桌面端不显示触发键，手机上不显示右上角账户 chip —— 同一份入口内容，两种形态。
+   ⚠️ 这里必须写成 `.icon-btn.drawer-trigger`（两分）：只写 `.drawer-trigger` 会被
+   `.icon-btn { display: inline-flex }` 盖过，桌面端就会冒出一个菜单图标（实测踩到）；
+   用 `:where()` 压到零特异性同样会输给 `.icon-btn`。移动端那条要写成同分且排在后面。 */
+.icon-btn.drawer-trigger {
+  display: none;
+}
+.site-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1201;
+  width: min(320px, 86vw);
+  padding: 12px 12px calc(16px + env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  background: var(--md-sys-color-surface-container);
+  border-radius: var(--md-sys-shape-corner-large) 0 0 var(--md-sys-shape-corner-large);
+  box-shadow: var(--md-sys-elevation-level3);
+  animation: drawer-in var(--md-sys-motion-duration-medium2)
+    var(--md-sys-motion-easing-emphasized-decelerate) both;
+}
+@keyframes drawer-in {
+  from {
+    opacity: 0.6;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.drawer-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: color-mix(in srgb, var(--md-sys-color-scrim) 44%, transparent);
+  animation: fx-fade var(--md-sys-motion-duration-medium1) var(--md-sys-motion-easing-standard) both;
+}
+/* 菜单行的**共用布局**：下拉菜单与侧边抽屉都用它。
+   ⚠️ 之前这套 display:flex 只写在 `.account-dropdown .menu-row` 里，抽屉里的行因此没有布局规则，
+   渲染成"横着排一行"（实测截图发现）。抽成不限定容器的规则，两处共用。 */
+.menu-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  border-radius: var(--md-sys-shape-corner-extra-small);
+  background: none;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-label-large-size);
+  font-weight: 500;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+    color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+}
+.menu-row:hover {
+  background: var(--md-sys-color-surface-container-highest);
+  color: var(--md-sys-color-on-surface);
+}
+.menu-row > svg:first-child {
+  flex: 0 0 20px;
+  color: var(--faint);
+}
+.menu-row:hover > svg:first-child {
+  color: var(--accent);
+}
+.menu-row.danger {
+  color: var(--md-sys-color-error);
+}
+.menu-row.danger > svg:first-child {
+  color: var(--md-sys-color-error);
+}
+.menu-row.danger:hover {
+  background: color-mix(in srgb, var(--md-sys-color-error) 10%, transparent);
+  color: var(--md-sys-color-error);
+}
+.menu-row:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+.menu-row-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 抽屉里的条目：高度与内边距按触屏规格给足 */
+.site-drawer .menu-row {
+  min-height: 48px;
+  padding: 0 12px;
+}
+.site-drawer .menu-label {
+  margin: 12px 0 4px;
+  padding: 0 12px;
+}
+
 /* ⚠️ 顶栏是 `position: fixed`，所以主区的**顶部留白必须让开顶栏高度**。
    本轮重写这条时一度漏掉这一步，实测手机端标题被压在顶栏下面（h1 top=32 / 顶栏 bottom=64）。
    这里用 calc 让它跟着 --header-height 走，顶栏高度一改（桌面 64 / 手机 56）就自动跟随。
@@ -2702,25 +2855,112 @@ input[type='search']:focus {
   .notice {
     padding: 12px 14px;
   }
-  /* 筛选 chip 行：横向滚动而不是换行堆成三排 */
+  /* 筛选 chip 行：手机上**换行**，不要横向滚动。
+     实测截图：横向滚动会把"排序:"、后台的"需要…"切在屏幕外，用户根本不知道右边还有内容；
+     换行最多两排，看得全、也不用做"隐藏可滚动"的发现成本。 */
   .filters {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    padding-bottom: 4px;
-    scrollbar-width: none;
-  }
-  .filters::-webkit-scrollbar {
-    display: none;
+    flex-wrap: wrap;
+    overflow-x: visible;
   }
   .filters > * {
     flex: 0 0 auto;
   }
-  /* 表格：允许横向滚动，否则会把整页撑宽（M3 数据表在窄屏也应可横滚） */
+  /* 分类侧栏：手机上由纵向列表改成横向 chip 行（与首页同一套阅读动作），
+     省掉一整块竖向空间（实测这块原本占约 130px）。 */
+  .catalog-layout aside .side-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .catalog-layout aside .side-nav a {
+    /* 与筛选 chip / .tag 完全同一套标准（之前这里还留着 8px 纵向内边距 → 36px 高，偏大） */
+    display: inline-flex;
+    align-items: center;
+    height: var(--chip-height);
+    padding: 0 var(--chip-padding-x);
+    border-radius: var(--md-sys-shape-corner-small);
+    background: var(--md-sys-color-surface-container-highest);
+    color: var(--md-sys-color-on-surface-variant);
+    font-size: var(--chip-font-size);
+    font-weight: 500;
+  }
+  .catalog-layout aside .side-nav a.active {
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+  }
+  /*
+   * 个人中心的栏目（我的/评测/通知/个人设置）在手机上同样是**胶囊行**，
+   * 并入全局胶囊标准：22px 高、内容居中、未选中描边、选中 secondaryContainer。
+   * （实测它原来是一行 48px 的全圆角大药丸 —— 就是主人指的"全局胶囊还有错误的"。）
+   */
+  .me-side .side-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .me-side .side-nav a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+    height: var(--chip-height);
+    padding: 0 var(--chip-padding-x);
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--chip-radius);
+    background: transparent;
+    color: var(--md-sys-color-on-surface-variant);
+    font-size: var(--chip-font-size);
+    font-weight: 500;
+  }
+  .me-side .side-nav a.active {
+    border-color: transparent;
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+  }
+  /*
+   * 列表行在手机上更紧凑（主人反馈"每个文章的大小都显得很大"）：
+   * 标题从 title-medium(16) 降到 title-small(14)，元信息降一档并收紧行距与外边距。
+   */
+  .item-list > .item {
+    min-height: 0;
+    padding: 12px;
+  }
+  .item-title {
+    font-size: var(--md-sys-typescale-title-small-size);
+    line-height: var(--md-sys-typescale-title-small-line);
+  }
+  .item-main .list-meta {
+    margin-top: 2px;
+    gap: 2px 12px;
+    font-size: var(--md-sys-typescale-body-small-size);
+    /* 手机上尽量收成一行：插件名过长时省略号截断，但**保底约 8 个字符可见**
+       （第一版用 flex:1 1 auto + 0 宽度，结果插件名被整段省略掉 —— 那等于丢了
+       "这篇评的是哪个插件"，比多一行更糟）。实在放不下时才换到第二行。 */
+    flex-wrap: wrap;
+  }
+  .item-main .list-meta > * {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .item-main .list-meta > *:first-child {
+    flex: 1 1 8ch;
+  }
+  .item-main .list-meta > *:not(:first-child) {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+  /* 表格：横向滚动 + **不换行**。实测窄屏里逐格换行会把表格挤成"文字麻花"，
+     不如给足宽度让它横滚（M3 数据表在窄屏也是横滚）。 */
   .panel:has(> table) {
     overflow-x: auto;
   }
   .panel > table {
-    min-width: 560px;
+    min-width: 720px;
+  }
+  .panel table th,
+  .panel table td {
+    white-space: nowrap;
   }
   /* 侧栏类布局一律单列 */
   .catalog-layout,
@@ -2743,18 +2983,18 @@ input[type='search']:focus {
 }
 
 @media (max-width: 600px) {
-  .search {
-    flex-wrap: wrap;
-  }
-  .search input {
-    flex: 1 1 100%;
-  }
-  /* 搜索按钮在手机上占满一行更好点 */
-  .search .button {
-    flex: 1 1 auto;
-  }
   .stat-row {
     grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  }
+}
+
+/* 手机端：入口形态切换 —— 显示菜单图标 + 抽屉，隐藏右上角的账户 chip/菜单 */
+@media (max-width: 900px) {
+  .icon-btn.drawer-trigger {
+    display: inline-flex;
+  }
+  .account-menu {
+    display: none;
   }
 }
 
@@ -2968,18 +3208,81 @@ input[type='search']:focus {
 /* M3 规定：触摸设备上的可点区不小于 48dp（视觉高 40dp 的按钮要给出更大的命中区）。
    只在粗指针设备上放大，桌面鼠标下仍保持 M3 的 40dp 视觉高度。 */
 @media (pointer: coarse) {
+  /*
+   * 触屏上**不放大视觉尺寸**（主人反馈"按钮都太大了，看着不舒服"）：
+   * 改为用透明伪元素扩大命中区 —— 与 chip 同一套做法，观感不变、可点区仍达标。
+   */
   .button,
   button.button,
   :where(button:not([class]), button[class='']),
   .back-link,
-  .filters a {
+  .icon-btn,
+  .link-btn,
+  .account-trigger,
+  .brand,
+  .search-go {
+    position: relative;
+  }
+  .button::before,
+  button.button::before,
+  :where(button:not([class]), button[class=''])::before,
+  .back-link::before,
+  .icon-btn::before,
+  .link-btn::before,
+  .account-trigger::before,
+  .brand::before,
+  .search-go::before {
+    content: '';
+    position: absolute;
+    inset: -6px -4px;
+  }
+  /* 顶栏品牌与行内动作按钮的命中区单独放大：它们视觉上很矮（24 / 28px），
+     用伪元素补到 44px 才点得中（不影响观感）。 */
+  .brand::before,
+  .link-btn::before {
+    inset: -10px -6px;
+  }
+  /* 输入类：44px 视觉高度足够（软键盘弹起时也更省空间） */
+  input,
+  select,
+  textarea {
+    min-height: 44px;
+  }
+  /*
+   * chip 一律保持 --chip-height 的**标准视觉尺寸** + 命中区兜住 48px。
+   * 这里把**分类侧栏**（手机上也是 chip 行）与筛选 chip 一起收进来 ——
+   * 之前漏了分类那组，所以出现"不是所有胶囊都被改好"（主人指出）。
+   */
+  .filters a,
+  .filter-toggle,
+  .catalog-layout aside .side-nav a,
+  .me-side .side-nav a {
+    position: relative;
+    min-height: var(--chip-height);
+  }
+  .filters a::before,
+  .filter-toggle::before,
+  .catalog-layout aside .side-nav a::before,
+  .me-side .side-nav a::before {
+    content: '';
+    position: absolute;
+    /* 胶囊视觉 22px，外扩 13px → 命中区 48px（观感不变） */
+    inset: -13px -4px;
+  }
+  /* 个人中心的栏目导航保留 48px 大行：它本来就是列表项，密度合适 */
+  .side-nav a {
     min-height: 48px;
   }
-  .icon-btn {
-    width: 48px;
-    height: 48px;
+  /* 列表元信息里的链接：命中区略扩（之前 8px 内边距把行撑太高，主人反馈"文章显得很大"） */
+  .list-meta a,
+  .list-meta button {
+    padding-top: 4px;
+    padding-bottom: 4px;
   }
-  .account-trigger {
-    height: 44px;
+  .item-body a,
+  .facts a,
+  .panel > p a {
+    padding-top: 5px;
+    padding-bottom: 5px;
   }
 }

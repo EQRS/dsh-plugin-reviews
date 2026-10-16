@@ -80,8 +80,21 @@ export default async function HomePage() {
             placeholder="搜插件名、作者仓库或简介"
             aria-label="搜索插件"
           />
-          <button type="submit" className="button primary">
-            搜索
+          {/* 搜索动作简化成一个放大镜图标按钮（主人要求）：与输入框同一行，不再换行占两行 */}
+          <button type="submit" className="search-go" aria-label="搜索">
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <circle cx="11" cy="11" r="7" />
+              <line x1="16.5" y1="16.5" x2="21" y2="21" />
+            </svg>
           </button>
         </form>
 

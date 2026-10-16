@@ -52,11 +52,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         </main>
         {/* 底部导航栏（M3 navigation bar）：≤900px 显示，桌面隐藏 */}
         <BottomNav />
-        <footer className="footer">
-          {/* 页脚只留一句对读者有意义的话。原来那句"本页是最小功能切片的演示载体…
-              见 docs/README-切片说明.md"是写给开发者的项目内部说明，对访问者是废话。 */}
-          DSH Plugin Review · 收录 ≠ 已实测可用
-        </footer>
+        {/* 页脚已按主人要求整块删除（含那条分隔线）。
+            "收录 ≠ 已实测可用"这句诚实声明仍在**插件提交页**与**引导页**上出现，没有丢失。 */}
       </body>
     </html>
   );

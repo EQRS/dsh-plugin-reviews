@@ -208,38 +208,57 @@ export default async function PluginsPage({
                 <input type="hidden" name="has_reviews" value={conditions.hasReviews} />
               ) : null}
               {conditions.sort !== 'info' ? <input type="hidden" name="sort" value={conditions.sort} /> : null}
-              <button type="submit" className="button primary">
-                搜索
+              <button type="submit" className="search-go" aria-label="搜索">
+                {/* 搜索动作简化成放大镜图标按钮（与首页同一形态），与输入框保持同一行 */}
+                <svg
+                  width="22"
+                  height="22"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="11" cy="11" r="7" />
+                  <line x1="16.5" y1="16.5" x2="21" y2="21" />
+                </svg>
               </button>
             </form>
 
-            {/* 筛选 / 排序：都是链接，改条件回第一页（listHref 保证） */}
-            <div className="filters" style={{ marginTop: 'var(--space-3)' }}>
-              <span className="group-label">评测：</span>
-              {(['all', 'yes', 'no'] as const).map((v) => (
-                <Link
-                  key={v}
-                  href={listHref(conditions, { hasReviews: v })}
-                  className={conditions.hasReviews === v ? 'active' : ''}
-                >
-                  {v === 'all' ? '全部' : v === 'yes' ? '已有评测' : '暂无评测'}
-                </Link>
-              ))}
-              <span className="divider" aria-hidden="true">|</span>
-              <span className="group-label">排序：</span>
-              {(['info', 'reviews'] as const).map((v) => (
-                <Link
-                  key={v}
-                  href={listHref(conditions, { sort: v })}
-                  className={conditions.sort === v ? 'active' : ''}
-                >
-                  {v === 'info' ? '按资料更新时间' : '按评测数'}
-                </Link>
-              ))}
+            {/* 筛选 / 排序：都是链接，改条件回第一页（listHref 保证）。
+                主人要求**拆成两组各自成行**：原来"评测:"标签与它的胶囊会被换行拆开，
+                "排序:"标签孤零零留在上一行末尾（实测截图），很难读。 */}
+            <div className="filters filter-groups" style={{ marginTop: 'var(--space-3)' }}>
+              <div className="filter-group">
+                <span className="group-label">评测：</span>
+                {(['all', 'yes', 'no'] as const).map((v) => (
+                  <Link
+                    key={v}
+                    href={listHref(conditions, { hasReviews: v })}
+                    className={conditions.hasReviews === v ? 'active' : ''}
+                  >
+                    {v === 'all' ? '全部' : v === 'yes' ? '已有评测' : '暂无评测'}
+                  </Link>
+                ))}
+              </div>
+              <div className="filter-group">
+                <span className="group-label">排序：</span>
+                {(['info', 'reviews'] as const).map((v) => (
+                  <Link
+                    key={v}
+                    href={listHref(conditions, { sort: v })}
+                    className={conditions.sort === v ? 'active' : ''}
+                  >
+                    {v === 'info' ? '按资料更新时间' : '按评测数'}
+                  </Link>
+                ))}
+              </div>
             </div>
 
             {/* 原来这里有一行"共 N 个条目。收录 ≠ 已实测可用。"，按主人要求删除：
-                条数改成上面的 data-total（验收脚本用），"收录 ≠ 已实测可用"仍然由页脚承担。 */}
+                条数改成上面的 data-total（验收脚本用）；"收录等于不等于已实测可用"这句
+                仍由**插件提交页**（/plugins/new）承担，页脚也已删除。 */}
           </div>
 
           {outOfRange ? (

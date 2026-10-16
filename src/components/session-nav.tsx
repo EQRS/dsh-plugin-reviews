@@ -22,6 +22,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ApiError, ErrorNotice, apiFetch, newRequestKey } from './api-client';
 import { AccountMenu } from './account-menu';
 import { SignInMenu } from './sign-in-menu';
+import { SiteDrawer } from './site-drawer';
 
 interface SessionData {
   authenticated: boolean;
@@ -140,7 +141,8 @@ export function SessionNav() {
               onSignOut={() => void signOut()}
             />
           ) : (
-            /* 未登录：收成一个 filled「登录」按钮 + M3 菜单（真实登录在前，测试通道标"（开发）"） */
+            /* 未登录：收成一个 filled「登录」按钮 + M3 菜单（真实登录在前，测试通道标"（开发）"）
+               —— 这是**桌面**形态；手机上由下面的侧边抽屉承担（CSS 切换显示）。 */
             <SignInMenu
               githubConfigured={session.githubLoginConfigured}
               testLoginEnabled={session.testLoginEnabled}
@@ -148,6 +150,30 @@ export function SessionNav() {
               onTestLogin={() => void signInForTest()}
             />
           )}
+          {/*
+            手机端的入口：菜单图标 + 侧边抽屉（主人要求把账户入口换成"侧边展开的栏"）。
+            桌面端这一段不显示（.drawer-trigger 在宽屏 display:none）。
+          */}
+          <SiteDrawer
+            name={session?.nickname ?? session?.userId ?? '访客'}
+            subtitle={
+              session?.authenticated
+                ? session.accountStatus === 'disabled'
+                  ? `${session.role === 'admin' ? '管理员' : '普通用户'} · 账户已禁用`
+                  : session.role === 'admin'
+                    ? '管理员'
+                    : '普通用户'
+                : '未登录'
+            }
+            initial={(session?.nickname ?? session?.userId ?? '?').slice(0, 1).toUpperCase()}
+            unread={unread}
+            busy={busy}
+            authenticated={session?.authenticated === true}
+            githubConfigured={session?.githubLoginConfigured === true}
+            testLoginEnabled={session?.testLoginEnabled === true}
+            onSignOut={() => void signOut()}
+            onTestLogin={() => void signInForTest()}
+          />
         </div>
       </nav>
       {error ? (
