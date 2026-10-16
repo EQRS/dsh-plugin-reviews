@@ -1,31 +1,19 @@
 'use client';
 
 /**
- * 评测编辑器（任务 7 第 3 项）。
- *
- * 契约（逐字对照 src/app/api/drafts/route.ts，不猜）：
- *   PUT   /api/drafts   { draftId, requestKey, expectedVersion, title, pluginId,
- *                         pluginVersion, dshVersion, body: [{key, markdown}] }
- *                       → { saveVersion, savedAt, replayed }
- *   PATCH /api/drafts   { draftId, requestKey, expectedSaveVersion, title,
- *                         bodyMarkdown, pluginVersion, dshVersion } → 202
- *   POST  /api/drafts/{draftId}/attachments  { originalFilename, usage }
- *                       → { attachmentId, processingState, displayUrl, ... }
- *   PUT   /api/attachments/{attachmentId}/file   raw bytes
- *                       content-type: image/png | image/jpeg | image/webp，≤10MB
- *                       → { processingState, displayUrl, ... }
+ * 评测编辑器。
  *
  * 几个刻意的设计决定：
- *  1. `body` 是**数组** `[{key, markdown}]`，而 PATCH 要的是展平后的 `bodyMarkdown`。
- *     编辑器内部只维护一份 markdown 全文（单一真相），保存时才拆成数组、提交时直接用全文。
- *  2. `expectedVersion` 必须来自**上一次响应**，不能写死 0。冲突(409)时提示刷新版本。
- *  3. 版本字段空值不是省略，而是明确的 `{kind:'unknown'}`（产品规则：未知版本不是退回理由）。
- *  4. 图片两步上传：先登记拿 attachmentId，再 PUT 字节；只有拿到 `displayUrl`
- *     才把 `![文件名](displayUrl)` 插到光标处 —— 未就绪的附件不写进正文。
+ *  1. 编辑器内部只维护一份 markdown 全文（单一真相），保存时才拆成段落数组。
+ *  2. `expectedVersion` 必须来自上一次响应，不能写死 0。冲突时提示刷新版本。
+ *  3. 版本空值不是省略，而是明确的"未知"（产品规则：未知版本不是退回理由）。
+ *  4. 图片两步上传：先登记拿附件 id，再 PUT 字节；只有附件就绪才把图片语法插到正文，
+ *     未就绪的附件不写进正文，可稍后重新查询状态。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { BackLink } from './back-link';
 import {
   ApiError,
   ErrorNotice,
@@ -212,7 +200,7 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
     setSaveVersion(result.saveVersion);
     setSaved(
       result.replayed
-        ? `本次请求此前已处理过（幂等重放），当前保存版本 ${result.saveVersion}。`
+        ? `这次请求此前已处理过，当前保存版本 ${result.saveVersion}。`
         : `已保存，保存版本 ${result.saveVersion}。`,
     );
     return result.saveVersion;
@@ -270,11 +258,7 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
   const [pendingAttachment, setPendingAttachment] = useState<PendingAttachment | null>(null);
 
   /**
-   * 查一次附件的真实状态（`GET /api/attachments/{id}`）。
-   *
-   * 这个接口此前**前端完全没有入口**：PUT 返回未就绪时，界面直接抛错放弃，
-   * 于是"处理中"被当成失败，用户只能重新选文件、把登记与传字节再走一遍。
-   * 现在按状态查询：就绪就插入正文，没就绪就把状态与原因留在界面上。
+   * 查一次附件的真实状态；处理中不是失败，就绪后插入正文。
    */
   const queryAttachment = async (attachmentId: string, filename: string) => {
     setUploading(true);
@@ -303,7 +287,7 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
     }
   };
 
-  /** 图片上传：登记 → PUT 字节 → 就绪则把 displayUrl 插到光标处，未就绪则留下记录可继续查。 */
+  /** 图片上传：登记 → PUT 字节 → 就绪则把图片插到光标处，未就绪则留下记录可继续查。 */
   const onUpload = async (file: File) => {
     setUploading(true);
     setError(null);
@@ -321,7 +305,7 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
         );
       }
 
-      // 第一步：登记（拿 attachmentId）。登记 ≠ 收到字节。
+      // 第一步：登记（拿附件 id）。登记 ≠ 收到字节。
       const registered = await apiFetch<AttachmentView>(`/api/drafts/${encodeURIComponent(draftId)}/attachments`, {
         method: 'POST',
         json: { originalFilename: file.name, usage: 'body' },
@@ -355,7 +339,7 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
         );
       }
 
-      // 还在处理中：**不是失败**。留着这条记录，让用户能查状态，而不是只能重选文件重走一遍。
+      // 还在处理中：不是失败。留着这条记录，让用户能查状态，而不是只能重选文件重走一遍。
       setPendingAttachment({
         attachmentId: registered.attachmentId,
         filename: file.name,
@@ -393,13 +377,9 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
   if (error && !draft) {
     return (
       <div>
+        <BackLink href="/me">返回我的评测</BackLink>
         <h1 style={{ fontSize: 22 }}>无法打开草稿</h1>
         <ErrorNotice error={error} onDismiss={() => setError(null)} />
-        <p>
-          <Link href="/me" style={{ color: 'var(--accent)' }}>
-            ← 返回我的评测
-          </Link>
-        </p>
       </div>
     );
   }
@@ -413,9 +393,8 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
       </p>
 
       {/*
-        插件绑定必须在**动手写之前**说清楚：提交时会校验 plugin_id，
-        而 review_revisions.plugin_id 是 NOT NULL —— 未绑定的草稿保存得了、提交不了。
-        与其让作者写到一半再被拒，不如一进页面就告诉他去哪建草稿。
+        插件绑定要在动手写之前说清楚：提交时会校验插件绑定 ——
+        未绑定的草稿保存得了、提交不了。
       */}
       {draft ? (
         draft.pluginId ? (
@@ -434,7 +413,7 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
           >
             <strong>这份草稿还没有关联插件，无法提交审核。</strong>
             <br />
-            请到插件目录打开对应插件页，用那里的「写一篇评测」新建草稿（已保存的正文不会丢，可复制过去）。
+            请到插件目录打开对应插件，用那里的「写一篇评测」新建草稿（已保存的正文不会丢，可复制过去）。
             <Link href="/plugins" style={{ color: 'var(--accent)', marginLeft: 8 }}>
               去插件目录 →
             </Link>
@@ -446,8 +425,7 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
       {saved ? <SuccessNotice>{saved}</SuccessNotice> : null}
       {submission ? (
         <SuccessNotice>
-          已提交审核。提交 <code>{submission.submissionId}</code> · 状态 <strong>pending</strong>（等待检查）
-          {submission.taskId ? <> · 检查任务 <code>{submission.taskId}</code></> : ' · 检查任务未入队（可稍后重试）'}
+          已提交审核，正在等待检查。
           <br />
           审核通过并发布后，读者才能在 <Link href={`/reviews/${submission.reviewId}`}>评测页</Link> 看到它。
         </SuccessNotice>
@@ -466,7 +444,7 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
             placeholder="例如：某插件的实测体验"
             style={inputStyle}
           />
-          <p className="muted" style={{ fontSize: 13 }}>标题可以留空（草稿允许未写完），提交时才有必填校验。</p>
+          <p className="muted" style={{ fontSize: 13 }}>标题可以留空，提交时才有必填校验。</p>
         </div>
 
         <div className="panel">
@@ -496,13 +474,13 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
             </span>
           </div>
 
-          {/* 处理中的附件：可继续查状态（接的就是 GET /api/attachments/{id}）。 */}
+          {/* 处理中的附件：可继续查状态。 */}
           {pendingAttachment ? (
             <div className="notice" style={{ marginTop: 12 }}>
               <div>
                 图片「{pendingAttachment.filename}」还在处理中（状态：{pendingAttachment.state}
                 {pendingAttachment.reason ? `，原因：${pendingAttachment.reason}` : ''}）。 处理完成后点「重新查询状态」
-                即可插入正文；也可以继续写，稍后再回来查。
+                就会插入正文；也可以先继续写，稍后再回来查。
               </div>
               <div style={{ marginTop: 6, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                 <button

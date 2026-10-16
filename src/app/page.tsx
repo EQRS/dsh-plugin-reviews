@@ -1,18 +1,11 @@
 /**
- * 首页（页面布局.md 第 3 节的三块：搜索入口、最新评测、近期更新插件）。
+ * 首页：三块 —— 搜索入口、「最新评测」、「近期更新插件」。
  *
- * 视觉（本轮）：按参照工作区 `网站\HTML` 的深色语言重排 ——
- * 英雄区大字展示标题 + 引导句 + 搜索，直接落在深色底上（不套面板）；
- * 下面仍是「最新评测约 2/3 + 近期更新插件约 1/3」双栏面板（§3 线框图比例）。
+ * 视觉：英雄区大字展示标题 + 搜索，直接落在深色底上（不套面板）；
+ * 下面双栏面板（最新评测约 2/3 + 近期更新插件约 1/3）。
  *
- * 这里**不再**写"搜索、分类与筛选的完整交互见插件目录"这种空话 ——
- * 入口、评测、插件三块都真实渲染；没数据就显示空状态，不塞样例数据。
- *
- * 文案纪律：验收脚本会断言"最新评测 / 近期更新插件 / 共 N 个条目"等真实字样，
- * 重排时**逐字保留**既有空状态与统计文案；数量口径不动（评测 6、插件 12）。
- *
- * 插件一块直接调 catalog 服务（而不是另写一段 SQL）：排序口径必须与 /plugins 一致，
- * 否则"首页说最近更新的是 A、目录说是 B"。
+ * 三块都真实渲染：没数据就显示空状态，不塞样例数据。
+ * 插件一块的排序口径必须与 /plugins 一致，否则首页与目录会各说各话。
  */
 
 import Link from 'next/link';
@@ -75,11 +68,11 @@ export default async function HomePage() {
 
   return (
     <div>
-      {/* 英雄区：站名作为主标题（放大），下面直接是搜索与分类 —— 不再有眉标与说明段落 */}
+      {/* 英雄区：站名作为主标题，下面直接是搜索与分类 */}
       <section className="home-hero">
         <h1 className="home-title">DSH 插件评测</h1>
 
-        {/* 搜索入口：GET 到目录页，条件留在 URL 里（目录页负责筛选与分页） */}
+        {/* 搜索入口：GET 到目录页，条件留在 URL 里 */}
         <form action="/plugins" method="get" className="search home-search">
           <input
             type="search"
@@ -92,10 +85,10 @@ export default async function HomePage() {
           </button>
         </form>
 
-        {/* 分类为空（还没收录）时整行不渲染，不给"全部 0"的假筛选 */}
+        {/* 分类为空（还没收录）时整行不渲染 */}
         {tags.length > 0 ? (
           <div className="filters" role="navigation" aria-label="按用途分类浏览" style={{ marginBottom: 0 }}>
-            <span className="group-label">用途分类</span>
+            {/* 「用途分类」标签按主人要求去掉：这一排本来就是分类 chip，标题是多余的 */}
             <Link href={tagHref(null)} className="active">
               全部
             </Link>
@@ -104,17 +97,17 @@ export default async function HomePage() {
                 {t.tag === UNCLASSIFIED_TAG ? '未分类' : t.tag} <span className="count">{t.pluginCount}</span>
               </Link>
             ))}
-            <Link href="/plugins">更多插件 →</Link>
+            {/* 「更多插件 →」按主人要求去掉：分类 chip 本身已能进目录，多一个出口反而显乱 */}
           </div>
         ) : null}
       </section>
 
       <div className="twocol">
-        {/* 主栏（约 2/3）：最新评测 */}
+        {/* 主栏：最新评测 */}
         <section className="panel" aria-labelledby="home-reviews">
           <div className="section-head">
+            {/* 栏目头只留标题（「全部评测」按主人要求去掉） */}
             <h2 id="home-reviews">最新评测</h2>
-            <Link href="/reviews">全部评测</Link>
           </div>
           {reviews.length === 0 ? (
             <p className="empty">
@@ -125,23 +118,28 @@ export default async function HomePage() {
               {reviews.map((r) => (
                 <li key={r.review_id} className="item">
                   <div className="item-body">
-                    <h3>
-                      <Link href={`/reviews/${r.review_id}`} className="truncate" style={{ display: 'block' }}>
-                        {r.title}
-                      </Link>
-                    </h3>
-                    <div className="list-meta">
-                      <span className={r.source_kind === 'site' ? 'tag site' : 'tag'} style={{ marginRight: 0 }}>
+                    {/* 两列：来源标签 +（标题 + 元信息），元信息与标题同列（与评测列表一致） */}
+                    <div className="item-head">
+                      <span className={r.source_kind === 'site' ? 'tag site' : 'tag'}>
                         {r.source_kind === 'site' ? '站点评测' : '社区评测'}
                       </span>
-                      {pluginLabel(r) === null ? (
-                        <span>插件信息不可用</span>
-                      ) : (
-                        <Link href={`/plugins/${r.plugin_id}`} className="truncate">
-                          {pluginLabel(r)}
-                        </Link>
-                      )}
-                      <span>{formatDateTimeOr(r.public_updated_at, '时间未知')}</span>
+                      <div className="item-main">
+                        <h3 className="item-title">
+                          <Link href={`/reviews/${r.review_id}`} className="truncate" style={{ display: 'block' }}>
+                            {r.title}
+                          </Link>
+                        </h3>
+                        <div className="list-meta">
+                          {pluginLabel(r) === null ? (
+                            <span>插件信息不可用</span>
+                          ) : (
+                            <Link href={`/plugins/${r.plugin_id}`} className="truncate">
+                              {pluginLabel(r)}
+                            </Link>
+                          )}
+                          <span>{formatDateTimeOr(r.public_updated_at, '时间未知')}</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </li>
@@ -150,11 +148,11 @@ export default async function HomePage() {
           )}
         </section>
 
-        {/* 辅栏（约 1/3）：近期更新插件 */}
+        {/* 辅栏：近期更新插件 */}
         <aside className="panel" aria-labelledby="home-plugins">
           <div className="section-head">
+            {/* 栏目头只留标题（「全部插件」按主人要求去掉） */}
             <h2 id="home-plugins">近期更新插件</h2>
-            <Link href="/plugins">全部插件</Link>
           </div>
           {recentPlugins.items.length === 0 ? (
             <p className="empty">

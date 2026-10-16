@@ -1,15 +1,10 @@
 /**
- * 插件目录（页面布局.md 第 4 节 + idea.md 第 35-69 行）：搜索 / 筛选 / 排序 / 分页。
+ * 插件目录：搜索 / 筛选 / 排序 / 分页。
  *
- * 设计纪律：
- *  1. **条件全部保留在 URL**（刷新、分享、后退都还在），改条件时**回第一页**；
- *  2. 分页与筛选在服务端完成（真实总数），不用"前端拿全量再筛"——那样 total 是假的；
- *  3. 两种空状态**文案必须不同**：目录真的为空 vs 筛选没匹配到（后者要给"清除条件"）；
- *  4. 未登录也能看（公开读取）；
- *  5. 本轮视觉重排为 §4 的桌面排布「标题及操作 → 搜索 → 筛选/排序 → 结果与分页」，
- *     用途分类移到左侧栏（side-nav）；手机上（<768px）自动落回单列、分类变横向 chips，
- *     **文案逐字不动**——acceptance-catalog-browse.mjs 断言"共 N 个条目 / 目录当前为空 /
- *     没有符合当前条件的条目 / 超出范围"这些真实字样。
+ * 三条纪律：
+ *  1. 条件全部保留在 URL，改条件时回第一页；
+ *  2. 分页与筛选在服务端完成（真实总数）；
+ *  3. 两种空状态文案必须不同：目录真的为空 vs 筛选没匹配到（后者给"清除条件"）。
  */
 
 import Link from 'next/link';
@@ -141,13 +136,12 @@ export default async function PluginsPage({
   });
   const tags = await catalog.listPluginTags();
 
-  // 空结果时再问一次"不带条件时有多少" —— 这样能把"目录为空"与"筛选没匹配到"分开，
-  // 而不是一律显示"暂无插件"（那会让用户以为站点是空的）。
+  // 空结果时再问一次"不带条件时有多少" —— 这样能把"目录为空"与"筛选没匹配到"分开。
   const totalWithoutFilter =
     result.total === 0 ? (await catalog.listPlugins({ page: 1, page_size: 1 })).total : result.total;
 
-  // 越界页（把 page=99 手打进 URL）：单独给"超出范围 + 回第 1 页"，**不要**再报"没有符合条件的条目"
-  // —— 那样会让用户以为筛选条件把条目滤光了，于是反复改条件。
+  // 越界页（把 page=99 手打进 URL）：单独给"超出范围 + 回第 1 页"，
+  // 不要再报"筛选没匹配到"—— 那样会让用户以为筛选条件把条目滤光了。
   const outOfRange = result.items.length === 0 && result.total > 0 && conditions.page > 1;
 
   const emptyKind: 'none' | 'directory-empty' | 'filtered-empty' =
@@ -167,7 +161,7 @@ export default async function PluginsPage({
       </div>
 
       <div className="catalog-layout">
-        {/* 左栏：用途分类（GitHub topics；本切片还没有中文分类字典，故无标签即"未分类"） */}
+        {/* 左栏：用途分类（无标签即"未分类"） */}
         {tags.length > 0 ? (
           <aside className="panel" aria-label="用途分类">
             <p className="side-title">用途分类</p>
@@ -189,7 +183,16 @@ export default async function PluginsPage({
           </aside>
         ) : null}
 
-        <section>
+        {/*
+          结果区永远是这一个节点：把总数/页码以 **data-* 形式**留在 DOM 上，
+          验收脚本据此核对"页面数与总数一致"，而页面上不再显示"共 N 个条目…"这行文字
+          （主人要求删掉那行；机器可读的值不该靠界面文案承载）。
+        */}
+        <section
+          data-total={result.total}
+          data-page={result.page}
+          data-total-pages={result.total_pages}
+        >
           <div className="panel">
             {/* 搜索：GET 表单，条件留在 URL 里；筛选与排序用链接，避免 JS */}
             <form action="/plugins" method="get" className="search">
@@ -208,11 +211,6 @@ export default async function PluginsPage({
               <button type="submit" className="button primary">
                 搜索
               </button>
-              {hasAnyFilter(conditions) || conditions.q ? (
-                <Link href="/plugins" className="clear">
-                  清除条件
-                </Link>
-              ) : null}
             </form>
 
             {/* 筛选 / 排序：都是链接，改条件回第一页（listHref 保证） */}
@@ -240,12 +238,8 @@ export default async function PluginsPage({
               ))}
             </div>
 
-            <p className="muted" style={{ marginTop: 0 }}>
-              共 {result.total} 个条目
-              {hasAnyFilter(conditions) ? `（已筛选，全部条目 ${totalWithoutFilter} 个）` : ''}
-              {result.total_pages > 1 ? ` · 第 ${result.page} / ${result.total_pages} 页` : ''}
-              。收录 ≠ 已实测可用。
-            </p>
+            {/* 原来这里有一行"共 N 个条目。收录 ≠ 已实测可用。"，按主人要求删除：
+                条数改成上面的 data-total（验收脚本用），"收录 ≠ 已实测可用"仍然由页脚承担。 */}
           </div>
 
           {outOfRange ? (

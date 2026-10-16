@@ -6,6 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  renderArticleMarkdown,
   renderMarkdownToSafeHtml,
   markdownToPlainText,
   extractMediaReferences,
@@ -16,7 +17,8 @@ describe('正常渲染', () => {
     const html = renderMarkdownToSafeHtml(
       ['## 用它做什么', '', '- 第一条', '- 第二条', '', '**加粗**与`行内代码`', '', '```ts', 'const a = 1;', '```'].join('\n'),
     );
-    expect(html).toContain('<h2>');
+    // 标题现在**带锚点 id**（目录要用），所以断言到标签名 + 可能的属性为止
+    expect(html).toMatch(/<h2[ >]/);
     expect(html).toContain('<ul>');
     expect(html).toContain('<li>第一条</li>');
     expect(html).toContain('<strong>加粗</strong>');
@@ -79,6 +81,35 @@ describe('净化：危险内容必须被清除', () => {
   it('普通外链仍可用（净化不等于把功能全砍掉）', () => {
     const html = renderMarkdownToSafeHtml('[GitHub](https://github.com/example/repo)');
     expect(html).toContain('href="https://github.com/example/repo"');
+  });
+});
+
+describe('文章大纲与锚点（目录用）', () => {
+  it('按文档顺序给标题加锚点 id，并给出大纲', () => {
+    const { html, outline } = renderArticleMarkdown(['## 第一节', '', '正文', '', '### 小节', '', '## 第二节'].join('\n'));
+
+    expect(outline.map((e) => [e.level, e.text, e.id])).toEqual([
+      [2, '第一节', 'h-1'],
+      [3, '小节', 'h-2'],
+      [2, '第二节', 'h-3'],
+    ]);
+    expect(html).toContain('id="h-1"');
+    expect(html).toContain('id="h-3"');
+  });
+
+  it('锚点只能由服务端生成：作者写进 Markdown 的原始 HTML（含 id/事件属性）整块被丢弃', () => {
+    const { html, outline } = renderArticleMarkdown('<h2 id="evil" onclick="x()">标题</h2>\n\n正文');
+    expect(html).not.toContain('<h2');
+    expect(html).not.toContain('evil');
+    expect(html).not.toContain('onclick');
+    expect(outline).toEqual([]);
+    expect(html).toContain('正文');
+  });
+
+  it('没有标题时大纲为空、正文照常', () => {
+    const { html, outline } = renderArticleMarkdown('只有正文，没有标题。');
+    expect(outline).toEqual([]);
+    expect(html).toContain('只有正文');
   });
 });
 

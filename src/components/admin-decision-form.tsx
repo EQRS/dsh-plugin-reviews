@@ -1,20 +1,13 @@
 'use client';
 
 /**
- * 后台人工审核决定（把 /admin 从"只读待办表"变成真的能审）。
+ * 后台人工审核决定（"通过并发布 / 需修改"）。
  *
- * 契约（逐字对照 src/app/api/admin/submissions/[submissionId]/decisions/route.ts）：
- *   POST /api/admin/submissions/{submissionId}/decisions
- *        { decision: 'approve' | 'needs_changes', reason, expectedStateVersion, requestKey }
- *     →  { state, publishTaskId, publishQueued }
- *
- * 几条刻意的设计决定：
- *  1. `reason` **必填**（后端也校验）。这里先拦一次，省一趟往返，但**不代替后端校验**。
- *  2. `expectedStateVersion` 必须来自服务端渲染时读到的 `state_version`，不能缓存：
- *     决定是 CAS，版本不符会 409。冲突时提示"刷新后重试"，不自动重试（避免按旧版本连点）。
- *  3. `requestKey` 一次操作一个，失败重试复用同一个 —— 否则重试会变成两次决定。
- *  4. **通过之后必须如实报告"发布有没有入队"**：`publishQueued=false` 意味着
- *     状态是 approved 但没有任何东西会去发布，界面上不能写成"已完成"。
+ * 几点界面口径：
+ *  1. 原因**必填**；
+ *  2. 版本冲突时提示"刷新后再试"，不自动重试；
+ *  3. 通过之后如实报告"发布有没有入队"：入队失败时内容不会公开，
+ *     界面上不能写成"已完成"。
  */
 
 import { useState } from 'react';
@@ -41,7 +34,7 @@ export function AdminDecisionForm({
   const [busy, setBusy] = useState<Decision | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [done, setDone] = useState<{ text: string; ok: boolean } | null>(null);
-  // 一次决定一个幂等键；失败重试复用（每个方向各留一个）。
+  // 每个方向各留一个键：失败重试复用，避免重试变成两次决定。
   const [pendingKeys, setPendingKeys] = useState<Partial<Record<Decision, string>>>({});
 
   const decide = async (decision: Decision) => {
@@ -76,12 +69,12 @@ export function AdminDecisionForm({
         setDone({ text: '已标记为「需修改」。作者可以修改后重新提交，内容未公开。', ok: true });
       } else if (result.publishQueued) {
         setDone({
-          text: `已通过，发布任务 ${result.publishTaskId} 已入队（由 worker 执行发布）。刷新列表后该项会移出待办。`,
+          text: '已通过并排入发布，稍后由 worker 发布。刷新列表后该项会移出待办。',
           ok: true,
         });
       } else {
         setDone({
-          text: '已通过，但**发布任务入队失败**：状态是 approved，可是没有任何东西会去发布，内容不会公开。请检查 worker 与 tasks 模块后重试。',
+          text: '已通过，但发布没有排上：内容不会公开。请检查 worker 是否在运行，然后重试。',
           ok: false,
         });
       }

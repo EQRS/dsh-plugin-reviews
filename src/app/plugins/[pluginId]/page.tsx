@@ -1,8 +1,8 @@
 /**
- * 插件详情（页面布局.md 第 5 节）：插件介绍与本站评测同页可达。
+ * 插件详情：插件资料与本站评测同页可达。
  *
- * 最小切片只展示已同步的结构化资料与本站评测入口；
- * README 抓取、安装资料核验属本切片范围外。
+ *  - 顶部摘要：图标 + 名称 + 作者 + 用途标签 + 归档/上游状态 + 简介；
+ *  - 桌面分两栏：主栏放本插件评测，辅栏放资料来源；
  */
 
 import Link from 'next/link';
@@ -11,7 +11,9 @@ import { getDb } from '@/server/platform/db';
 import { createCatalogService } from '@/server/modules/catalog';
 import { resolveVisibilityInTx } from '@/server/modules/content';
 import { currentContext } from '@/app/api/_lib/context';
+import { BackLink } from '@/components/back-link';
 import { StartDraftButton } from '@/components/start-draft-button';
+import { repositoryAvailabilityLabels } from '@/packages/common/status-text';
 import { formatDateTimeOr } from '@/packages/common/time';
 
 export const dynamic = 'force-dynamic';
@@ -38,94 +40,122 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ p
     .all(pluginId) as { review_id: string; title: string; public_updated_at: number | null }[];
   const reviews = rows.filter((row) => resolveVisibilityInTx(db, row.review_id).publiclyVisible);
 
+  const displayName = plugin.displayName ?? plugin.repository.fullName;
+  const initial = displayName.slice(0, 1).toUpperCase();
+  const availability = repositoryAvailabilityLabels[plugin.repository.availabilityState];
+  const author = plugin.authorLogin ?? plugin.ownerLogin ?? '未知';
+
   return (
     <div>
-      <h1>
-        {plugin.displayName ?? plugin.repository.fullName}
-        {plugin.pluginPath === '.' ? '' : ` / ${plugin.pluginPath}`}
-      </h1>
-      {plugin.displayName ? (
-        <p style={{ color: 'var(--faint)', fontSize: 13, marginTop: -8 }}>
-          {plugin.repository.fullName}
-          {plugin.pluginPath === '.' ? '' : ` / ${plugin.pluginPath}`}
-        </p>
-      ) : null}
+      <BackLink href="/plugins">返回插件目录</BackLink>
 
-      {/* 简介：没有就明说"暂无简介"，不留空行（本地旧条目正是这种情形） */}
-      <p style={{ color: 'var(--ink)' }}>{plugin.description ?? '暂无简介'}</p>
+      {/* 顶部摘要 */}
+      <header className="plugin-summary">
+        <span className="icon icon-lg" aria-hidden="true">
+          {plugin.ownerAvatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={plugin.ownerAvatarUrl} alt="" width={56} height={56} />
+          ) : (
+            initial
+          )}
+        </span>
 
-      <p>
-        {/* 用途标签来自 GitHub topics；本切片还没有中文分类字典，无标签即"未分类" */}
-        {(plugin.topics.length > 0 ? plugin.topics : ['未分类']).map((t) => (
-          <span key={t} className="tag site">
-            {t}
-          </span>
-        ))}
-        {plugin.repository.isArchived ? (
-          <span className="tag warn">
-            已归档
-          </span>
-        ) : null}
-      </p>
+        <div style={{ minWidth: 0 }}>
+          <h1 className="plugin-title">{displayName}</h1>
 
-      <p className="muted">
-        仓库：{' '}
-        <a href={plugin.repository.htmlUrl}>
-          {plugin.repository.htmlUrl}
-        </a>
-        <br />
-        作者：{plugin.authorLogin ?? plugin.ownerLogin ?? '未知'}
-        {plugin.manifestVersion ? ` · 清单版本 ${plugin.manifestVersion}` : ''}
-        <br />
-        上游状态：{plugin.repository.availabilityState}
-        {plugin.repository.isArchived ? ' · 已归档' : ''}
-        {plugin.repository.availabilityState !== 'available' ? '（以下为最后一次成功同步的资料）' : ''}
-        <br />
-        子路径：<code>{plugin.pluginPath}</code>
-        <br />
-        {/* 两个时间语义不同，必须分开写：前者是"本站何时拉的"，后者是"上游仓库何时动的" */}
-        资料同步：{formatDateTimeOr(plugin.infoUpdatedAt ?? plugin.updatedAt, '未知')} · 仓库更新：
-        {formatDateTimeOr(plugin.repoUpdatedAt, '未知')}
-      </p>
-
-      <section className="panel" style={{ marginTop: 24 }}>
-        <div className="section-head">
-          <h2>本站评测</h2>
-        </div>
-
-        {/*
-          设计口径（页面布局.md 第 5 节、实施顺序与验收.md 创作行）是"**从插件页写评测**"。
-          这里必须带上 pluginId：评测在提交时会校验 plugin_id，而 review_revisions.plugin_id
-          是 NOT NULL —— 不带插件的草稿永远提交不出去（点完才发现，是死路）。
-        */}
-        {ctx.userId === null ? (
-          <p className="muted">登录后可以在这里写评测（开发环境可用页面顶部的「测试登录」）。</p>
-        ) : (
-          <StartDraftButton pluginId={plugin.pluginId} />
-        )}
-
-        {reviews.length === 0 ? (
-          <p className="empty" style={{ marginBottom: 0 }}>
-            暂无评测。
-          </p>
-        ) : (
-          <ul className="item-list">
-            {reviews.map((r) => (
-              <li key={r.review_id} className="item">
-                <Link href={`/reviews/${r.review_id}`}>
-                  {r.title}
-                </Link>
-              </li>
+          {/* 元信息只留作者 + 用途分类（+ 归档警示） */}
+          <div className="plugin-meta">
+            <span>作者 {author}</span>
+            {(plugin.topics.length > 0 ? plugin.topics : ['未分类']).map((t) => (
+              <span key={t} className="tag site">
+                {t}
+              </span>
             ))}
-          </ul>
-        )}
-      </section>
+            {plugin.repository.isArchived ? <span className="tag warn">已归档</span> : null}
+          </div>
 
-      <p style={{ marginTop: 24 }}>
-        <Link href="/plugins" className="muted">
-          ← 返回插件目录
-        </Link>
-      </p>
+          <p className="plugin-desc">{plugin.description ?? '暂无简介'}</p>
+        </div>
+      </header>
+
+      <div className="twocol read-layout">
+        {/* 主栏：本插件评测 */}
+        <section>
+          <div className="panel">
+            <div className="section-head">
+              <h2>本站评测（{reviews.length}）</h2>
+              {/*
+                从插件页写评测必须带上 pluginId：提交时会校验插件绑定，
+                不带插件的草稿永远提交不出去。
+              */}
+              {ctx.userId === null ? null : <StartDraftButton pluginId={plugin.pluginId} />}
+            </div>
+
+            {ctx.userId === null ? (
+              <p className="muted" style={{ marginTop: 0, fontSize: 14 }}>
+                登录后可以在这里写评测。
+              </p>
+            ) : null}
+
+            {reviews.length === 0 ? (
+              <p className="empty" style={{ marginBottom: 0 }}>
+                暂无评测。
+              </p>
+            ) : (
+              <ul className="item-list">
+                {reviews.map((r) => (
+                  <li key={r.review_id} className="item">
+                    <div className="item-body">
+                      <h3>
+                        <Link href={`/reviews/${r.review_id}`}>{r.title}</Link>
+                      </h3>
+                      <div className="list-meta">
+                        <span>{formatDateTimeOr(r.public_updated_at, '时间未知')}</span>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
+
+        {/* 辅栏：资料来源 */}
+        <aside>
+          <div className="panel">
+            <div className="section-head">
+              <h2>资料来源</h2>
+            </div>
+            <dl className="facts">
+              <dt>仓库</dt>
+              <dd>
+                <a href={plugin.repository.htmlUrl}>{plugin.repository.fullName}</a>
+              </dd>
+              <dt>子路径</dt>
+              <dd>
+                <code>{plugin.pluginPath}</code>
+              </dd>
+              <dt>上游状态</dt>
+              <dd>
+                {availability}
+                {plugin.repository.isArchived ? ' · 已归档' : ''}
+              </dd>
+              <dt>清单版本</dt>
+              <dd>{plugin.manifestVersion ?? '未知'}</dd>
+              {/* 两个时间语义不同：本站何时拉的资料 vs 上游仓库何时动的 */}
+              <dt>资料同步</dt>
+              <dd>{formatDateTimeOr(plugin.infoUpdatedAt ?? plugin.updatedAt, '未知')}</dd>
+              <dt>仓库更新</dt>
+              <dd>{formatDateTimeOr(plugin.repoUpdatedAt, '未知')}</dd>
+            </dl>
+            {plugin.repository.availabilityState !== 'available' ? (
+              <p className="muted" style={{ margin: '12px 0 0', fontSize: 12 }}>
+                上游当前不可访问，以上是最后一次成功同步的资料。
+              </p>
+            ) : null}
+          </div>
+        </aside>
+      </div>
     </div>
   );
 }

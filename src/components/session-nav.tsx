@@ -20,10 +20,14 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, ErrorNotice, apiFetch, newRequestKey } from './api-client';
+import { AccountMenu } from './account-menu';
+import { SignInMenu } from './sign-in-menu';
 
 interface SessionData {
   authenticated: boolean;
   userId?: string;
+  /** 展示昵称（`/api/session` 现在会回它）；缺省时退回显示 userId。 */
+  nickname?: string | null;
   role?: 'user' | 'admin' | null;
   accountStatus?: 'active' | 'disabled' | null;
   githubLoginConfigured: boolean;
@@ -117,65 +121,32 @@ export function SessionNav() {
           {session === null ? (
             <span className="muted">正在读取登录状态…</span>
           ) : session.authenticated ? (
-            <>
-              <Link
-                href="/me/notifications"
-                className="icon-btn nav-bell"
-                title="通知"
-                aria-label={unread !== null && unread > 0 ? `通知（${unread} 条未读）` : '通知'}
-              >
-                {/* 铃铛图标（与参照站页头图标按钮同一风格：线性 SVG + currentColor） */}
-                <svg
-                  width="19"
-                  height="19"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-                  <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-                </svg>
-                {unread !== null && unread > 0 ? (
-                  <span className="badge-count">{unread > 99 ? '99+' : unread}</span>
-                ) : null}
-              </Link>
-              <Link href="/me" className="account-chip" title={`账户 ${session.userId}`}>
-                <span className="truncate">
-                  {session.userId}
-                  {session.role === 'admin' ? '（管理员）' : ''}
-                  {session.accountStatus === 'disabled' ? '（已禁用）' : ''}
-                </span>
-              </Link>
-              <button type="button" onClick={() => void signOut()} disabled={busy}>
-                登出
-              </button>
-            </>
+            /* 页头不再放通知铃铛（主人指定删掉）：未读改为在账户下拉的「通知」行右侧显示红点，
+               少一个常驻图标，未读提示跟着"去哪看通知"的动作走。 */
+            <AccountMenu
+              name={session.nickname ?? session.userId ?? '账户'}
+              subtitle={
+                /* 只留角色；"会话进行中"这类过程性描述按主人要求去掉，禁用状态仍然如实说明 */
+                session.accountStatus === 'disabled'
+                  ? `${session.role === 'admin' ? '管理员' : '普通用户'} · 账户已禁用`
+                  : session.role === 'admin'
+                    ? '管理员'
+                    : '普通用户'
+              }
+              initial={(session.nickname ?? session.userId ?? '?').slice(0, 1).toUpperCase()}
+              title={`账户 ${session.userId}`}
+              unread={unread}
+              busy={busy}
+              onSignOut={() => void signOut()}
+            />
           ) : (
-            <>
-              {session.githubLoginConfigured ? (
-                <a href="/api/auth/github/start" className="button primary">
-                  用 GitHub 登录
-                </a>
-              ) : (
-                // 未配置时明说未配置，而不是给一个会返回 503 HTML 的链接。
-                <span
-                  className="account-chip"
-                  title="服务端未设置 GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET"
-                  style={{ borderStyle: 'dashed', cursor: 'not-allowed', color: 'var(--warn-ink)' }}
-                >
-                  GitHub 登录未配置
-                </span>
-              )}
-              {session.testLoginEnabled ? (
-                <button type="button" onClick={() => void signInForTest()} disabled={busy}>
-                  {busy ? '登录中…' : '测试登录（开发）'}
-                </button>
-              ) : null}
-            </>
+            /* 未登录：收成一个 filled「登录」按钮 + M3 菜单（真实登录在前，测试通道标"（开发）"） */
+            <SignInMenu
+              githubConfigured={session.githubLoginConfigured}
+              testLoginEnabled={session.testLoginEnabled}
+              busy={busy}
+              onTestLogin={() => void signInForTest()}
+            />
           )}
         </div>
       </nav>

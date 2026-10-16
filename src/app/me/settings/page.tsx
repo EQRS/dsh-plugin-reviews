@@ -13,9 +13,9 @@
  * 这里如实标注，不放一个点了会失败的按钮。
  */
 
-import Link from 'next/link';
 import { getDb } from '@/server/platform/db';
 import { currentContext } from '../../api/_lib/context';
+import { BackLink } from '@/components/back-link';
 import { ProfileForm } from '@/components/profile-form';
 import { MeNav } from '@/components/me-nav';
 import { formatDateTimeOr } from '@/packages/common/time';
@@ -38,15 +38,13 @@ export default async function MeSettingsPage() {
   if (ctx.userId === null) {
     return (
       <div>
+        <BackLink href="/">返回首页</BackLink>
         <h1>个人设置</h1>
         <div className="me-layout">
           <MeNav current="settings" />
           <div style={{ maxWidth: 720 }}>
             <p className="muted" style={{ marginTop: 0 }}>
               需要先登录。请使用页面顶部的登录入口。
-            </p>
-            <p style={{ marginTop: 16 }}>
-              <Link href="/">← 返回首页</Link>
             </p>
           </div>
         </div>
@@ -74,10 +72,6 @@ export default async function MeSettingsPage() {
         <MeNav current="settings" />
 
         <div style={{ maxWidth: 720 }}>
-          <p className="muted" style={{ marginTop: 0 }}>
-            站内公开身份只有昵称一项可改；其余字段由系统或管理员维护。
-          </p>
-
           <section className="panel">
             <div className="section-head">
               <h2>展示昵称</h2>
@@ -89,9 +83,9 @@ export default async function MeSettingsPage() {
             <div className="section-head">
               <h2>账户信息</h2>
             </div>
-            <div className="list-meta" style={{ flexDirection: 'column', gap: 6, fontSize: 14 }}>
-              <span>
-                登录方式：
+            <dl className="facts">
+              <dt>登录方式</dt>
+              <dd>
                 {row?.provider_username ? (
                   row.profile_url ? (
                     <a href={row.profile_url} rel="noreferrer">
@@ -103,15 +97,16 @@ export default async function MeSettingsPage() {
                 ) : (
                   <span className="muted">暂无已绑定身份</span>
                 )}
-              </span>
-              <span>角色：{row?.role === 'admin' ? '管理员' : '普通用户'}</span>
-              <span>账户状态：{row?.account_status === 'disabled' ? '已禁用' : '正常'}</span>
-              <span>注册时间：{formatDateTimeOr(row?.created_at ?? null, '未知')}</span>
-              <span>上次登录：{formatDateTimeOr(row?.last_login_at ?? null, '未知')}</span>
-            </div>
-            <p className="muted" style={{ marginTop: 12, marginBottom: 0, fontSize: 13 }}>
-              角色与账户状态由管理员维护；本切片还没有站内管理界面，因此这里只做只读展示。
-            </p>
+              </dd>
+              <dt>角色</dt>
+              <dd>{row?.role === 'admin' ? '管理员' : '普通用户'}</dd>
+              <dt>账户状态</dt>
+              <dd>{row?.account_status === 'disabled' ? '已禁用' : '正常'}</dd>
+              <dt>注册时间</dt>
+              <dd>{formatDateTimeOr(row?.created_at ?? null, '未知')}</dd>
+              <dt>上次登录</dt>
+              <dd>{formatDateTimeOr(row?.last_login_at ?? null, '未知')}</dd>
+            </dl>
           </section>
         </div>
       </div>

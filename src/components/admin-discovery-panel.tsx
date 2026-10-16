@@ -1,15 +1,14 @@
 'use client';
 
 /**
- * 后台「任务与同步」组（`idea.md §1`：管理员的"立即同步"按钮）。
- *
- * 展示最近几轮自动发现的结果 —— 读的是任务的 `progress` 列（每轮结束由 worker 写入），
+ * 后台「任务与同步」组：展示最近几轮自动发现的结果，
  * 以及"这一轮为什么只有这么几条"（配额/配置谁在限制）。
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import { formatDateTime } from '@/packages/common/time';
 import { ApiError, ErrorNotice, apiFetch, newRequestKey } from './api-client';
+import { SkeletonLines } from './skeleton';
 
 interface RunSummary {
   runKey?: string;
@@ -85,9 +84,9 @@ export function AdminDiscoveryPanel() {
         { method: 'POST', json: { requestKey: newRequestKey(), maxPlugins: parsed } },
       );
       setNotice(
-        `已排入发现任务 ${result.taskId.slice(-8)}（每轮最多收录 ${result.maxPlugins} 个）。worker 通常几秒内领走，完成后这里会显示结果。`,
+        `已排入发现任务 ${result.taskId.slice(-8)}（每轮最多收录 ${result.maxPlugins} 个）。完成后这里会显示结果。`,
       );
-      // 稍等一下再刷，让 worker 有机会领走并跑完（跑一轮通常十几秒）。
+      // 稍等一下再刷，给 worker 留出跑完一轮的时间。
       setTimeout(() => void load(), 8000);
     } catch (e) {
       setError(e as ApiError);
@@ -100,22 +99,21 @@ export function AdminDiscoveryPanel() {
     <section style={{ marginTop: 32, borderTop: '1px solid var(--line)', paddingTop: 16 }}>
       <h2 style={{ fontSize: 18 }}>任务与同步</h2>
       <p className="muted">
-        每天一轮自动发现（按天幂等、重启自愈）；这里可以立即排一轮，与定时那一轮走**完全同一条路径**。
+        每天一轮自动发现；这里可以立即排一轮。
       </p>
 
       {error ? <ErrorNotice error={error} onDismiss={() => setError(null)} /> : null}
       {notice ? <p className="notice success">{notice}</p> : null}
 
       {data === null ? (
-        <p className="muted">正在读取发现任务…</p>
+        <SkeletonLines lines={3} label="正在读取发现任务…" />
       ) : (
         <>
           <div className="muted">
-            搜索词 <code>{data.config.query}</code> · 每日开关{' '}
+            关键词 <code>{data.config.query}</code> · 每日开关{' '}
             <strong>{data.config.dailyEnabled ? '开' : '关'}</strong> · 上游客源{' '}
-            <strong>{data.config.authenticated ? '已认证（额度高）' : '未认证（核心接口 60 次/小时）'}</strong> ·
-            本轮最多收录 <strong>{data.config.effectiveMaxPlugins}</strong> 个（配置 {data.config.maxPluginsPerRun}、请求上限{' '}
-            {data.config.maxRequests}）
+            <strong>{data.config.authenticated ? '已认证（额度高）' : '未认证（额度低）'}</strong> ·
+            本轮最多收录 <strong>{data.config.effectiveMaxPlugins}</strong> 个
           </div>
 
           <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>

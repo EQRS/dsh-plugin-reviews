@@ -60,7 +60,7 @@ export default async function MePage() {
           <MeNav current="reviews" />
           <div>
             <p className="muted" style={{ marginTop: 0 }}>
-              需要先登录。请使用页面顶部的登录入口（已配置时是「用 GitHub 登录」）。
+              需要先登录。请使用页面顶部的登录入口。
             </p>
           </div>
         </div>
@@ -124,7 +124,7 @@ export default async function MePage() {
             </div>
             {drafts.length === 0 ? (
               <p className="empty" style={{ marginBottom: 0 }}>
-                暂无草稿。到 <Link href="/plugins">插件目录</Link> 选一个插件开始。
+                暂无草稿。写评测请到 <Link href="/plugins">插件目录</Link> 选一个插件，从它的详情页开始。
               </p>
             ) : (
               <ul className="item-list">
