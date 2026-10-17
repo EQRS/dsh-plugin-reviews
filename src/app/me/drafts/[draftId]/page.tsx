@@ -5,8 +5,8 @@
  * （GET /api/drafts 会按所有权拒绝，服务端不再重复实现一遍判断）。
  */
 
-import Link from 'next/link';
 import { currentContext } from '@/app/api/_lib/context';
+import { BackLink } from '@/components/back-link';
 import { ReviewEditor } from '@/components/review-editor';
 
 export const dynamic = 'force-dynamic';
@@ -18,9 +18,9 @@ export default async function DraftEditorPage({ params }: { params: Promise<{ dr
   if (ctx.userId === null) {
     return (
       <div>
+        <BackLink href="/me">返回我的评测</BackLink>
         <h1 style={{ fontSize: 22 }}>需要登录</h1>
         <p className="muted">编辑草稿需要登录。请使用页面顶部的登录入口。</p>
-        <Link href="/me">← 返回我的评测</Link>
       </div>
     );
   }

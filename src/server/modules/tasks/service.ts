@@ -2,7 +2,7 @@
  * 任务队列服务（工作包 GT）。
  *
  * 权威依据：
- *  - docs/模块签名契约.md 第 7 节（签名）与第 176-177 行（参数）；
+ *  - 已删除的设计稿《模块签名契约》 第 7 节（签名）与第 176-177 行（参数）；
  *  - migrations/0001_baseline.sql §3.6（表结构与 CHECK）；
  *  - migrations/0002_triggers.sql 第 225-231 行（已结束的 attempt 不可改写）。
  *
@@ -97,10 +97,6 @@ function resolveDb(tx: unknown): SqliteDatabase | null {
   return null;
 }
 
-function isSqliteDatabase(value: unknown): value is SqliteDatabase {
-  return typeof (value as { prepare?: unknown } | null)?.prepare === 'function';
-}
-
 function mapClaim(row: TaskRow, workerReference: string, token: string, now: number, attemptNumber: number): ClaimedTask {
   return {
     taskId: row.id,
@@ -181,74 +177,6 @@ function claimWithin(db: SqliteDatabase, workerReference: string, now: number): 
   );
 
   return mapClaim(selected, workerReference, token, now, attemptNumber);
-}
-
-/** CAS 写回：所有状态变更都必须同时匹配 token + running + 未过期。 */
-function casUpdate(
-  db: SqliteDatabase,
-  claim: { taskId: string; executionToken: string },
-  now: number,
-  build: (row: TaskRow) => {
-    state: TaskState;
-    availableAt?: number;
-    errorCode?: string | null;
-    errorSummary?: string | null;
-    finishedAt?: number | null;
-    clearLease: boolean;
-  },
-): { ok: boolean; row: TaskRow | null } {
-  const row = db
-    .prepare(
-      `SELECT id, task_type, processing_state, available_at, attempt_count, retry_cycle,
-              cycle_attempt_count, execution_token, lease_owner, lease_expires_at, payload
-         FROM background_tasks WHERE id = ?`,
-    )
-    .get(claim.taskId) as TaskRow | undefined;
-
-  if (!row) return { ok: false, row: null };
-
-  const next = build(row);
-
-  if (next.clearLease) {
-    const result = db
-      .prepare(
-        `UPDATE background_tasks
-            SET processing_state = ?,
-                available_at = ?,
-                lease_owner = NULL,
-                lease_expires_at = NULL,
-                execution_token = NULL,
-                last_error_code = ?,
-                last_error_summary = ?,
-                updated_at = ?,
-                finished_at = ?
-          WHERE id = ?
-            AND execution_token = ?
-            AND processing_state = 'running'
-            AND lease_expires_at > ?`,
-      )
-      .run(
-        next.state,
-        next.availableAt ?? row.available_at,
-        next.errorCode ?? null,
-        next.errorSummary ?? null,
-        now,
-        next.finishedAt ?? null,
-        claim.taskId,
-        claim.executionToken,
-        now,
-      );
-    return { ok: result.changes === 1, row };
-  }
-
-  const result = db
-    .prepare(
-      `UPDATE background_tasks
-          SET processing_state = ?, available_at = ?, updated_at = ?
-        WHERE id = ? AND execution_token = ? AND processing_state = 'running' AND lease_expires_at > ?`,
-    )
-    .run(next.state, next.availableAt ?? row.available_at, now, claim.taskId, claim.executionToken, now);
-  return { ok: result.changes === 1, row };
 }
 
 export function createTasksService(db: SqliteDatabase): TasksService {

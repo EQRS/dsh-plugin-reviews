@@ -17,7 +17,7 @@ import { currentContext } from '../../../api/_lib/context';
 export const runtime = 'nodejs';
 
 export async function GET(
-  request: Request,
+  _request: Request,
   { params }: { params: Promise<{ attachmentId: string; variantKey: string }> },
 ): Promise<Response> {
   const { attachmentId, variantKey } = await params;

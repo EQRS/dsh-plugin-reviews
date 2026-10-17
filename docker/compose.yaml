@@ -1,0 +1,126 @@
+# DSH 插件测评站 · compose 编排（migrate / web / worker / nginx）
+#
+# 四个角色：
+#   migrate  一次性：把库升到最新结构（**唯一维护进程**，web/worker 不抢）
+#   web      常驻：Next 服务（容器内 3000，**不发布端口**，只给 nginx 反代）
+#   worker   常驻：任务与发布（跑 TS；健康检查看它自己写的心跳）
+#   nginx    常驻：唯一对外入口（80/443），负责真实 IP 透传与静态缓存
+#
+# 用法（在 docker/ 目录下）：
+#   cp .env.example .env && vi .env          # 至少填 SESSION_SECRET
+#   docker compose up -d --build
+#   docker compose ps
+#   curl -fsS http://127.0.0.1/api/health
+#
+# 数据与"痕迹"约定（见 docs/docker约定.md）：
+#   * 宿主数据目录默认 /root/dsh-plugin-review/data（**只在 /root 下留痕**）
+#   * nginx 配置烘焙在镜像里，宿主不放 /etc/nginx；唯一从宿主注入的是 TLS 证书目录
+#   * 本地试跑时可覆盖：DSH_REVIEW_DATA_DIR=./.data-dev docker compose up -d
+#
+# ⚠️ 数据目录属主与容器内 UID 必须对得上，否则容器里的 dsh 用户写不进库。
+#    镜像里固定 10001:10001；宿主目录属主不同时用 DSH_REVIEW_UID / DSH_REVIEW_GID 覆盖。
+
+name: dsh-plugin-review
+
+services:
+  # 迁移：跑完即退。web/worker 都要等它成功，避免"两个进程同时迁移"。
+  migrate:
+    build:
+      context: ..
+      dockerfile: docker/web.Dockerfile
+      target: runner
+    image: dsh-plugin-review:local
+    command: ['npx', 'tsx', 'src/server/platform/migrate-cli.ts']
+    env_file: ['.env']
+    user: '${DSH_REVIEW_UID:-10001}:${DSH_REVIEW_GID:-10001}'
+    environment:
+      DSH_REVIEW_DB_PATH: /app/.data/app.sqlite
+    volumes:
+      - '${DSH_REVIEW_DATA_DIR:-/root/dsh-plugin-review/data}:/app/.data'
+    restart: 'no'
+
+  web:
+    image: dsh-plugin-review:local
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    env_file: ['.env']
+    user: '${DSH_REVIEW_UID:-10001}:${DSH_REVIEW_GID:-10001}'
+    environment:
+      DSH_REVIEW_DB_PATH: /app/.data/app.sqlite
+      DSH_REVIEW_MEDIA_ROOT: /app/.data/media
+      PORT: '3000'
+      # web 只挂在内部网络、由 nginx 反代 → 允许信任反代传来的真实 IP 头。
+      # 直接把 web 端口发布到公网时必须改成 0（否则客户端可伪造 X-Real-IP）。
+      DSH_REVIEW_TRUST_PROXY: '1'
+    # 刻意**不发布端口**：对外只有 nginx。调试时临时加 '127.0.0.1:3101:3000' 即可。
+    volumes:
+      - '${DSH_REVIEW_DATA_DIR:-/root/dsh-plugin-review/data}:/app/.data'
+    restart: unless-stopped
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+    security_opt:
+      - no-new-privileges:true
+
+  worker:
+    image: dsh-plugin-review:local
+    command: ['npx', 'tsx', 'src/worker/main.ts']
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    env_file: ['.env']
+    user: '${DSH_REVIEW_UID:-10001}:${DSH_REVIEW_GID:-10001}'
+    environment:
+      DSH_REVIEW_DB_PATH: /app/.data/app.sqlite
+      DSH_REVIEW_MEDIA_ROOT: /app/.data/media
+    volumes:
+      - '${DSH_REVIEW_DATA_DIR:-/root/dsh-plugin-review/data}:/app/.data'
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+    security_opt:
+      - no-new-privileges:true
+    # worker 不提供 HTTP，所以直接查它自己写的心跳：静默死亡必须能被编排发现
+    healthcheck:
+      test: ['CMD', 'node', 'scripts/worker-healthcheck.mjs']
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx.Dockerfile
+    image: dsh-plugin-review-nginx:local
+    depends_on:
+      web:
+        # 等 web 真的健康再放流量，避免入口起来就对着一个还没就绪的后端报 502
+        condition: service_healthy
+    ports:
+      - '${DSH_REVIEW_HTTP_PORT:-80}:80'
+      # 上 TLS 时再打开（证书目录挂在 /root 下，见 default.conf 里的 HTTPS 段）
+      - '${DSH_REVIEW_HTTPS_PORT:-443}:443'
+    volumes:
+      # 只挂证书目录；**不挂站点配置**（配置烘焙在镜像里，避免在宿主撒文件）
+      - '${DSH_REVIEW_ROOT:-/root/dsh-plugin-review}/certs:/etc/nginx/certs:ro'
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  default:
+    name: dsh-plugin-review

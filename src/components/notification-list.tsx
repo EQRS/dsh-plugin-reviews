@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { formatDateTime } from '@/packages/common/time';
 import { ApiError, ErrorNotice, apiFetch } from './api-client';
+import { SkeletonLines } from './skeleton';
 
 interface NotificationItem {
   id: string;
@@ -82,17 +83,26 @@ export function NotificationList() {
     <div className="panel">
       {/* 工具栏：左侧是状态与筛选，右侧是批量操作（都在同一条 section-head 上，不再把按钮甩到最右边） */}
       <div className="section-head" style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           {data !== null ? (
-            <span className={data.unreadCount > 0 ? 'tag site' : 'tag'}>未读 {data.unreadCount}</span>
+            <span className={data.unreadCount > 0 ? 'tag site' : 'tag'} style={{ margin: 0 }}>
+              未读 {data.unreadCount}
+            </span>
           ) : null}
-          <label
-            className="muted"
-            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, marginBottom: 0, fontWeight: 400 }}
+          {/*
+            「只看未读」做成**可切换按钮**（M3 filter chip 的形态），不再用复选框：
+            复选框的勾选方块与左边的"未读 N"徽标不在同一条基线上，看着别扭；
+            按钮和徽标同高（都吃 --chip-height），自然对齐。
+          */}
+          <button
+            type="button"
+            className={onlyUnread ? 'tag site filter-toggle' : 'tag filter-toggle'}
+            aria-pressed={onlyUnread}
+            onClick={() => setOnlyUnread((value) => !value)}
+            style={{ margin: 0 }}
           >
-            <input type="checkbox" checked={onlyUnread} onChange={(e) => setOnlyUnread(e.target.checked)} />
             只看未读
-          </label>
+          </button>
         </div>
         <button
           type="button"
@@ -107,12 +117,12 @@ export function NotificationList() {
       {error ? <ErrorNotice error={error} onDismiss={() => setError(null)} /> : null}
 
       {data === null ? (
-        <p className="muted" style={{ marginBottom: 0 }}>正在读取通知…</p>
+        <SkeletonLines lines={3} label="正在读取通知…" />
       ) : data.items.length === 0 ? (
         <p className="empty" style={{ marginBottom: 0 }}>
           {onlyUnread
             ? '没有未读通知。'
-            : '还没有通知。别人评论你的评测、或回复你的评论时，会出现在这里。'}
+            : '还没有通知。别人评论或回复你时，会出现在这里。'}
         </p>
       ) : (
         <ul className="item-list">

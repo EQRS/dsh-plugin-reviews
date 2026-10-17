@@ -1,24 +1,18 @@
 'use client';
 
 /**
- * 评论区（任务 7 第 4 项；回复功能为第三轮补全）。
+ * 评论区（含组内回复）。
  *
- * 契约（见 src/app/api/content/[contentId]/comments/route.ts 与 .../[commentId]/replies/route.ts）：
- *   GET  /api/content/{contentId}/comments?page=&page_size=            → PageResult<CommentView>（仅顶层）
- *   GET  /api/content/{contentId}/comments/{commentId}/replies?...     → PageResult<CommentView>（组内回复）
- *   POST /api/content/{contentId}/comments  { body, requestKey, replyToCommentId? } → 202
- *
- * 几个真实约束（读代码得到，不是猜的）：
- *  - 接口只在**目标当前公开**时才返回/接受评论（否则 404 target_unavailable）；
- *  - `page_size` 只允许 10 / 20 / 50（PaginationDefaults.allowed_page_sizes）；
- *  - 新评论写入后处理状态是 `pending`，**尚未公开**，所以刚发完它可能不在公开列表里。
+ * 几个真实约束：
+ *  - 新评论写入后处于待检查状态，尚未公开，所以刚发完它可能不在公开列表里；
  *    这不是 bug，界面必须如实说明，不能让用户以为"发丢了"；
- *  - 回复**不随顶层列表返回**，要单独取（懒加载）—— 顶层列表里只有 `replyCount` 这个数字。
+ *  - 回复不随顶层列表返回，要单独取（懒加载，可继续翻页）。
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, ErrorNotice, apiFetch, inputStyle, newRequestKey } from './api-client';
 import { formatDateTime } from '@/packages/common/time';
+import { SkeletonLines } from './skeleton';
 
 interface CommentView {
   commentId: string;
@@ -53,10 +47,10 @@ interface SessionData {
   testLoginEnabled: boolean;
 }
 
-/** 展开状态：undefined = 没展开过；null = 正在读第一页；对象 = 已加载（items 为**累计**已取到的页）。 */
+/** 展开状态：undefined = 没展开过；null = 正在读第一页；对象 = 已加载（items 为累计已取到的页）。 */
 type ReplyState = { items: CommentView[]; total: number; page: number } | null;
 
-/** 组内回复每页条数：后端只接受 10 / 20 / 50（PaginationDefaults.allowed_page_sizes）。 */
+/** 组内回复每页条数：后端只接受 10 / 20 / 50。 */
 const REPLY_PAGE_SIZE = 50;
 
 /** 单条评论的时间与署名行（顶层与回复共用，避免两处格式漂移）。 */
@@ -67,7 +61,7 @@ function CommentMeta({ comment }: { comment: CommentView }) {
       {comment.firstPublishedAt === null
         ? ' · 尚未公开'
         : ` · ${formatDateTime(comment.firstPublishedAt)}`}
-      {/* 编辑过的评论要留痕（`idea.md §11`：替换后显示"已编辑"） */}
+      {/* 编辑过的评论要留痕（显示"已编辑"） */}
       {comment.editedAt !== null ? ` · 已编辑 ${formatDateTime(comment.editedAt)}` : ''}
     </div>
   );
@@ -136,10 +130,8 @@ export function CommentSection({ contentId }: { contentId: string }) {
   /**
    * 懒加载某个顶层讨论组的回复。
    *
-   * `page > 1` 表示"加载更多"：**追加**已取到的页，而不是替换
-   * （替换会把用户刚看过的回复顶掉，等于每点一次就重来）。
-   * 此前这里写死 `page=1&page_size=50`，于是**超过 50 条的讨论组第 51 条起永远看不到** ——
-   * 而两级评论是本切片的核心交付，故改成可继续翻页。
+   * `page > 1` 表示"加载更多"：追加已取到的页，而不是替换
+   * （替换会把用户刚看过的回复顶掉）。
    */
   const loadReplies = useCallback(
     async (rootCommentId: string, page = 1) => {
@@ -166,7 +158,7 @@ export function CommentSection({ contentId }: { contentId: string }) {
         });
       } catch (e) {
         // 第一页失败 = 整组打不开，退回未展开状态；
-        // "加载更多"失败则**保留已取到的内容**，只把错误报出来（不能把已看到的抹掉）。
+        // "加载更多"失败则保留已取到的内容，只把错误报出来。
         if (page === 1) {
           setExpanded((prev) => {
             const next = { ...prev };
@@ -279,16 +271,18 @@ export function CommentSection({ contentId }: { contentId: string }) {
   };
 
   return (
-    <section style={{ marginTop: 32, borderTop: '1px solid var(--line)', paddingTop: 16 }}>
-      <div className="section-head" style={{ marginBottom: 8 }}>
-        <h2 style={{ fontSize: 18 }}>评论（{data?.total ?? 0}）</h2>
+    /* 讨论区做成一张卡片：正文是"平面散文"（不套面板），讨论区是卡片 —— 这是本项目一开始定的版式，
+       主人反馈"评论这块太素"后，这里补齐卡片化与发表区的结构感。 */
+    <section className="panel comment-section">
+      <div className="section-head">
+        <h2>评论（{data?.total ?? 0}）</h2>
       </div>
 
       {error ? <ErrorNotice error={error} onDismiss={() => setError(null)} /> : null}
       {notice ? <p className="muted" style={{ fontSize: 14 }}>{notice}</p> : null}
 
       {data === null ? (
-        <p className="muted">正在读取评论…</p>
+        <SkeletonLines lines={3} label="正在读取评论…" />
       ) : data.items.length === 0 ? (
         <p className="muted">还没有评论。</p>
       ) : (
@@ -438,27 +432,17 @@ export function CommentSection({ contentId }: { contentId: string }) {
       {session === null ? (
         <p className="muted" style={{ fontSize: 14 }}>正在读取登录状态…</p>
       ) : session.authenticated ? (
-        <form onSubmit={submit}>
+        /* 发表区：一块内嵌容器（比卡片再高一级容器色），把"写评论"这个动作和列表分开 */
+        <form onSubmit={submit} className="comment-composer">
           {replyTo ? (
-            <div
-              className="notice"
-              style={{
-                fontSize: 13,
-                marginBottom: 6,
-              }}
-            >
-              正在回复 <code>{replyTo.authorId}</code>
-              <button
-                type="button"
-                onClick={() => setReplyTo(null)}
-                className="link-btn"
-                style={{ marginLeft: 8 }}
-              >
+            <div className="composer-reply">
+              <span>正在回复这条评论</span>
+              <button type="button" onClick={() => setReplyTo(null)} className="link-btn">
                 取消
               </button>
             </div>
           ) : null}
-          <label htmlFor={`comment-${contentId}`} style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}>
+          <label htmlFor={`comment-${contentId}`} className="composer-label">
             发表评论
           </label>
           <textarea
@@ -470,11 +454,11 @@ export function CommentSection({ contentId }: { contentId: string }) {
             style={inputStyle}
             required
           />
-          <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div className="composer-actions">
             <button type="submit" disabled={busy || body.trim() === ''} className="button primary">
               {busy ? '提交中…' : pendingKey ? '重试提交' : replyTo ? '发表回复' : '发表评论'}
             </button>
-            <span className="muted" style={{ fontSize: 13 }}>提交后需通过检查才会公开显示。</span>
+            <span className="composer-hint">提交后需通过检查才会公开显示。</span>
           </div>
         </form>
       ) : (

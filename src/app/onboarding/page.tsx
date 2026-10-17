@@ -9,9 +9,9 @@
  * 本页只做三件事：告诉用户你是谁、确认展示昵称、然后回到原来要去的地方。
  */
 
-import Link from 'next/link';
 import { getDb } from '@/server/platform/db';
 import { currentContext } from '../api/_lib/context';
+import { BackLink } from '@/components/back-link';
 import { ProfileForm } from '@/components/profile-form';
 
 export const dynamic = 'force-dynamic';
@@ -29,7 +29,7 @@ interface Row {
  * `returnTo` 来自查询串，直接 `router.push` 就是一个开放重定向
  * （`/onboarding?returnTo=https://evil.example` 或 `//evil.example` 都能把人带走）。
  */
-export function safeReturnTo(raw: string | undefined): string {
+function safeReturnTo(raw: string | undefined): string {
   if (!raw) return '/';
   if (!raw.startsWith('/')) return '/';
   // `//host` 是协议相对 URL；`/\host` 在部分浏览器里等价 —— 两种都挡掉。
@@ -48,14 +48,11 @@ export default async function OnboardingPage({
   if (ctx.userId === null) {
     return (
       <div>
+        <BackLink href="/">返回首页</BackLink>
         <h1>资料确认</h1>
         <p className="muted">
-          需要先登录。这个页面是 GitHub 登录后给**新用户**做资料确认用的；
-          未登录时请先从页面顶部登录。
+          需要先登录。请使用页面顶部的登录入口。
         </p>
-        <Link href="/">
-          ← 返回首页
-        </Link>
       </div>
     );
   }
@@ -73,6 +70,7 @@ export default async function OnboardingPage({
 
   return (
     <div style={{ maxWidth: 640 }}>
+      <BackLink href="/">返回首页</BackLink>
       <h1>欢迎来到 DSH 插件测评站</h1>
       <p className="muted" style={{ marginTop: 0 }}>
         你是第一次来这里，先确认一下展示资料。
@@ -97,12 +95,6 @@ export default async function OnboardingPage({
 
       <p className="muted" style={{ marginTop: 16 }}>
         这里可以收录插件、写评测、评论。收录不等于已实测可用；提交的内容要先通过检查才会公开。
-      </p>
-
-      <p style={{ marginTop: 16 }}>
-        <Link href={returnTo} className="muted">
-          ← 返回
-        </Link>
       </p>
     </div>
   );

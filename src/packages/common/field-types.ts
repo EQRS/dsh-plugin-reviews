@@ -2,7 +2,7 @@
  * 内容类型契约（浏览器可用）。
  *
  * 本文件不导入任何 server 代码；页面与接口共用这些形状。
- * 与 docs/模块签名契约.md 保持一致。
+ * 与 已删除的设计稿《模块签名契约》 保持一致。
  */
 
 import type {
@@ -11,7 +11,6 @@ import type {
   RepositoryAvailabilityState,
   ReviewSourceKind,
   SubmissionState,
-  TaskState,
   UserRole,
   VersionValue,
 } from './field-rules';

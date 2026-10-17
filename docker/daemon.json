@@ -1,0 +1,19 @@
+{
+  "_comment": [
+    "把这个文件放到 /etc/docker/daemon.json 后执行 systemctl restart docker。",
+    "目的：把 Docker 自己的二进制数据（镜像层、容器、卷、日志）从默认的 /var/lib/docker",
+    "挪到 /root/docker —— 这样部署产物除 /root 外不留痕迹。",
+    "",
+    "注意：安装 Docker 本身会在 /etc、/usr/bin 等位置留下文件，这是装 Docker 的代价，无法避免。",
+    "本约定能保证的是：镜像、容器、卷、构建缓存、容器日志、应用数据与证书全部在 /root 下。",
+    "",
+    "改 data-root 会让原来的镜像/容器'消失'（它们仍在 /var/lib/docker 里）。",
+    "已经有内容时请先 `docker system prune -a` 或在维护窗口操作。"
+  ],
+  "data-root": "/root/docker",
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  }
+}

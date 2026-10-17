@@ -1,19 +1,16 @@
 'use client';
 
 /**
- * 作者撤回自己的已发布评测（契约见 src/app/api/reviews/[reviewId]/withdraw/route.ts）。
- *
- *   POST /api/reviews/{reviewId}/withdraw
- *        { expectedControlVersion, requestKey, reason? } → { withdrawnAt }
+ * 作者撤回自己的已发布评测。
  *
  * 几条刻意的设计决定：
- *  1. **两段式**：先点「撤回这篇评测」展开确认区，再点「确认撤回」才真的发请求。
+ *  1. 两段式：先点「撤回这篇评测」展开确认区，再点「确认撤回」才真的发请求。
  *     撤回是不可从界面撤销的动作（重新公开要重新提交并通过检查），不能一键误触。
- *  2. `expectedControlVersion` 来自服务端渲染时读到的控制版本 —— 它是"你看到的这一版"的凭据：
- *     若期间内容已被改动（撤回/隐藏/重新发布过），请求会被拒，而不是撤回一份你没看过的新内容。
- *  3. 撤回**不删除历史**：公开修订指针保留，只是不再公开。这一点必须在界面上说清楚，
+ *  2. 若期间内容已被改动（撤回/隐藏/重新发布过），请求会被拒，
+ *     而不是撤回一份你没看过的新内容。
+ *  3. 撤回不删除历史：公开修订指针保留，只是不再公开。这一点必须在界面上说清楚，
  *     否则作者会以为"撤回 = 销毁"，反而不敢用。
- *  4. 成功后**不立即刷新**：刷新会让整页变成"作者已撤回"、把说明冲掉。给一个显式的刷新入口。
+ *  4. 成功后不立即刷新：刷新会让整页变成"作者已撤回"、把说明冲掉。给一个显式的刷新入口。
  */
 
 import { useState } from 'react';
@@ -105,8 +102,8 @@ export function WithdrawButton({
         style={{ width: '100%', fontSize: 13 }}
       />
       <p className="muted" style={{ fontSize: 12, margin: '6px 0' }}>
-        撤回后读者看不到这篇评测（显示「作者已撤回」）。**内容不会被删除**，
-        历史修订留在库里；想重新公开需要修改后重新提交审核。
+        撤回后读者看不到这篇评测（显示「作者已撤回」）。<strong>内容不会被删除</strong>，
+        历史修订会保留；想重新公开，需要修改后重新提交审核。
       </p>
       {error ? <ErrorNotice error={error} onDismiss={() => setError(null)} /> : null}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>

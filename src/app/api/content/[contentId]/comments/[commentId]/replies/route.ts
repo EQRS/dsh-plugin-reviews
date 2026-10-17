@@ -22,7 +22,7 @@ import { resolveVisibilityInTx } from '@/server/modules/content';
 import { isUuidV7 } from '@/packages/common/field-rules';
 import { err } from '@/packages/common/errors';
 import { okJson, errorResponse, requestMeta } from '../../../../../_lib/context';
-import { parsePaging } from '../../route';
+import { parsePaging } from '@/app/api/_lib/pagination';
 export const runtime = 'nodejs';
 
 export async function GET(

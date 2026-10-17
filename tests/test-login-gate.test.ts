@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { testLoginAllowed } from '../src/app/api/testing/session/route';
+import { testLoginAllowed } from '../src/server/platform/test-login';
 
 function env(overrides: Record<string, string | undefined>): NodeJS.ProcessEnv {
   return { ...overrides } as NodeJS.ProcessEnv;

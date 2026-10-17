@@ -1,0 +1,3 @@
+此文件只为让 docker/bin/ 存在于 git 与构建上下文里。
+镜像构建时执行 COPY docker/bin ./bin；目录为空时仍会创建一个空的 /app/bin。
+放什么、不放什么见本目录 README.md。

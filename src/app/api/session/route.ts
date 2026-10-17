@@ -16,7 +16,7 @@ import { createIdentityService } from '@/server/modules/identity';
 import { clearSessionCookie, readSessionToken } from '@/server/platform/session-cookie';
 import { createGithubLoginAdapter } from '@/server/adapters/login';
 import { currentContext, okJson, errorResponse, requestMeta } from '../_lib/context';
-import { testLoginAllowed } from '../testing/session/route';
+import { testLoginAllowed } from '@/server/platform/test-login';
 
 export const runtime = 'nodejs';
 
@@ -27,6 +27,16 @@ export async function GET(request: Request): Promise<Response> {
     // 让前端知道"GitHub 登录是否已配置"，从而显示真实状态而不是点了才报错。
     const githubConfigured = createGithubLoginAdapter().isConfigured();
 
+    // 昵称：导航栏要显示"谁登录了"。此前只回 userId，于是页头挂着一个 UUID 给人看。
+    // 昵称是本站唯一的公开身份（评测/评论署名都用它），放在这里并不会多泄露什么。
+    let nickname: string | null = null;
+    if (ctx.userId !== null) {
+      const row = getDb().prepare('SELECT nickname FROM users WHERE id = ?').get(ctx.userId) as
+        | { nickname: string }
+        | undefined;
+      nickname = row?.nickname ?? null;
+    }
+
     return okJson(
       {
         ...(ctx.userId === null
@@ -34,6 +44,7 @@ export async function GET(request: Request): Promise<Response> {
           : {
               authenticated: true as const,
               userId: ctx.userId,
+              nickname,
               role: ctx.role,
               accountStatus: ctx.accountStatus,
             }),

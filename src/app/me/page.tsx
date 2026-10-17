@@ -9,7 +9,7 @@
  * 不做估算——空的时候就是 0，一眼能看出"这个号还没开始写"。
  *
  * 本页只做"我的评测草稿 + 提交阶段"一块；收藏、整合包、事项属本切片范围外
- * （见 `docs/线上实现-对规划-差距盘点.md`：那些连表都没有）。
+ * （见 `docs/HANDOFF.md`：那些连表都没有）。
  *
  * 几处本轮补正（都是后端早已就绪、前端没接上的）：
  *  1. **栏目入口**：把已经存在的三块（评测 / 通知 / 个人设置）摆成左侧栏；
@@ -60,7 +60,7 @@ export default async function MePage() {
           <MeNav current="reviews" />
           <div>
             <p className="muted" style={{ marginTop: 0 }}>
-              需要先登录。请使用页面顶部的登录入口（已配置时是「用 GitHub 登录」）。
+              需要先登录。请使用页面顶部的登录入口。
             </p>
           </div>
         </div>
@@ -124,7 +124,7 @@ export default async function MePage() {
             </div>
             {drafts.length === 0 ? (
               <p className="empty" style={{ marginBottom: 0 }}>
-                暂无草稿。到 <Link href="/plugins">插件目录</Link> 选一个插件开始。
+                暂无草稿。写评测请到 <Link href="/plugins">插件目录</Link> 选一个插件，从它的详情页开始。
               </p>
             ) : (
               <ul className="item-list">

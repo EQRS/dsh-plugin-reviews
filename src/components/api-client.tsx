@@ -121,7 +121,7 @@ export function newRequestKey(): string {
 export function ErrorNotice({ error, onDismiss }: { error: ApiError; onDismiss?: () => void }) {
   const fields = error.describeFields();
   // 频控是**可解释**的失败：服务端已经算好还要等几秒，就必须说出来，
-  // 否则用户只会反复点、反复失败（`docs/验收纪律.md`：不装作成功，也不隐瞒原因）。
+  // 否则用户只会反复点、反复失败（`docs/HANDOFF.md`：不装作成功，也不隐瞒原因）。
   const waitSeconds = error.retryAfterSeconds();
   return (
     <div

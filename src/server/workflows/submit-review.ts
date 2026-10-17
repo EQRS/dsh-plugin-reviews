@@ -117,7 +117,7 @@ interface DraftRow {
  *  4. 写入 content_submissions（处理状态从 pending 起）；
  *  5. 更新 reviews.latest_submitted_revision_id（草稿自动保存不改这个引用）。
  *
- * 任务入队放在事务提交之后（见 docs/模块签名契约.md §9.2 的已知偏离）：
+ * 任务入队放在事务提交之后（见 已删除的设计稿《模块签名契约》 §9.2 的已知偏离）：
  * better-sqlite3 的事务回调必须同步，而 tasks 的加载是异步的。
  * 入队失败会向上抛错让调用方重试，**不静默吞掉**。
  */

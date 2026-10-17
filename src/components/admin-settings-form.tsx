@@ -1,15 +1,15 @@
 'use client';
 
 /**
- * 后台「业务设置」组（`idea.md §24`：常用参数后台可调 + 修改记录）。
+ * 后台「业务设置」组：常用参数可改 + 修改记录。
  *
- * 只显示**真的被读取**的参数（定义来自服务端 `SETTING_DEFINITIONS`，前端不自己写一份清单 ——
- * 两份清单一定会漂移）。改完必须填原因，服务端会写一条配置修订。
+ * 只显示**真的被读取**的参数；改完必须填原因，服务端会记一条修订记录。
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import { formatDateTime } from '@/packages/common/time';
 import { ApiError, ErrorNotice, apiFetch, newRequestKey } from './api-client';
+import { SkeletonLines } from './skeleton';
 
 interface SettingDefinition {
   key: string;
@@ -85,7 +85,7 @@ export function AdminSettingsForm() {
         }
         const asNumber = Number(raw);
         if (!Number.isInteger(asNumber)) {
-          // 本地先拦一道，免得白跑一次请求；服务端仍会再校验一次（不能只信前端）。
+          // 本地先拦一道，免得白跑一次请求
           setError(new ApiError({ code: 'input_invalid', message: `${def.label} 必须是整数。` }, 400));
           return;
         }
@@ -99,7 +99,7 @@ export function AdminSettingsForm() {
         method: 'PUT',
         json: { changes, reason, requestKey: newRequestKey() },
       });
-      setNotice(`已生效，配置修订 #${result.revision_number ?? '?'}（${(result.changed as unknown[]).length} 项变更）。`);
+      setNotice(`已生效，修订 #${result.revision_number ?? '?'}（${(result.changed as unknown[]).length} 项变更）。`);
       setReason('');
       await load();
     } catch (e) {
@@ -113,20 +113,20 @@ export function AdminSettingsForm() {
     <section style={{ marginTop: 32, borderTop: '1px solid var(--line)', paddingTop: 16 }}>
       <h2 style={{ fontSize: 18 }}>业务设置</h2>
       <p className="muted">
-        这里只列出**真的会被读取**的参数；改完留一条修订记录（含原因与完整生效快照）。
-        媒体限额、草稿自动保存间隔等仍是模块内常量，尚未接入（见差距盘点）。
+        这里只列出<strong>真的会被读取</strong>的参数；改完会留一条修订记录（含原因与变更后的完整值）。
+        另有一些限额与间隔仍是程序内写死的常量，暂不可调。
       </p>
 
       {error ? <ErrorNotice error={error} onDismiss={() => setError(null)} /> : null}
       {notice ? <p className="notice success">{notice}</p> : null}
 
       {data === null ? (
-        <p className="muted">正在读取配置…</p>
+        <SkeletonLines lines={3} label="正在读取配置…" />
       ) : (
         <>
           {data.unknownKeys.length > 0 ? (
             <p className="notice warn">
-              注意：库里有 {data.unknownKeys.length} 个不在清单里的键（{data.unknownKeys.join('、')}
+              注意：库里还有 {data.unknownKeys.length} 个不认得的键（{data.unknownKeys.join('、')}
               ），它们不会生效，也不会被本页修改。
             </p>
           ) : null}
@@ -184,7 +184,7 @@ export function AdminSettingsForm() {
           <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <input
               aria-label="修改原因"
-              placeholder="修改原因（必填，会进修订记录）"
+              placeholder="修改原因（必填，会记入修改记录）"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               style={{ flex: '1 1 260px' }}

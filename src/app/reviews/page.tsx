@@ -1,15 +1,11 @@
 /**
- * 全站评测列表（页面布局.md 第 4 节）：只列当前公开文章。
+ * 全站评测列表：只列当前公开文章。
  *
- * 本轮补三处（§4 明确要求、而此前一个都没有）：
- *  1. **来源筛选**：全部／站点／社区 —— 数据在 `reviews.source_kind`；
- *  2. **真实总数 + 分页**：此前整表取出后一次性渲染，没有分页也没有上限（列表一长就不可用），
- *     且看不到"共多少页"；
- *  3. **关联插件**：§4 要求条目显示"封面或插件图标占位、标题、来源、**关联插件**、版本、作者、时间"，
- *     此前只有来源／作者／时间。
+ *  - 来源筛选：全部／站点／社区（数据在 `reviews.source_kind`）；
+ *  - 真实总数 + 分页；
+ *  - 条目显示标题、来源、关联插件、作者、时间。
  *
- * 两条与插件目录一致的纪律：**条件留在 URL**；**两种空状态文案必须不同**
- * （列表真的为空 vs 筛选没匹配到）。可见性仍逐行核验（不另存公开状态字段）。
+ * 两条纪律：条件留在 URL；两种空状态文案必须不同（列表真的为空 vs 筛选没匹配到）。
  */
 
 import Link from 'next/link';
@@ -105,7 +101,7 @@ export default async function ReviewsPage({
     <div>
       <h1>评测</h1>
 
-      {/* 与插件目录同一套版式（页面布局.md §4：左侧筛选栏 + 右侧结果与分页） */}
+      {/* 与插件目录同一套版式：左侧筛选栏 + 右侧结果与分页 */}
       <div className="catalog-layout">
         <aside className="panel" aria-label="来源筛选">
           <p className="side-title">来源</p>
@@ -125,10 +121,10 @@ export default async function ReviewsPage({
         <section>
           <div className="panel">
             <p className="muted" style={{ marginTop: 0 }}>
+              {/* 只留"多少篇文章"；"评测与插件分开看待：收录不等于已实测可用。"按主人要求删掉 */}
               共 {total} 篇公开评测
               {conditions.source !== 'all' ? `（已筛选，全部公开评测 ${visible.length} 篇）` : ''}
               {totalPages > 1 ? ` · 第 ${page} / ${totalPages} 页` : ''}
-              。评测与插件分开看待：收录不等于已实测可用。
             </p>
 
             {emptyKind === 'all-empty' ? (
@@ -152,24 +148,30 @@ export default async function ReviewsPage({
                     return (
                       <li key={r.review_id} className="item">
                         <div className="item-body">
-                          <h3>
-                            <Link href={`/reviews/${r.review_id}`}>{r.title}</Link>
-                          </h3>
-                          <div>
+                          {/*
+                            两列：左边来源标签，右边"标题 + 元信息"。
+                            这样元信息与**标题同列**（主人要求），而不是顶到标签下面另起一列。
+                          */}
+                          <div className="item-head">
                             <span className={r.source_kind === 'site' ? 'tag site' : 'tag'}>
                               {r.source_kind === 'site' ? '站点评测' : '社区评测'}
                             </span>
-                          </div>
-                          <div className="list-meta" style={{ marginTop: 6 }}>
-                            {label === null ? (
-                              <span>插件信息不可用</span>
-                            ) : (
-                              <Link href={`/plugins/${r.plugin_id}`} className="truncate">
-                                {label}
-                              </Link>
-                            )}
-                            <span>{r.author_nickname}</span>
-                            <span>{formatDateTimeOr(r.public_updated_at, '时间未知')}</span>
+                            <div className="item-main">
+                              <h3 className="item-title">
+                                <Link href={`/reviews/${r.review_id}`}>{r.title}</Link>
+                              </h3>
+                              <div className="list-meta">
+                                {label === null ? (
+                                  <span>插件信息不可用</span>
+                                ) : (
+                                  <Link href={`/plugins/${r.plugin_id}`} className="truncate">
+                                    {label}
+                                  </Link>
+                                )}
+                                <span>{r.author_nickname}</span>
+                                <span>{formatDateTimeOr(r.public_updated_at, '时间未知')}</span>
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </li>

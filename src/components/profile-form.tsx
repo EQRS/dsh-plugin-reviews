@@ -14,7 +14,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ApiError, ErrorNotice, apiFetch, newRequestKey } from './api-client';
+import { ApiError, ErrorNotice, apiFetch } from './api-client';
 
 export function ProfileForm({
   initialNickname,
@@ -31,8 +31,6 @@ export function ProfileForm({
   const [nickname, setNickname] = useState(initialNickname);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
-  // 一次保存一个幂等键；失败重试复用（否则重试会变成两次写）。
-  const [pendingKey, setPendingKey] = useState<string | null>(null);
 
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -43,15 +41,12 @@ export function ProfileForm({
 
     setBusy(true);
     setError(null);
-    const requestKey = pendingKey ?? newRequestKey();
-    setPendingKey(requestKey);
 
     try {
       await apiFetch<{ nickname: string }>('/api/me/profile', {
         method: 'PATCH',
         json: { nickname: nickname.trim() },
       });
-      setPendingKey(null);
       router.push(returnTo);
       router.refresh();
     } catch (e) {
@@ -75,9 +70,8 @@ export function ProfileForm({
         style={{ width: '100%' }}
       />
       <p className="muted" style={{ fontSize: 13 }}>
-        {isOnboarding
-          ? '这是你在这里唯一的公开身份：评测与评论的署名都用它。之后可以在「我的」页面再改。'
-          : '这是你在这里唯一的公开身份：评测与评论的署名都用它；改完立刻生效。'}
+        {/* 设置页那句"…改完立刻生效"按主人要求去掉；引导页保留一句说明（新用户需要知道昵称是干什么的） */}
+        {isOnboarding ? '这是你在这里唯一的公开身份，评测与评论的署名都用它。' : null}
       </p>
 
       {error ? <ErrorNotice error={error} onDismiss={() => setError(null)} /> : null}
@@ -90,11 +84,8 @@ export function ProfileForm({
           <a href={returnTo} style={{ fontSize: 14 }}>
             跳过，直接进入
           </a>
-        ) : (
-          <a href={returnTo} style={{ fontSize: 14 }} className="muted">
-            ← 返回
-          </a>
-        )}
+        ) : null}
+        {/* 设置页的"← 返回"按主人要求删掉：保存按钮旁边不需要再挂一个返回（顶部导航已能回） */}
       </div>
     </form>
   );

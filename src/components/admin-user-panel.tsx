@@ -3,24 +3,19 @@
 /**
  * 后台「用户管理」组：授予/撤销管理员、禁用/恢复账户。
  *
- * 规划要求"日常数据管理全部通过后台页面完成，不得要求管理员直接改数据库表"——
- * 在它之前只有 `scripts/grant-admin.mjs`（或手拼 SQL）。这里把那件事搬进页面。
- *
  * 三条界面纪律：
- *  1. **不假装成功**：失败原样显示服务端的 `code` 与说明（含"最后一个可用管理员"这类守卫拒绝），
- *     不做任何本地乐观改写；
- *  2. **版本号来自刚读到的列表**（`management_version` / `account_status_version`），
- *     不做缓存；服务端 CAS 不符时回 409，界面据此提示刷新（列表会自动重读）；
- *  3. **幂等键按"一次用户操作"生成，重试复用同一个**：失败时保留、成功后才丢弃
- *     ——否则重试会变成第二次操作（见 `api-client.ts` 的约定）。
+ *  1. **不假装成功**：失败原样显示服务端的错误码与说明（含"最后一个可用管理员"这类拒绝）；
+ *  2. **版本号来自刚读到的列表**，不缓存；版本不符时提示刷新；
+ *  3. **一次用户操作一个键，重试复用同一个**，避免重试变成第二次操作。
  *
- * 守卫只在服务端是权威；界面把"唯一可用管理员"的按钮提前置灰并写明原因，
- * 是为了不摆一个点下去必然失败的按钮（服务端仍会拒绝）。
+ * 唯一可用管理员的按钮提前置灰并写明原因，是为了不摆一个点下去必然失败的按钮
+ * （服务端仍然会拒绝）。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { formatDateTime } from '@/packages/common/time';
 import { ApiError, ErrorNotice, apiFetch, newRequestKey } from './api-client';
+import { SkeletonLines } from './skeleton';
 
 interface AdminUserJson {
   user_id: string;
@@ -47,7 +42,7 @@ interface UserMutationResponse {
   revoked_sessions: number;
 }
 
-/** 一次用户操作的幂等键缓存：失败保留（重试复用），成功丢弃（下次点击是新操作）。 */
+/** 一次用户操作的键缓存：失败保留（重试复用），成功丢弃（下次点击是新操作）。 */
 type KeyStore = Map<string, string>;
 
 export function AdminUserPanel() {
@@ -88,13 +83,13 @@ export function AdminUserPanel() {
           method: 'PATCH',
           json: { action, ...body, request_key: requestKey },
         });
-        // 成功了：这次操作结束，下一次点击必须是新键（否则会被判成重放而不生效）。
+        // 成功了：这次操作结束，下一次点击必须重新开始。
         keysRef.current.delete(opKey);
         setNotice(describeOutcome(user, result));
         setReasons((prev) => ({ ...prev, [user.user_id]: '' }));
         await load();
       } catch (e) {
-        // 失败：**保留同一个键**，用户重试时复用，服务端才能认成同一次操作。
+        // 失败：保留同一个键，用户重试时复用同一个操作。
         setError(e as ApiError);
       } finally {
         setBusy(null);
@@ -114,16 +109,16 @@ export function AdminUserPanel() {
     <section style={{ marginTop: 32, borderTop: '1px solid var(--line)', paddingTop: 16 }}>
       <h2 style={{ fontSize: 18 }}>用户管理</h2>
       <p className="muted">
-        授予/撤销管理员、禁用/恢复账户 —— 全部在站内完成，不需要再跑{' '}
-        <code>scripts/grant-admin.mjs</code> 或手改数据库表。每次变更都留一条审计记录（谁、对谁、改了什么、为什么），
-        并带版本号做并发保护：这里的操作**不能**让一个普通用户把自己变成管理员（服务端会先校验操作者是管理员）。
+        授予/撤销管理员、禁用/恢复账户 —— 全部在站内完成，不需要上机跑命令或手改数据库。
+        每次变更都会记下<strong>谁、对谁、改了什么、为什么</strong>；这里的操作<strong>不能</strong>
+        让普通用户把自己变成管理员。
       </p>
 
       {error ? <ErrorNotice error={error} onDismiss={() => setError(null)} /> : null}
       {notice ? <p className="notice success">{notice}</p> : null}
 
       {data === null ? (
-        <p className="muted">正在读取用户…</p>
+        <SkeletonLines lines={3} label="正在读取用户…" />
       ) : (
         <>
           <div className="list-meta" style={{ marginBottom: 8 }}>
@@ -133,13 +128,13 @@ export function AdminUserPanel() {
 
           {data.active_admin_count <= 1 ? (
             <p className="notice warn">
-              当前只有 {data.active_admin_count} 名可用管理员：撤销或禁用**最后一名可用管理员**会被服务端拒绝
+              当前只有 {data.active_admin_count} 名可用管理员：撤销或禁用<strong>最后一名可用管理员</strong>会被拒绝
               （系统必须至少保留一名能审核内容的管理员）。请先把另一名用户授予管理员，再处理这一名。
             </p>
           ) : null}
 
           {data.users.length === 0 ? (
-            <p className="empty">库里还没有任何用户 —— 用户行由首次 GitHub 登录建立。</p>
+            <p className="empty">还没有任何用户 —— 第一次 GitHub 登录会建立用户。</p>
           ) : (
             <ul className="item-list panel" style={{ padding: '4px 16px' }}>
               {data.users.map((user) => {
@@ -206,7 +201,7 @@ export function AdminUserPanel() {
                         {/* ---- 账户状态 ---- */}
                         <input
                           aria-label={`${user.nickname} 的状态变更原因`}
-                          placeholder={isActive ? '禁用原因（必填，会写进审计）' : '恢复原因（必填）'}
+                          placeholder={isActive ? '禁用原因（必填，会记入记录）' : '恢复原因（必填）'}
                           value={reason}
                           onChange={(e) => setReasons((prev) => ({ ...prev, [user.user_id]: e.target.value }))}
                           style={{ flex: '1 1 220px', minWidth: 180 }}
@@ -246,9 +241,9 @@ export function AdminUserPanel() {
           )}
 
           <p className="muted" style={{ fontSize: 13 }}>
-            禁用会**同时撤销该用户所有会话**（立刻踢下线，旧 Cookie 不再可用），并阻止其重新登录；
-            恢复后旧会话不会复活，需要重新登录。界面上的按钮对"最后一名可用管理员"提前置灰，
-            但真正的守卫在服务端：即使绕过界面，也一样会被拒绝（错误码 <code>forbidden</code>，附{' '}
+            禁用会<strong>同时撤销该用户所有会话</strong>（立刻踢下线，旧 Cookie 不再可用），并阻止其重新登录；
+            恢复后旧会话不会复活，需要重新登录。按钮对"最后一名可用管理员"提前置灰，
+            服务端也会拒绝这类操作（错误码 <code>forbidden</code>，附{' '}
             <code>error.context.guard = last_active_admin</code>）。
           </p>
         </>

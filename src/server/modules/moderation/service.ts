@@ -2,7 +2,7 @@
  * 内容审核服务（工作包 GT）。
  *
  * 权威依据：
- *  - docs/模块签名契约.md 第 6 节（签名）与第 151 行（未配置筛查的硬规则）；
+ *  - 已删除的设计稿《模块签名契约》 第 6 节（签名）与第 151 行（未配置筛查的硬规则）；
  *  - migrations/0001_baseline.sql §3.4-3.5（表结构与 CHECK）；
  *  - 并行工作包 §2.10（状态机与"绝不自动放行"）。
  *
@@ -153,15 +153,6 @@ export function evaluateRules(snapshot: {
   }
   // 规则通过 → 进入外部内容筛查阶段（是否真的能过由筛查配置决定）。
   return { result: 'pass', fields: [], nextState: 'checking' };
-}
-
-function resolveDb(tx: unknown): SqliteDatabase | null {
-  if (!tx || typeof tx !== 'object') return null;
-  const candidate = tx as { db?: unknown };
-  if (candidate.db && typeof candidate.db === 'object') return candidate.db as SqliteDatabase;
-  const direct = tx as { prepare?: unknown };
-  if (typeof direct.prepare === 'function') return tx as SqliteDatabase;
-  return null;
 }
 
 export interface ModerationOptions {

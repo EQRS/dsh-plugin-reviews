@@ -11,11 +11,15 @@ import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { SessionNav } from '@/components/session-nav';
 import { ReadingProgress } from '@/components/reading-progress';
+import { MotionRuntime } from '@/components/motion-runtime';
+import { BackToTop } from '@/components/back-to-top';
+import { BottomNav } from '@/components/bottom-nav';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'DSH Plugin Review · 最小切片',
-  description: '登录 → 收录插件 → 写/审/发一篇评测 → 评论',
+  // 站点标题与描述面向访问者，不再带"最小切片"这类项目内部说法。
+  title: 'DSH 插件评测',
+  description: 'DSH 插件目录与社区评测：收录插件、撰写与阅读评测、参与讨论。',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
@@ -35,6 +39,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           跳至主内容
         </a>
         <ReadingProgress />
+        {/* 动效运行时：入场、行级错峰、按压涟漪、数字跳变（减少动效时自动不参与） */}
+        <MotionRuntime />
+        {/* 回到顶部：滚过一屏才出现 */}
+        <BackToTop />
         <header className="site-header">
           {/* 导航栏由客户端组件渲染：登录态来自 GET /api/session 的真实响应。 */}
           <SessionNav />
@@ -42,9 +50,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <main id="main-content" className="site-main">
           {children}
         </main>
-        <footer className="footer">
-          本页是最小功能切片的演示载体，不是完整站点；未实现范围见 docs/README-切片说明.md。
-        </footer>
+        {/* 底部导航栏（M3 navigation bar）：≤900px 显示，桌面隐藏 */}
+        <BottomNav />
+        {/* 页脚已按主人要求整块删除（含那条分隔线）。
+            "收录 ≠ 已实测可用"这句诚实声明仍在**插件提交页**与**引导页**上出现，没有丢失。 */}
       </body>
     </html>
   );

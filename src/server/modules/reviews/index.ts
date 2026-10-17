@@ -1,8 +1,8 @@
 /**
- * 评测模块（工作包 GC · 签名见 docs/模块签名契约.md 第 3 节）。
+ * 评测模块（工作包 GC · 签名见 已删除的设计稿《模块签名契约》 第 3 节）。
  *
  * 本体只导出服务对象 `reviewsService`，不导出仓储与表定义。
- * 关键不变量（docs/并行工作包.md 第 2 节）：
+ * 关键不变量（已删除的设计稿《并行工作包》 第 2 节）：
  *  - `save_version` 原子条件更新：`WHERE id = ? AND save_version = ?`，影响行数 0 → version_conflict，保留用户输入；
  *  - 请求去重：`draft_save_receipts(draft_id, request_key)` 同键同摘要 → 返回原回执且**不递增** save_version；同键不同摘要 → request_key_reused；
  *  - 一篇评测只有一份当前草稿（部分唯一索引 `uq_drafts_review`）；

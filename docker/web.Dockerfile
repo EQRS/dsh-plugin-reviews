@@ -1,19 +1,20 @@
 # syntax=docker/dockerfile:1
 #
-# DSH 插件测评站 · 容器镜像
+# DSH 插件测评站 · 应用镜像（web / worker / migrate 三个角色共用一份镜像）
 #
-# 一个镜像同时供 web 与 worker 使用（两者共用同一份业务代码、同一个库），
-# 由 compose 用不同 command 拉起不同进程 —— 与 systemd 那套的分工完全一致。
-#
-# 为什么不做 standalone 瘦身：worker 跑的是 TS（tsx），需要 node_modules 与源码。
+# 为什么一个镜像供三个角色：三者跑的是同一份业务代码、同一个库，
+# 用不同 command 拉起不同进程（与 compose 里的分工一致）。
 # 拆成"web 用 standalone、worker 用全量依赖"两个镜像，会让"两边是同一份代码"
-# 这个前提变得难以核对，而收益只是镜像小几百 MB。要瘦身得先给 worker 做编译产物，
-# 那是另一片的事，不该混进"先把容器跑起来"这一步。
+# 这个前提变得难以核对，收益只是小几百 MB。要瘦身得先给 worker 做编译产物，那是另一片的事。
+#
+# 构建上下文 = **仓库根**（docker/compose.yaml 里 context: ..），所以下面的 COPY
+# 路径都是相对仓库根写的。二进制附加物（预编译 .node、离线 seed 等）放 docker/bin/，
+# 会被原样复制进 /app/bin —— 见 docker/bin/README.md 的约定。
 
 FROM node:24-bookworm-slim AS base
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1
-# tini：容器里的 1 号进程只负责转发信号 + 回收僵尸进程，SIGTERM 才能真的传到 node
+# tini：容器 1 号进程只负责转发信号 + 回收僵尸进程，SIGTERM 才能真的传到 node
 # curl：给 HEALTHCHECK 用
 RUN apt-get update \
  && apt-get install -y --no-install-recommends tini ca-certificates curl \
@@ -42,7 +43,8 @@ RUN npm run build
 # ---------- 运行层 ----------
 FROM base AS runner
 WORKDIR /app
-# 固定 UID/GID（与《依赖与 Linux 部署》一致）；容器内绝不用 root 跑业务
+# 固定 UID/GID 10001；容器内绝不用 root 跑业务。宿主机数据目录属主不同时，
+# 由 compose 的 DSH_REVIEW_UID / DSH_REVIEW_GID 覆盖（见 docs/docker约定.md）。
 RUN groupadd --gid 10001 dsh \
  && useradd --uid 10001 --gid 10001 --home-dir /app --shell /usr/sbin/nologin dsh \
  && mkdir -p /app/.data \
@@ -55,6 +57,8 @@ COPY --from=builder /app/tsconfig.json /app/next.config.ts /app/server.mjs ./
 COPY --from=builder /app/src        ./src
 COPY --from=builder /app/migrations ./migrations
 COPY --from=builder /app/scripts    ./scripts
+# 随镜像携带的二进制附加物（目录为空时只是建一个空 /app/bin）
+COPY docker/bin ./bin
 
 # 秘密一律由运行时注入（compose env_file），绝不烘进镜像
 ENV DSH_REVIEW_DB_PATH=/app/.data/app.sqlite \

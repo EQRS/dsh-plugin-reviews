@@ -1,5 +1,5 @@
 /**
- * catalog 服务（工作包 GI，契约 docs/模块签名契约.md 第 2 节）。
+ * catalog 服务（工作包 GI，契约 已删除的设计稿《模块签名契约》 第 2 节）。
  *
  * 关键不变量：
  *  1. **收录检查必须真的做**：仓库可访问 **且** package.json 有 `dsh.bundle` 声明
@@ -26,7 +26,7 @@ import { withRead, withTransaction } from '@/server/platform/tx';
 import { digest } from '@/server/platform/digest';
 import { newId } from '@/server/platform/id';
 import { err } from '@/packages/common/errors';
-import { buildPage, type PageRequest, type PageResult } from '@/packages/common/result';
+import { buildPage, type PageResult } from '@/packages/common/result';
 import { ROOT_PLUGIN_PATH, parseSubmissionUrl } from './parse-url';
 import type {
   AcceptPluginSubmissionInput,
@@ -149,7 +149,7 @@ async function runAccept(params: {
   requestDigest: string;
   actor: AcceptActor;
 }): Promise<AcceptPluginSubmissionResult> {
-  const { db, probe, url, parsed, requestDigest, actor } = params;
+  const { db, probe, parsed, requestDigest, actor } = params;
 
       // ---- 收录检查（事务外：网络调用不得占用写事务）----
       // 1) 仓库可访问
@@ -343,25 +343,6 @@ async function runAccept(params: {
 export interface CatalogServiceDeps {
   /** 显式连接（测试用真实临时库）。省略时回退平台单例。 */
   db?: SqliteDatabase;
-}
-
-interface RepositoryRow {
-  id: string;
-  github_repository_id: string;
-  full_name: string;
-  html_url: string;
-  is_archived: number;
-  availability_state: 'unknown' | 'available' | 'unavailable';
-  last_checked_at: number | null;
-  last_successful_check_at: number | null;
-}
-
-interface PluginRow {
-  id: string;
-  repository_id: string;
-  plugin_path: string;
-  created_at: number;
-  updated_at: number;
 }
 
 interface OperationRow {
@@ -629,7 +610,7 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
      * 用途标签聚合（筛选 chip 行）。
      *
      * 口径：**直接拿 GitHub topics 当标签**，本切片没有中文分类字典（见
-     * docs/线上实现-对规划-差距盘点.md 的"未做"清单）；没有 topics 的条目归到 `__none__`。
+     * docs/HANDOFF.md 的"未做"清单）；没有 topics 的条目归到 `__none__`。
      */
     async listPluginTags(): Promise<PluginTagSummary[]> {
       return withRead((conn) => {

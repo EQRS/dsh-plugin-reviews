@@ -52,7 +52,9 @@ async function check(name, path, assert) {
 }
 
 function countOf(html) {
-  const m = /共 (\d+) 个条目/.exec(html);
+  // 页面已不再显示"共 N 个条目"（主人要求删掉那行文案）：
+  // 总数改为结果区节点上的 `data-total`，验收读属性、不读界面文案。
+  const m = /data-total="(\d+)"/.exec(html);
   return m ? Number(m[1]) : null;
 }
 
@@ -71,7 +73,7 @@ try {
 await check('目录页可访问：空库走"目录为空"、非空库给出条目链接', '/plugins', ({ status, html }) => {
   if (status !== 200) return `HTTP ${status}`;
   const total = countOf(html);
-  if (total === null) return '页面上没有"共 N 个条目"';
+  if (total === null) return '结果区没有 data-total（目录页应给出机器可读的总数）';
   if (!html.includes('提交插件')) return '缺少"提交插件"入口';
   if (total === 0) {
     // 线上刚部署完正是这种状态：必须明确说"目录为空"，不能只留一个空列表

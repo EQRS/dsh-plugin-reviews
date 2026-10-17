@@ -27,7 +27,7 @@ import { newId } from '../src/server/platform/id';
 import type { SqliteDatabase } from '../src/server/platform/db';
 import type { CallerContext } from '../src/server/platform/context';
 import { TaskTypes, type TaskType } from '../src/packages/common/field-rules';
-import { createTasksService, type TasksService } from '../src/server/modules/tasks/service';
+import { createTasksService } from '../src/server/modules/tasks/service';
 import { submitReview } from '../src/server/workflows/submit-review';
 import { publishComment } from '../src/server/workflows/publish-comment';
 import { createHandlers } from '../src/worker/handlers';

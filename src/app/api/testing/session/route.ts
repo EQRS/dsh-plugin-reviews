@@ -21,16 +21,11 @@
 import { getDb } from '@/server/platform/db';
 import { createIdentityService } from '@/server/modules/identity';
 import { writeSessionCookie } from '@/server/platform/session-cookie';
+import { testLoginAllowed } from '@/server/platform/test-login';
 import { err } from '@/packages/common/errors';
 import { okJson, errorResponse, requestMeta, readJson } from '../../_lib/context';
 
 export const runtime = 'nodejs';
-
-/** 是否允许测试登录通道。生产环境一律不允许。 */
-export function testLoginAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
-  if (env.NODE_ENV === 'production') return false;
-  return env.DSH_REVIEW_ALLOW_TEST_LOGIN === '1';
-}
 
 export async function POST(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
