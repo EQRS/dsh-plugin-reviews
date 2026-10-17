@@ -1,5 +1,5 @@
 /**
- * catalog 模块对外类型（契约 docs/模块签名契约.md 第 2 节）。
+ * catalog 模块对外类型（契约 已删除的设计稿《模块签名契约》 第 2 节）。
  */
 
 import type { PageRequest, PageResult } from '@/packages/common/result';

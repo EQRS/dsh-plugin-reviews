@@ -2,7 +2,7 @@
  * 审计记录服务（工作包 GT）。
  *
  * 权威依据：
- *  - docs/模块签名契约.md 第 8 节；
+ *  - 已删除的设计稿《模块签名契约》 第 8 节；
  *  - migrations/0001_baseline.sql §3.7（`UNIQUE(action_type, operation_key)`，
  *    `CHECK (actor_kind = 'system' AND actor_user_id IS NULL) OR (...)`）；
  *  - 并行工作包 §2.4（请求去重：同键同摘要 → 原结果；同键不同摘要 → `request_key_reused`）。

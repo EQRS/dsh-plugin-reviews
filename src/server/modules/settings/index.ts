@@ -39,7 +39,7 @@ export interface SettingDefinition {
  *   * 两条频控（规格第 22-25 行）—— 键名与 `RATE_LIMIT_RULES[].specKey` 逐字一致；
  *   * 自动发现的两项（每轮上限、每日开关）。
  * 尚未接上的（如实记在这里，别让人以为改了就生效）：媒体限额（单张大小 / 每篇张数）、
- * 草稿自动保存间隔、内容筛查开关 —— 见 docs/线上实现-对规划-差距盘点.md。
+ * 草稿自动保存间隔、内容筛查开关 —— 见 docs/HANDOFF.md。
  */
 export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
   {

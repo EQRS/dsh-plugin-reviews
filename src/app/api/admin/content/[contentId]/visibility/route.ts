@@ -1,5 +1,5 @@
 /**
- * 管理员隐藏 / 取消隐藏内容（`docs/README-切片说明.md` §2.1 里「仍缺：管理员隐藏评论并记原因」的接口半）。
+ * 管理员隐藏 / 取消隐藏内容（`已删除的设计稿《切片说明》` §2.1 里「仍缺：管理员隐藏评论并记原因」的接口半）。
  *
  * POST /api/admin/content/{contentId}/visibility
  *   body: { action: 'hide' | 'unhide', reason, expectedVisibilityControlVersion, requestKey }
@@ -22,13 +22,13 @@
  *     `publicly_visible`，由界面如实说明；本路由**不**顺手改公开状态（那会绕过发布流程与复核）。
  *  2. **版本不符 → 409 `version_conflict`**，带上 `current_version` / `expected_version`，
  *     不假装成功。注意校验的位置：`contentService.hide/unhide` 的签名**不收**控制版本
- *     （见 `docs/模块签名契约.md` §4 与 `src/server/modules/content/index.ts`），所以版本比对
+ *     （见 `已删除的设计稿《模块签名契约》` §4 与 `src/server/modules/content/index.ts`），所以版本比对
  *     只能在路由层做一次「读—比」，真正的落地保护是服务层 UPDATE 里的状态条件
  *     （`WHERE hidden_at IS NULL` / `WHERE hidden_at IS NOT NULL`）：并发下后到者会被服务层拒成 409，
  *     不会重复隐藏或误解除。
  *  3. **`replayed` 目前结构上只能是 `false`**。`contentService.hide/unhide` 对 `requestKey` 只做
  *     非空校验后就 `void requestKey`，服务层对这两个动作**没有** `request_key` / `operation_records`
- *     去重（`docs/模块签名契约.md` §9.3 已把这一点登记为已知缺口）。接口层不自己另建去重台账 ——
+ *     去重（`已删除的设计稿《模块签名契约》` §9.3 已把这一点登记为已知缺口）。接口层不自己另建去重台账 ——
  *     那会变成第二套真相，也与"审计与去重都在服务层"的边界冲突。
  *     后果要照实说：网络失败后用**同一个 `requestKey` 重试**，第二次会因为目标状态已变而拿到
  *     409（`version_conflict`），**不是**幂等返回原结果。界面必须提示"刷新后看当前状态"，不能写成"已完成"。

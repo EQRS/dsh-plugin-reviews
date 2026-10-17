@@ -1,5 +1,5 @@
 /**
- * catalog 服务（工作包 GI，契约 docs/模块签名契约.md 第 2 节）。
+ * catalog 服务（工作包 GI，契约 已删除的设计稿《模块签名契约》 第 2 节）。
  *
  * 关键不变量：
  *  1. **收录检查必须真的做**：仓库可访问 **且** package.json 有 `dsh.bundle` 声明
@@ -610,7 +610,7 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
      * 用途标签聚合（筛选 chip 行）。
      *
      * 口径：**直接拿 GitHub topics 当标签**，本切片没有中文分类字典（见
-     * docs/线上实现-对规划-差距盘点.md 的"未做"清单）；没有 topics 的条目归到 `__none__`。
+     * docs/HANDOFF.md 的"未做"清单）；没有 topics 的条目归到 `__none__`。
      */
     async listPluginTags(): Promise<PluginTagSummary[]> {
       return withRead((conn) => {

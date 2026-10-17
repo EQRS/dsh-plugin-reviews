@@ -6,7 +6,7 @@
  * 404 是不是变多了"在生产日志里根本无从看起。自定义 server 是拿到**每请求一行、
  * 含状态码与耗时**的标准做法（也是将来放反代之前能自己做的最完整方案）。
  *
- * 一行一条 JSON，字段：request_id / method / path / status / duration_ms / slow。
+ * 一行一条 JSON，字段：request_id / client_ip / method / path / status / duration_ms / slow。
  * 与业务日志共用同一个 `request_id`（复用入站 `x-request-id`，否则自己生成），
  * 所以从用户报的编号能直接 grep 到这一行的上下文。
  *
@@ -16,16 +16,20 @@
  *   PORT                        监听端口（默认 3000）
  *   DSH_REVIEW_HOST             绑定地址（默认 0.0.0.0）
  *   DSH_REVIEW_SLOW_REQUEST_MS  慢请求阈值（默认 1000；超过就打 slow:true，且升为 warn）
+ *   DSH_REVIEW_TRUST_PROXY      为 1 时按 X-Real-IP / X-Forwarded-For 记客户端地址。
+ *                               **只在前面确实有反代时开**：这些头客户端可以自己写。
  */
 
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import next from 'next';
+import { resolveClientIp } from './src/server/platform/client-ip.mjs';
 
 const port = Number(process.env.PORT ?? 3000);
 // 注意：不要用 HOSTNAME —— 容器里它被 Docker 设成容器 ID，不是绑定地址。
 const hostname = process.env.DSH_REVIEW_HOST ?? '0.0.0.0';
 const slowMs = Number(process.env.DSH_REVIEW_SLOW_REQUEST_MS ?? 1000);
+const trustProxy = process.env.DSH_REVIEW_TRUST_PROXY === '1';
 
 /** 这些路径不打访问日志（静态资源按前缀，健康检查按路径）。 */
 function isQuiet(path) {
@@ -62,6 +66,13 @@ const server = createServer((req, res) => {
     const slow = durationMs >= slowMs;
     writeLine(status >= 500 || slow ? 'warn' : 'info', {
       request_id: requestId,
+      // 真实客户端地址：未开 TRUST_PROXY 时这里是反代的地址（如 172.18.0.1），
+      // 开了之后才是访客地址 —— 排查滥用时两者的区别很关键。
+      client_ip: resolveClientIp({
+        headers: req.headers,
+        socketAddress: req.socket?.remoteAddress ?? null,
+        trustProxy,
+      }),
       method: req.method ?? 'GET',
       path,
       status,
@@ -74,7 +85,14 @@ const server = createServer((req, res) => {
 });
 
 server.listen(port, hostname, () => {
-  writeLine('info', { message: 'server_listening', port, hostname, slow_request_ms: slowMs });
+  writeLine('info', { message: 'server_listening', port, hostname, slow_request_ms: slowMs, trust_proxy: trustProxy });
+  // 这一条是**如实提醒**：开了信任反代，就不能把本端口直接暴露给公网。
+  if (trustProxy) {
+    writeLine('info', {
+      message: 'trust_proxy_enabled',
+      note: '只按 X-Real-IP / X-Forwarded-For 记客户端地址；本端口不得直接暴露给公网。',
+    });
+  }
 });
 
 /** 优雅退出：容器里靠 tini 把 SIGTERM 送到这里。 */

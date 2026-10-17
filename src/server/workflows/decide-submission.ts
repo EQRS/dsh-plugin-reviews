@@ -9,7 +9,7 @@
  * 把状态改成 `approved` 就结束了 —— **没有任何东西去发布**。
  * 真人点「通过」之后内容永远不公开，而两个验收脚本都在"通过"之后**直接调用 `publishReview`**，
  * 把这条缝盖住了：单测全绿、验收全绿，页面上的主路径却是断的。
- * 这与"worker handlers 是空注册表"是同一类问题（见 docs/README-切片说明.md §5）。
+ * 这与"worker handlers 是空注册表"是同一类问题（见 已删除的设计稿《切片说明》 §5）。
  *
  * worker 的 `review_check` 处理器在**自动检查通过**时会入队 `review_publish`
  * （见 `src/worker/handlers.ts`）。人工通过是另一条通向 `approved` 的路，
@@ -32,7 +32,7 @@
  * ## 入队位置
  *
  * 放在决定事务**提交之后**，与 `submit-review.ts` 同构：better-sqlite3 的事务回调
- * 必须同步，而 tasks 的加载是异步的。这条偏离在 `docs/模块签名契约.md` §9.2 有记录。
+ * 必须同步，而 tasks 的加载是异步的。这条偏离在 `已删除的设计稿《模块签名契约》` §9.2 有记录。
  */
 
 import { getDb, type SqliteDatabase } from '@/server/platform/db';
