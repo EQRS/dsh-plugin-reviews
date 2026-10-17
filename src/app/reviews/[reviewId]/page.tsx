@@ -5,7 +5,6 @@
  * 正文之后依次是修订历史、评论区。
  */
 
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getDb } from '@/server/platform/db';
 import { resolveVisibilityInTx } from '@/server/modules/content';

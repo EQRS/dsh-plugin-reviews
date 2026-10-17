@@ -14,28 +14,10 @@ import { rateLimitOverrideFor } from '@/server/modules/settings';
 import { commentsService } from '@/server/modules/comments';
 import { resolveVisibilityInTx } from '@/server/modules/content';
 import { err } from '@/packages/common/errors';
-import { PaginationDefaults } from '@/packages/common/result';
+import { parsePaging } from '@/app/api/_lib/pagination';
 import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../../../_lib/context';
 
 export const runtime = 'nodejs';
-
-/**
- * 页码/每页校验。**导出**是给同级的 `.../comments/[commentId]/replies` 复用 ——
- * 允许的每页条数是产品规则，复制两份迟早漂移。
- */
-export function parsePaging(url: URL): { page: number; pageSize: number } {
-  const page = Number(url.searchParams.get('page') ?? '1');
-  const pageSize = Number(url.searchParams.get('page_size') ?? String(PaginationDefaults.default_page_size));
-  if (!Number.isInteger(page) || page < 1) {
-    throw err.input('页码必须是从 1 开始的正整数。', [{ path: 'page', message: '取值不合法' }]);
-  }
-  if (!(PaginationDefaults.allowed_page_sizes as readonly number[]).includes(pageSize)) {
-    throw err.input(`每页条数只允许 ${PaginationDefaults.allowed_page_sizes.join('、')}。`, [
-      { path: 'page_size', message: '取值不合法' },
-    ]);
-  }
-  return { page, pageSize };
-}
 
 export async function GET(
   request: Request,

@@ -16,7 +16,7 @@ import { createIdentityService } from '@/server/modules/identity';
 import { clearSessionCookie, readSessionToken } from '@/server/platform/session-cookie';
 import { createGithubLoginAdapter } from '@/server/adapters/login';
 import { currentContext, okJson, errorResponse, requestMeta } from '../_lib/context';
-import { testLoginAllowed } from '../testing/session/route';
+import { testLoginAllowed } from '@/server/platform/test-login';
 
 export const runtime = 'nodejs';
 

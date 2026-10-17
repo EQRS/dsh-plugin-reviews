@@ -11,7 +11,6 @@ import type {
   RepositoryAvailabilityState,
   ReviewSourceKind,
   SubmissionState,
-  TaskState,
   UserRole,
   VersionValue,
 } from './field-rules';

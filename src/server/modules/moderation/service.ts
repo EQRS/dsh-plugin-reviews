@@ -155,15 +155,6 @@ export function evaluateRules(snapshot: {
   return { result: 'pass', fields: [], nextState: 'checking' };
 }
 
-function resolveDb(tx: unknown): SqliteDatabase | null {
-  if (!tx || typeof tx !== 'object') return null;
-  const candidate = tx as { db?: unknown };
-  if (candidate.db && typeof candidate.db === 'object') return candidate.db as SqliteDatabase;
-  const direct = tx as { prepare?: unknown };
-  if (typeof direct.prepare === 'function') return tx as SqliteDatabase;
-  return null;
-}
-
 export interface ModerationOptions {
   /**
    * 外部内容筛查适配器。**未注入即视为未配置**。

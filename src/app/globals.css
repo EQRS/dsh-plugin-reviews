@@ -242,9 +242,7 @@ html::-webkit-scrollbar {
 body {
   min-height: 100vh;
   margin: 0;
-  background: var(--bg);
   color: var(--ink);
-  line-height: 1.68;
   overflow-x: hidden;
 }
 
@@ -264,9 +262,7 @@ body {
 }
 
 /* 真正会滚的容器把滚动条还回来（参照同款，Firefox 用得上） */
-textarea,
-.drawer-content,
-.search-modal-results {
+textarea {
   scrollbar-width: auto;
 }
 
@@ -323,11 +319,6 @@ p {
 h1 {
   margin-bottom: 20px;
   color: var(--bright);
-  font-family: var(--font-heading);
-  font-size: clamp(2.1rem, 3.6vw, 3.1rem);
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  line-height: 1.08;
 }
 h2 {
   margin-bottom: 14px;
@@ -399,9 +390,6 @@ p {
   z-index: 1000;
   display: flex;
   align-items: center;
-  height: var(--header-height);
-  border-bottom: 1px solid var(--line);
-  background: rgba(17, 19, 24, 0.94);
 }
 
 /* 页头内的包裹层撑满宽度（否则 max-width + margin:auto 的导航无法居中） */
@@ -429,10 +417,6 @@ p {
   align-items: center;
   justify-self: start;
   color: var(--ink) !important;
-  font-family: var(--font-heading);
-  font-size: 1.1rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
   white-space: nowrap;
   transition: opacity var(--transition-fast);
 }
@@ -447,28 +431,12 @@ p {
   display: flex;
   align-items: center;
   justify-self: center;
-  gap: 1px;
-  padding: 3px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  background: var(--surface);
 }
 .main-nav a {
-  padding: 4px 12px;
-  border-radius: var(--radius-pill);
-  color: var(--muted);
-  font-size: 12.5px;
-  font-weight: 600;
   white-space: nowrap;
   transition: all var(--transition-fast);
 }
-.main-nav a:hover {
-  color: var(--ink);
-  background: var(--surface-hover);
-}
 .main-nav a.active {
-  background: var(--accent);
-  color: var(--on-primary);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
@@ -480,44 +448,12 @@ p {
   gap: 10px;
   font-size: 14px;
 }
-.account-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 260px;
-  padding: 7px 14px;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  background: var(--surface);
-  color: var(--muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.account-chip:hover {
-  border-color: var(--line-strong);
-  background: var(--surface-hover);
-  color: var(--ink);
-}
 /* 页头的通知铃铛与未读数字角标：**已随铃铛一起删除**（主人要求把铃铛去掉，
    未读改为账户下拉里「通知」行右侧的红点 `.menu-dot`）。这里不再保留死样式。 */
 
 /* 圆形图标按钮（参照 .nav-icon-btn；窗口/账户区的次级动作） */
-.icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 42px;
-  height: 42px;
-  border: 1px solid var(--line);
-  border-radius: 50%;
-  background: var(--surface);
-  color: var(--ink);
-  transition: background var(--transition-fast), border-color var(--transition-fast);
-}
 .icon-btn:hover {
   border-color: var(--line-strong);
-  background: var(--surface-hover);
 }
 
 /* ------------------------------------------------------------------ 主体区 */
@@ -527,7 +463,6 @@ p {
   max-width: var(--width-content);
   min-height: calc(100vh - 200px);
   margin: 0 auto;
-  padding: calc(var(--header-height) + 32px) 24px 80px;
   min-width: 0;
 }
 
@@ -557,11 +492,6 @@ p {
 /* 面板（参照 .report-feature：面板 + 1px 描边 + 中圆角 + 浅阴影；M3 层改成 filled card） */
 .panel {
   min-width: 0;
-  padding: 24px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
 }
 .panel + .panel {
   margin-top: 20px;
@@ -586,9 +516,6 @@ p {
   gap: 16px;
   margin-bottom: 20px;
   flex-wrap: wrap;
-}
-.section-head h2 {
-  margin: 0;
 }
 .section-head a {
   font-size: 14px;
@@ -698,23 +625,6 @@ p {
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 12px;
   margin-bottom: 20px;
-}
-.stat {
-  padding: 14px 16px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-}
-.stat .stat-value {
-  font-family: var(--font-heading);
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1.2;
-}
-.stat .stat-label {
-  color: var(--faint);
-  font-size: 12px;
 }
 
 /* ------------------------------------------------------------------ 控件 */
@@ -881,15 +791,6 @@ label {
 }
 
 /* 搜索行 */
-.search {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-.search input {
-  flex: 1 1 auto;
-  min-width: 0;
-}
 .search a.clear {
   padding: 10px 4px;
   color: var(--muted);
@@ -901,27 +802,6 @@ label {
 }
 
 /* 信息标签（chip）：不做评分，不用颜色当唯一状态 */
-.tag {
-  display: inline-block;
-  margin: 0 4px 5px 0;
-  padding: 3px 10px;
-  border-radius: var(--radius-pill);
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--muted);
-  font-size: 12px;
-}
-.tag.site {
-  background: var(--soft);
-  color: var(--accent);
-}
-.tag.warn {
-  background: var(--warn-bg);
-  color: var(--warn-ink);
-}
-.tag.danger {
-  background: var(--danger-bg);
-  color: var(--danger);
-}
 
 /* 筛选 chip（链接形态：无 JS 也让条件留在 URL） */
 .filters {
@@ -1046,12 +926,6 @@ label {
   color: var(--accent);
 }
 
-.item-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
 /* --------------------------------------------------------- 分类侧栏 */
 
 .side-nav {
@@ -1062,21 +936,6 @@ label {
   display: flex;
   justify-content: space-between;
   gap: var(--space-2);
-  padding: 9px 12px;
-  border-radius: var(--radius-sm);
-  color: var(--muted);
-  font-size: 14px;
-  font-weight: 500;
-  transition: all var(--transition-fast);
-}
-.side-nav a:hover {
-  background: var(--surface-hover);
-  color: var(--ink);
-}
-.side-nav a.active {
-  background: var(--soft);
-  color: var(--accent);
-  font-weight: 650;
 }
 .side-nav .count {
   color: var(--faint);
@@ -1130,27 +989,16 @@ label {
 /* 提示条：四种语义态（信息=强调色 / 警告=琥珀 / 失败=红 / 成功=绿）
    参照站只有中性提示，这里按本站"错误必须区别于提示、状态不只靠颜色"的既有纪律扩了三种。 */
 .notice {
-  padding: 12px 16px;
   border-left: 3px solid var(--accent);
-  border-radius: var(--radius-sm);
-  background: var(--soft);
-  color: var(--ink);
-  font-size: 14px;
 }
 .notice.warn {
   border-color: var(--warn-ink);
-  background: var(--warn-bg);
-  color: var(--warn-ink);
 }
 .notice.danger {
   border-color: var(--danger);
-  background: var(--danger-bg);
-  color: var(--danger);
 }
 .notice.success {
   border-color: var(--success-ink);
-  background: var(--success-bg);
-  color: var(--success-ink);
 }
 /* 静默态：已读通知这类"存在但不抢注意力"的条目 */
 .notice.quiet {
@@ -1162,24 +1010,15 @@ label {
 /* 行内链接态操作（回复 / 编辑 / 删除 / 知道啦 / 标为已读 …）。
    设计系统里唯一"看起来像链接、实际是按钮"的控件，别处不要再各写一套。 */
 .link-btn {
-  padding: 0;
   border: 0;
   background: none;
-  color: var(--accent);
   font-size: 14px;
-  font-weight: 600;
   cursor: pointer;
-  transition: color var(--transition-fast);
 }
 .link-btn:hover {
   color: var(--accent-hover);
-  text-decoration: underline;
-}
-.link-btn.danger {
-  color: var(--danger);
 }
 .link-btn.muted {
-  color: var(--muted);
   font-weight: 500;
 }
 .link-btn.muted:hover {
@@ -1224,10 +1063,6 @@ label {
  * Markdown 覆盖面（与 platform/markdown.ts 的净化白名单一致）：
  *   段落 / 强调 / 删除线 / 链接 / 有序无序与嵌套列表 / 任务列表（GFM）/
  *   引用 / 行内代码 / 代码块 / 表格（GFM）/ 分隔线 / 图片（站内 /media 与安全外链）。 */
-
-.article-flat {
-  min-width: 0;
-}
 .article-title {
   margin-bottom: 12px;
 }
@@ -1485,8 +1320,6 @@ label {
   left: 0;
   z-index: 10001;
   width: 0;
-  height: 2px;
-  background: linear-gradient(90deg, var(--accent), var(--cyan));
   transition: width 0.1s linear;
 }
 
@@ -1560,9 +1393,6 @@ label {
     justify-content: flex-end;
     max-width: 100%;
   }
-  .account-chip {
-    max-width: 46vw;
-  }
   .site-main {
     padding-top: calc(var(--header-height) + 40px);
   }
@@ -1617,23 +1447,9 @@ label {
   from { background-position: -140% 0; }
   to { background-position: 240% 0; }
 }
-@keyframes fx-pulse {
-  0% { box-shadow: 0 0 0 0 rgba(138, 180, 248, 0.5); }
-  70% { box-shadow: 0 0 0 7px rgba(138, 180, 248, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(138, 180, 248, 0); }
-}
-@keyframes fx-ripple {
-  from { opacity: 0.28; transform: scale(0.25); }
-  to { opacity: 0; transform: scale(2.4); }
-}
-@keyframes fx-flash {
-  from { color: var(--accent-hover); }
-  to { color: inherit; }
-}
 
 /* —— 入场：容器加上 .fx-enter 后，直接子元素按 --i 依次升起 —— */
 .fx-enter > * {
-  animation: fx-rise 0.32s cubic-bezier(0.2, 0.7, 0.25, 1) both;
   animation-delay: calc(var(--i, 0) * 45ms);
 }
 /* 第 13 个之后不再递增（否则长列表要等 1 秒才开始出现） */
@@ -1642,15 +1458,10 @@ label {
 }
 /* 列表行与表格行：步长更小，因为行数可能很多 */
 .fx-rows > * {
-  animation: fx-rise 0.28s cubic-bezier(0.2, 0.7, 0.25, 1) both;
   animation-delay: calc(var(--i, 0) * 22ms);
 }
 .fx-rows > *:nth-child(n + 17) {
   animation-delay: 0.35s;
-}
-.fx-panel {
-  animation: fx-rise 0.3s cubic-bezier(0.2, 0.7, 0.25, 1) both;
-  animation-delay: calc(var(--i, 0) * 60ms);
 }
 /* 提示条：出现时轻微弹入（错误/成功提示都是"刚发生的事"） */
 .notice {
@@ -1674,15 +1485,8 @@ label {
   background-size: 220% 100%;
   animation: fx-sheen 1.4s linear infinite;
 }
-.sk-sm {
-  height: 12px;
-}
 .sk-md {
   height: 15px;
-}
-.sk-lg {
-  height: 26px;
-  border-radius: 10px;
 }
 .sk-w35 {
   width: 35%;
@@ -1721,9 +1525,6 @@ button:not(:disabled):active,
   transform: translateY(1px) scale(0.985);
 }
 /* 列表条目 hover：给一点底色，提示"这一行可以点" */
-.item-list > .item {
-  transition: background-color 0.16s ease;
-}
 .item-list > .item:hover {
   background-color: rgba(255, 255, 255, 0.025);
 }
@@ -1752,16 +1553,7 @@ button:not(:disabled):active,
   border-radius: 50%;
   background: currentColor;
   pointer-events: none;
-  animation: fx-ripple 0.5s ease-out forwards;
 }
-
-/* 数字跳变时闪一下（未读角标这类"刚变过"的值） */
-.fx-flash {
-  animation: fx-flash 0.7s ease-out;
-}
-
-/* 未读提示的脉冲动画（fx-pulse）保留给需要的元素；页头铃铛已删，
-   未读红点用的是上面 .menu-dot 的 fx-dot 呼吸动画。 */
 
 @media (hover: hover) and (pointer: fine) {
   /* 桌面精确指针才给卡片抬升：触屏上"悬停"会粘住 */
@@ -1779,26 +1571,17 @@ button:not(:disabled):active,
 /* ---------------------------------------------------------- 回到顶部（滚过一屏才出现） */
 .back-to-top {
   position: fixed;
-  right: 24px;
-  bottom: 24px;
   z-index: 900;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-height: 36px;
-  padding: 7px 14px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-pill);
-  background: var(--surface-raised);
-  color: var(--muted);
   font-size: 13px;
   font-weight: 600;
-  box-shadow: var(--shadow-sm);
   animation: fx-pop 0.22s cubic-bezier(0.2, 0.7, 0.25, 1) both;
 }
 .back-to-top:hover {
   border-color: var(--accent);
-  color: var(--accent);
 }
 
 /* ---------------------------------------------------------- 页头账户下拉栏 */
@@ -1811,18 +1594,9 @@ button:not(:disabled):active,
   gap: 8px;
   max-width: 260px;
   min-height: 36px;
-  padding: 6px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  background: var(--surface);
-  color: var(--muted);
-  font-size: 14px;
-  font-weight: 600;
 }
 .account-trigger:hover {
   border-color: var(--line-strong);
-  background: var(--surface-hover);
-  color: var(--ink);
 }
 .account-trigger .chevron {
   transition: transform 0.2s cubic-bezier(0.2, 0.7, 0.25, 1);
@@ -1840,11 +1614,6 @@ button:not(:disabled):active,
   right: 0;
   z-index: 1002;
   width: 264px;
-  padding: 8px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md);
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-lg);
   animation: fx-pop 0.18s cubic-bezier(0.2, 0.7, 0.25, 1) both;
 }
 /* 头像：触发键里是 22px 小圆，菜单头部是 36px 圆 */
@@ -1856,8 +1625,6 @@ button:not(:disabled):active,
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: var(--soft);
-  color: var(--accent);
   font-size: 15px;
   font-weight: 700;
 }
@@ -1914,22 +1681,15 @@ button:not(:disabled):active,
 .menu-label {
   margin: 4px 0 2px;
   padding: 0 10px;
-  color: var(--faint);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
 }
 .account-dropdown .menu-row {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 8px 10px;
   border: 0;
-  border-radius: var(--radius-sm);
   background: none;
   color: var(--muted);
-  font-size: 14px;
   font-weight: 500;
   text-align: left;
   text-decoration: none;
@@ -1944,10 +1704,6 @@ button:not(:disabled):active,
 }
 .account-dropdown .menu-row:hover > svg:first-child {
   color: var(--accent);
-}
-.menu-row-label {
-  flex: 1 1 auto;
-  min-width: 0;
 }
 .account-dropdown .menu-row.danger {
   color: var(--danger);
@@ -2365,14 +2121,6 @@ input[type='search']:focus {
   color: var(--md-sys-color-on-primary-container);
 }
 /* FAB 里只留箭头图标（48dp 圆角方块放不下"回到顶部"四个字） */
-.back-to-top .fab-label {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-}
 .back-to-top > span[aria-hidden] {
   font-size: 20px;
   line-height: 1;
@@ -2976,10 +2724,6 @@ input[type='search']:focus {
   .article-layout {
     gap: 16px;
   }
-  /* 手机上正文宽度放开，左右留白统一走栅格 */
-  .article-body {
-    max-width: none;
-  }
 }
 
 @media (max-width: 600px) {
@@ -3037,8 +2781,7 @@ input[type='search']:focus {
   border-radius: var(--md-sys-shape-corner-large);
   background: var(--md-sys-color-surface-container-high);
 }
-.article-frame .review-body,
-.md-dialog-body .review-body {
+.article-frame .review-body {
   max-width: none;
 }
 
@@ -3088,12 +2831,6 @@ input[type='search']:focus {
   text-align: right;
   overflow-wrap: anywhere;
 }
-.panel-note {
-  margin: 12px 0 0;
-  color: var(--md-sys-color-on-surface-variant);
-  font-size: var(--md-sys-typescale-body-small-size);
-  line-height: 1.7;
-}
 
 /* ---------------------------------------------------------- 修订时间线（M3 重制）
    主人要求"蓝点旁边要有线，做成时间轴" → 用主色淡化的 2px 竖轨贯穿每一项，
@@ -3139,74 +2876,11 @@ input[type='search']:focus {
   color: var(--md-sys-color-on-surface-variant);
   font-size: var(--md-sys-typescale-body-small-size);
 }
-.timeline-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
-}
 .timeline-item .tag {
   margin-bottom: 0;
 }
 
-/* -------------------------------------------------------------- M3 弹窗（dialog）
-   M3 dialog：extra-large(28px) 圆角、surface-container-high 容器色、elevation 3、遮罩 40%。
-   ⚠️ 当前界面**没有使用者**：修订历史的"查看这次正文"入口按主人要求删掉了。
-      样式保留在这里，是为了将来需要一个 M3 弹窗时不必重写（而不是给某个假入口配的皮）。 */
-.md-dialog {
-  width: min(680px, calc(100vw - 32px));
-  max-height: min(82vh, 760px);
-  padding: 0;
-  border: none;
-  border-radius: var(--md-sys-shape-corner-extra-large);
-  background: var(--md-sys-color-surface-container-high);
-  color: var(--md-sys-color-on-surface);
-  box-shadow: var(--md-sys-elevation-level3);
-}
-.md-dialog[open] {
-  animation: fx-pop var(--md-sys-motion-duration-medium2)
-    var(--md-sys-motion-easing-emphasized-decelerate) both;
-}
-.md-dialog::backdrop {
-  background: color-mix(in srgb, var(--md-sys-color-scrim) 40%, transparent);
-}
-.md-dialog-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 24px 24px 0;
-}
-.md-dialog-title {
-  margin: 0;
-  font-size: var(--md-sys-typescale-headline-small-size);
-  line-height: var(--md-sys-typescale-headline-small-line);
-  font-weight: 600;
-}
-.md-dialog-sub {
-  margin: 4px 0 0;
-  color: var(--md-sys-color-on-surface-variant);
-  font-size: var(--md-sys-typescale-body-small-size);
-}
-.md-dialog-body {
-  max-height: 56vh;
-  overflow-y: auto;
-  padding: 16px 24px 0;
-}
-.md-dialog-subject {
-  margin: 0 0 10px;
-  font-size: var(--md-sys-typescale-title-medium-size);
-  font-weight: 600;
-}
-.md-dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 24px 24px;
-}
-
-/* M3 规定：触摸设备上的可点区不小于 48dp（视觉高 40dp 的按钮要给出更大的命中区）。
-   只在粗指针设备上放大，桌面鼠标下仍保持 M3 的 40dp 视觉高度。 */
+/* 触屏扩大命中区，同时保持控件的视觉尺寸。 */
 @media (pointer: coarse) {
   /*
    * 触屏上**不放大视觉尺寸**（主人反馈"按钮都太大了，看着不舒服"）：

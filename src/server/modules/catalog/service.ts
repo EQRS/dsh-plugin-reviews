@@ -26,7 +26,7 @@ import { withRead, withTransaction } from '@/server/platform/tx';
 import { digest } from '@/server/platform/digest';
 import { newId } from '@/server/platform/id';
 import { err } from '@/packages/common/errors';
-import { buildPage, type PageRequest, type PageResult } from '@/packages/common/result';
+import { buildPage, type PageResult } from '@/packages/common/result';
 import { ROOT_PLUGIN_PATH, parseSubmissionUrl } from './parse-url';
 import type {
   AcceptPluginSubmissionInput,
@@ -149,7 +149,7 @@ async function runAccept(params: {
   requestDigest: string;
   actor: AcceptActor;
 }): Promise<AcceptPluginSubmissionResult> {
-  const { db, probe, url, parsed, requestDigest, actor } = params;
+  const { db, probe, parsed, requestDigest, actor } = params;
 
       // ---- 收录检查（事务外：网络调用不得占用写事务）----
       // 1) 仓库可访问
@@ -343,25 +343,6 @@ async function runAccept(params: {
 export interface CatalogServiceDeps {
   /** 显式连接（测试用真实临时库）。省略时回退平台单例。 */
   db?: SqliteDatabase;
-}
-
-interface RepositoryRow {
-  id: string;
-  github_repository_id: string;
-  full_name: string;
-  html_url: string;
-  is_archived: number;
-  availability_state: 'unknown' | 'available' | 'unavailable';
-  last_checked_at: number | null;
-  last_successful_check_at: number | null;
-}
-
-interface PluginRow {
-  id: string;
-  repository_id: string;
-  plugin_path: string;
-  created_at: number;
-  updated_at: number;
 }
 
 interface OperationRow {

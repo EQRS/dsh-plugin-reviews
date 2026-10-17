@@ -140,7 +140,7 @@ describe('用户管理 · 列表', () => {
     bindGithub(db, normal, 'normal-user');
     const admin = insertUser(db, { nickname: '管理员', role: 'admin' });
     bindGithub(db, admin, 'liceses');
-    const disabled = insertUser(db, { nickname: '被封的', accountStatus: 'disabled' });
+    insertUser(db, { nickname: '被封的', accountStatus: 'disabled' });
     const loginAt = Date.now();
     db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?').run(loginAt, admin);
 

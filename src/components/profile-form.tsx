@@ -14,7 +14,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ApiError, ErrorNotice, apiFetch, newRequestKey } from './api-client';
+import { ApiError, ErrorNotice, apiFetch } from './api-client';
 
 export function ProfileForm({
   initialNickname,
@@ -31,8 +31,6 @@ export function ProfileForm({
   const [nickname, setNickname] = useState(initialNickname);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
-  // 一次保存一个幂等键；失败重试复用（否则重试会变成两次写）。
-  const [pendingKey, setPendingKey] = useState<string | null>(null);
 
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -43,15 +41,12 @@ export function ProfileForm({
 
     setBusy(true);
     setError(null);
-    const requestKey = pendingKey ?? newRequestKey();
-    setPendingKey(requestKey);
 
     try {
       await apiFetch<{ nickname: string }>('/api/me/profile', {
         method: 'PATCH',
         json: { nickname: nickname.trim() },
       });
-      setPendingKey(null);
       router.push(returnTo);
       router.refresh();
     } catch (e) {

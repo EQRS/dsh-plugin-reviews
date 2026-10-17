@@ -57,10 +57,6 @@ function listHref(current: DirectoryConditions, over: Partial<DirectoryCondition
   return qs.length > 0 ? `/plugins?${qs}` : '/plugins';
 }
 
-function hasAnyFilter(c: DirectoryConditions): boolean {
-  return Boolean(c.q) || Boolean(c.tag) || c.hasReviews !== 'all';
-}
-
 /** 卡片上的一行小标签（用途标签 / 状态）。颜色语义在 globals.css 的 .tag 家族里。 */
 function Chip({ text, tone = 'plain' }: { text: string; tone?: 'plain' | 'tag' | 'warn' }) {
   const cls = tone === 'tag' ? 'tag site' : tone === 'warn' ? 'tag warn' : 'tag';

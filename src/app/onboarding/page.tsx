@@ -29,7 +29,7 @@ interface Row {
  * `returnTo` 来自查询串，直接 `router.push` 就是一个开放重定向
  * （`/onboarding?returnTo=https://evil.example` 或 `//evil.example` 都能把人带走）。
  */
-export function safeReturnTo(raw: string | undefined): string {
+function safeReturnTo(raw: string | undefined): string {
   if (!raw) return '/';
   if (!raw.startsWith('/')) return '/';
   // `//host` 是协议相对 URL；`/\host` 在部分浏览器里等价 —— 两种都挡掉。

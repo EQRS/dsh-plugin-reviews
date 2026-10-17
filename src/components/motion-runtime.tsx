@@ -8,7 +8,6 @@
  *     否则客户端重渲染会把入场重播一次，看起来像闪屏；
  *   - **行级错峰**：列表（`.item-list`）与表格（`.panel table tbody`）的行按更小的步长错峰；
  *   - **按压涟漪**：pointerdown 时就地插一个 span —— 鼠标与触屏都生效，且不依赖 CSS 的 :active 时序；
- *   - **数字跳变**：`[data-fx-count]` 的文本一变就闪一下（例：未读角标从 0 变 3）；
  *   - **减少动效时一个类都不加**（不只是靠 CSS 兜底）：`prefers-reduced-motion: reduce` 下整段逻辑直接返回。
  *
  * 为什么用 usePathname 作依赖：App Router 里布局只挂载一次，页面切换不会重挂这个组件；
@@ -100,31 +99,9 @@ export function MotionRuntime() {
     };
     document.addEventListener('pointerdown', onPointerDown, { passive: true });
 
-    /* ---------- 4) 数字跳变闪一下 ---------- */
-    const flashed = new WeakSet<HTMLElement>();
-    const flash = (el: HTMLElement) => {
-      if (flashed.has(el)) return;
-      flashed.add(el);
-      el.classList.add('fx-flash');
-      el.addEventListener('animationend', () => {
-        el.classList.remove('fx-flash');
-        flashed.delete(el);
-      }, { once: true });
-    };
-    const observer = new MutationObserver((records) => {
-      records.forEach((record) => {
-        const el = (record.target.nodeType === Node.TEXT_NODE ? record.target.parentElement : record.target) as HTMLElement | null;
-        if (el?.matches('[data-fx-count]')) flash(el);
-      });
-    });
-    document.querySelectorAll<HTMLElement>('[data-fx-count]').forEach((el) => {
-      observer.observe(el, { childList: true, characterData: true, subtree: true });
-    });
-
     return () => {
       timers.forEach((t) => window.clearTimeout(t));
       document.removeEventListener('pointerdown', onPointerDown);
-      observer.disconnect();
       enterTargets.forEach((el) => el.classList.remove('fx-enter'));
       rowsTargets.forEach((el) => el.classList.remove('fx-rows'));
     };

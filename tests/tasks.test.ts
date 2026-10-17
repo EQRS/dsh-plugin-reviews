@@ -28,7 +28,6 @@ import {
   insertPlugin,
   insertRepository,
   insertReview,
-  insertReviewRevision,
   insertUser,
   type TestDb,
 } from './support/db';
@@ -52,7 +51,6 @@ import {
   createModerationService,
   evaluateRules,
   isVersionResolved,
-  type ModerationService,
 } from '../src/server/modules/moderation/service';
 import { createOperationsService } from '../src/server/modules/operations/service';
 import { createWorker } from '../src/worker/main';
@@ -295,7 +293,7 @@ describe('执行权 CAS：旧执行权不得写回', () => {
     const { db } = setup();
     const tasks = makeTasks(db);
     const { taskId } = await tasks.enqueue(enqueueInput());
-    const claim = (await tasks.claim('worker-1', 10_000))!;
+    await tasks.claim('worker-1', 10_000);
     const before = taskRow(db, taskId);
 
     const ok = await tasks.renew({ taskId, executionToken: 'not-the-right-token' }, 10_100);

@@ -19,7 +19,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { ApiError, ErrorNotice, apiFetch, newRequestKey } from './api-client';
+import { ApiError, ErrorNotice, apiFetch } from './api-client';
 import { AccountMenu } from './account-menu';
 import { SignInMenu } from './sign-in-menu';
 import { SiteDrawer } from './site-drawer';
@@ -72,9 +72,6 @@ export function SessionNav() {
   const signInForTest = async () => {
     setBusy(true);
     try {
-      // 幂等键固定一次；这里没有重试语义，仅保证同一次点击只建一个会话。
-      const requestKey = newRequestKey();
-      void requestKey;
       await apiFetch('/api/testing/session', {
         method: 'POST',
         json: { providerUserId: 'local-dev-user', providerUsername: 'local-dev' },
