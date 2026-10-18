@@ -47,15 +47,34 @@ export function codeChallengeFromVerifier(verifier: string): string {
   return createHash('sha256').update(verifier, 'ascii').digest('base64url');
 }
 
-/** 规范化回跳路径：只接受站内相对路径，其余一律回到首页。 */
+/**
+ * 规范化回跳路径：只接受站内相对路径，其余一律回到首页。
+ *
+ * 黑名单式校验不够：在 WHATWG URL 解析下，反斜杠在 http(s) 这类 special scheme
+ * 中等价于斜杠 —— `\/\evil.example`（或解码后的 `/\evil.example`）会被浏览器
+ * 解析成 `//evil.example`（协议相对地址），构成开放重定向；ASCII 制表符/控制字符
+ * 也可能被解析器忽略或用于截断。因此这里以**解析器**为准：把候选拼到固定 base
+ * 上解析，origin 必须仍是 base 本身；同时显式拒绝反斜杠与 C0 控制字符（不依赖
+ * 解析器版本差异）。
+ */
 export function normalizeReturnPath(raw: string | null | undefined): string {
   if (typeof raw !== 'string') return '/';
   const trimmed = raw.trim();
   if (trimmed === '' || !trimmed.startsWith('/')) return '/';
-  // 协议相对地址（//evil.example）不是站内路径
-  if (trimmed.startsWith('//')) return '/';
-  // 去掉可能的 CR/LF 注入
-  return trimmed.replace(/[\r\n]/g, '');
+  // 协议相对地址（//evil.example）与反斜杠变体（/\evil.example）都不是站内路径。
+  // 反斜杠在浏览器 URL 解析中等价于斜杠，`//` 与 `/\` 必须同判。
+  if (trimmed.startsWith('//') || trimmed.includes('\\')) return '/';
+  // 控制字符（CR/LF/TAB 等）不得进入回跳路径：拒绝而非静默剔除，
+  // 避免「剔除后恰好拼出别的地址」这类二次构造。
+  if (/[\u0000-\u001f\u007f]/.test(trimmed)) return '/';
+  // 解析器兜底：拼到固定站内 base 上，origin 必须仍是 base 本身。
+  try {
+    const resolved = new URL(trimmed, 'http://dsh.invalid');
+    if (resolved.origin !== 'http://dsh.invalid') return '/';
+  } catch {
+    return '/';
+  }
+  return trimmed;
 }
 
 /**

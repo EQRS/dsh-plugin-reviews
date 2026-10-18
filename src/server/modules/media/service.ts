@@ -35,6 +35,13 @@ export const MEDIA_LIMITS = {
   allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp'] as const,
   /** 单张最大字节数（10 MiB）。 */
   maxBytes: 10 * 1024 * 1024,
+  /**
+   * 解码后像素上限（4000 万，约 8000×5000）。
+   * 压缩后字节数小、解码后像素极大的「解压炸弹」会吃满内存（sharp 默认上限约
+   * 2.68 亿像素 ≈ 数百 MB~1 GB），因此在字节闸之外再加一道像素闸：
+   * metadata 读出宽高后显式比较，解码调用也带 limitInputPixels（双保险）。
+   */
+  maxPixels: 40_000_000,
   /** 每篇评测最多图片数（含封面）。 */
   maxPerReview: 20,
   /** 展示图长边上限。 */
@@ -45,6 +52,7 @@ export type AllowedMime = (typeof MEDIA_LIMITS.allowedMimeTypes)[number];
 
 /** 明确的上传失败原因（不把原因糊成一句"上传失败"）。 */
 export type MediaErrorCode =
+  | 'too_many_pixels'
   | 'unsupported_format'
   | 'too_large'
   | 'empty_file'
@@ -120,8 +128,17 @@ export async function probeImage(bytes: Buffer): Promise<
 
   let meta: SharpMetadata;
   try {
-    meta = await sharp(bytes, { failOn: 'error' }).metadata();
-  } catch {
+    meta = await sharp(bytes, { failOn: 'error', limitInputPixels: MEDIA_LIMITS.maxPixels }).metadata();
+  } catch (e) {
+    // 解码器自身也有像素上限（sharp 默认约 2.68 亿）：超限与「不是图片」要分开报，
+    // 否则用户上传超大图只会看到「无法解析」。
+    if (e instanceof Error && /pixel limit/i.test(e.message)) {
+      return {
+        ok: false,
+        code: 'too_many_pixels',
+        detail: `图片像素数超过上限（${MEDIA_LIMITS.maxPixels} 像素，约 8000×5000）。`,
+      };
+    }
     return { ok: false, code: 'decode_failed', detail: '无法解析为图片（文件可能损坏或不是图片）。' };
   }
 
@@ -140,6 +157,16 @@ export async function probeImage(bytes: Buffer): Promise<
     return { ok: false, code: 'decode_failed', detail: '无法读取图片尺寸。' };
   }
 
+  // 显式像素闸：不同 sharp/libvips 版本对 metadata() 的 limitInputPixels 行为不一致，
+  // 这里用解码前元数据再判一次（fail-closed），不依赖解码器版本。
+  if (meta.width * meta.height > MEDIA_LIMITS.maxPixels) {
+    return {
+      ok: false,
+      code: 'too_many_pixels',
+      detail: `图片像素数 ${meta.width}×${meta.height} 超过上限 ${MEDIA_LIMITS.maxPixels} 像素（约 8000×5000）。`,
+    };
+  }
+
   return { ok: true, mime, width: meta.width, height: meta.height };
 }
 
@@ -148,7 +175,7 @@ export async function buildDisplayImage(
   bytes: Buffer,
   mime: AllowedMime,
 ): Promise<{ bytes: Buffer; mime: AllowedMime; width: number; height: number; resized: boolean }> {
-  const meta = await sharp(bytes, { failOn: 'error' }).metadata();
+  const meta = await sharp(bytes, { failOn: 'error', limitInputPixels: MEDIA_LIMITS.maxPixels }).metadata();
   const width = meta.width ?? 0;
   const height = meta.height ?? 0;
   const longest = Math.max(width, height);
@@ -158,7 +185,7 @@ export async function buildDisplayImage(
     return { bytes, mime, width, height, resized: false };
   }
 
-  const pipeline = sharp(bytes, { failOn: 'error' }).resize({
+  const pipeline = sharp(bytes, { failOn: 'error', limitInputPixels: MEDIA_LIMITS.maxPixels }).resize({
     width: width >= height ? MEDIA_LIMITS.displayMaxEdge : undefined,
     height: height > width ? MEDIA_LIMITS.displayMaxEdge : undefined,
     withoutEnlargement: true,

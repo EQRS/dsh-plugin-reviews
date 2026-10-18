@@ -175,7 +175,9 @@ describe('return_path 只能是站内相对路径（防开放重定向）', () =
     expect(normalizeReturnPath('//evil.example')).toBe('/');
     expect(normalizeReturnPath('')).toBe('/');
     expect(normalizeReturnPath(null)).toBe('/');
-    expect(normalizeReturnPath('/a\r\nSet-Cookie: x=1')).toBe('/aSet-Cookie: x=1');
+    // 2026-10-18 外部审计加固：嵌入的控制字符不再「剔除后继续用」，直接拒绝——
+    // 剔除式处理会让「剔除后恰好拼出别的路径」成为二次构造面。
+    expect(normalizeReturnPath('/a\r\nSet-Cookie: x=1')).toBe('/');
   });
 
   it('数据库层也拒绝非站内路径（CHECK 兜底）', () => {
