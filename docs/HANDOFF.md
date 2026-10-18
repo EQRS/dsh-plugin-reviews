@@ -234,3 +234,12 @@ DSH_ACCEPTANCE_BASE=http://127.0.0.1:3100 node scripts/acceptance-catalog-browse
 * 未认证上限仍在：如果加一个只读 `GITHUB_TOKEN`，可以一次性批量跑完（无需等 40 分钟节拍）。
 * 实测：第二轮 `topic:deepseek-harness` 因配额被第一轮吃满而 `HTTP 403` —— 处理器把它判为
   **限流**并保留已收录结果（不是失败、也不会清空数据）。
+
+### 13.3 当日踩坑：`.gitignore` 的 `backups/` 把接口目录一起忽略了
+
+加备份功能时在 `.gitignore` 写了 `backups/`（想忽略备份产物），没带前导斜杠 ——
+gitignore 的目录规则匹配**任意层级**，于是 `src/app/api/admin/backups/route.ts` 被静默忽略：
+本地 typecheck / build 全过（文件在磁盘上），提交里却没有它，部署后 `/api/admin/backups` 直接 **404**。
+
+修法：改成 `/backups/`（只忽略仓库根那一个），并在 `.gitignore` 里留注释说明。
+教训：`git status` 里**没看到**新文件时别默认"忘了 add"，先 `git check-ignore -v <path>` 问一句。
