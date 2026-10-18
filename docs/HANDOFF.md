@@ -1,6 +1,6 @@
 # HANDOFF · 交接说明
 
-> 最后更新：2026-10-17。这份文档描述**当前真实状态**：能跑什么、验过什么、没做什么。
+> 最后更新：2026-10-18（线上按 docker compose 重建，见 §12）。这份文档描述**当前真实状态**：能跑什么、验过什么、没做什么。
 > 配套文档：[`API端点与路径.md`](./API端点与路径.md)（接口清单）、[`docker约定.md`](./docker约定.md)（容器部署）。
 
 ## 1. 这是什么，现在什么状态
@@ -14,11 +14,11 @@
 | 技术栈 | Next.js 16（App Router）+ React 19 + better-sqlite3（SQLite/WAL）+ TypeScript 7 |
 | 运行形态 | 本地 `next dev`；生产 **Docker 四个角色**（migrate / web / worker / nginx 反代） |
 | 代码规模 | 前端 42 文件、后端 80 文件、worker 4 文件、公共 7 文件、测试 29 文件 |
-| 测试 | **29 文件 / 506 条全绿**（`pnpm test`） |
+| 测试 | **30 文件 / 519 条全绿**（`npm test`） |
 | 类型检查 | `pnpm typecheck` 通过，且开着 `noUnusedLocals` / `noUnusedParameters` |
-| 迁移 | 到 `0008_notifications.sql`（编号执行、事务内、外键校验） |
-| 已知线上 | 曾部署于 VPS（`http://5.231.26.36`，systemd + 端口 80）。**容器化之后建议全部切到 `docker/` 那套** |
-| 未上 | 域名未解析到本机、**TLS 未配**（现在靠 `DSH_REVIEW_INSECURE_COOKIES=1` 降级，明文过网） |
+| 迁移 | 到 `0009_review_verdict.sql`（编号执行、事务内、外键校验） |
+| 已知线上 | **2026-10-18 起：`http://5.231.26.36` 跑 Docker 四角色**（migrate / web / worker / nginx），数据在宿主 `/root/dsh-plugin-review/data`。⚠️ 该机 2026-10-17 被重装：**旧库、旧 `.env`、旧部署目录全部丢失**，现网从空库重建（见 §12） |
+| 未上 | 域名未解析到本机、**TLS 未配**（现在是明文 HTTP；443 端口已发布，但 nginx 的 TLS server 段仍是注释） |
 
 ## 2. 关键路径
 
@@ -139,3 +139,61 @@ DSH_ACCEPTANCE_BASE=http://127.0.0.1:3100 node scripts/acceptance-catalog-browse
   `git show <删除前的提交>:docs/架构设计.md`。
 - 源码注释里仍会看到 `架构第 N 节`、`docs/…` 这类**历史引用**，它们指向的就是上面那些已删除的设计稿；
   正文的"为什么"都写在代码注释里，不依赖那些文档才能读懂。
+---
+
+## 12. 2026-10-18：线上按 docker compose 重建（含当日 4 个修复）
+
+### 12.1 发生了什么
+
+这台 VPS 在 **2026-10-17 07:46 被重装过**（`/` 的时间戳、`/srv` 为空、无 `dsh-review-*` systemd
+单元、无容器无镜像、磁盘只用 1.4G）。判断依据是实测：`/srv/dsh-plugin-review` 不存在、
+`find / -name app.sqlite` 只找到当天新建的那个。
+
+**因此：旧的数据库（17 个插件、评测、评论、用户）、旧 `.env`（OAuth/SESSION_SECRET）全部丢失。**
+现网是**从空库重新建的**。若 VPS 服务商有 10-17 之前的快照，可以按 §12.4 的步骤把旧库接回来。
+
+### 12.2 当天修的四个缺陷（都已入库）
+
+| # | 缺陷 | 症状 | 修法 |
+|---|---|---|---|
+| 1 | `scripts/acceptance-http-write.mjs` 提交不带判定 | PR#4 合入后 `input_invalid`，随后 `:152` TypeError，后面十几条检查全跑不到 | 提交体补 `verdict: 'undetermined'` |
+| 2 | `scripts/seed-demo.mjs` 同上 | 演示数据造不出来 | 补 `verdict: 'helpful'` + 一条 `evidenceRefs` |
+| 3 | `docker/daemon.json` 带 `_comment` 键 | `dockerd` **起不来**：`directives don't match any configuration option: _comment` | 改成纯配置；说明移进 `docs/docker约定.md` 并加警告 |
+| 4 | `docker/web.Dockerfile` 的 builder 没 COPY `server.mjs` | 镜像构建必失败：`"/app/server.mjs": not found`（只有 nginx 镜像能成） | builder 补 `COPY server.mjs ./` |
+
+> 3、4 是"照着 `docker约定.md` 与 `compose.yaml` 走一遍就必然撞到"的问题 —— **容器化这套此前从未真正构建过**。
+
+### 12.3 当前线上形态
+
+```
+/root/dsh-plugin-review/
+├─ repo/            ← git archive 上传解包（不是 git clone；私库不便在服务器留凭据）
+│  └─ docker/.env   ← 600，含 SESSION_SECRET（新生成）/ OAuth / BOOTSTRAP_ADMIN_GITHUB_ID
+├─ data/            ← app.sqlite + media（属主 10001:10001）
+└─ certs/           ← 空（TLS 未配）
+```
+
+* 容器：`migrate`（Exited 0）/ `web`（healthy）/ `worker`（healthy）/ `nginx`（healthy，80+443 已发布）
+* 库结构：`0009_review_verdict.sql`；`selfcheck` → `missingTables: []`、`problems: []`
+* 部署参数：`DSH_REVIEW_ALLOW_TEST_LOGIN=0`（**公网必须关**）、`DSH_REVIEW_CONTENT_SCREEN=basic`、
+  `DSH_REVIEW_TRUST_PROXY=1`（compose 里给 web）、无 `GITHUB_TOKEN`（未决，见 §12.5）
+* 首轮自动发现：worker 启动即排当天任务，`searched_repos=60 plugins_found=4 accepted=4`，
+  因**未认证 60 次/小时**而上限收尾（`requests_used=58`）
+
+### 12.4 如果要接回旧库
+
+1. 从服务商快照/备份取回旧 `app.sqlite`（旧结构是 `0008`）；
+2. 停 `web`/`worker`：`docker compose stop web worker`；
+3. 覆盖 `/root/dsh-plugin-review/data/app.sqlite`（连带删掉 `-wal`/`-shm`），`chown 10001:10001`；
+4. `docker compose run --rm migrate`（会把 0008 → 0009 补齐并自检）；
+5. `docker compose up -d`，核对 `/api/health` 的 `schema_version` 与站内数据。
+
+### 12.5 待主人做的两件事
+
+1. **GitHub OAuth 回调**：站点用 OAuth App `dsh-plugin-review-dev`，回调现设为
+   `http://5.231.26.36/api/auth/github/callback`。未登录状态无法判定 GitHub 是否认这个地址
+   （实测：未登记的回调与我们的回调在未登录时表现**相同**，都显示登录页）——
+   点一次登录即知。若报 redirect_uri 不匹配，把这个 URL 加进该 App 的 Authorization callback URL。
+2. **首个管理员**：`BOOTSTRAP_ADMIN_GITHUB_ID` 已按本地配置写入；**当站内一个管理员都没有时**，
+   该 GitHub 数字 ID 首次登录即被提升为管理员（用户名不算数，只看数字 ID）。
+3. （可选）加只读 `GITHUB_TOKEN`：单轮发现从约 4 个提到约 30 个候选、请求预算 58 → 400。
