@@ -177,13 +177,45 @@ tar -C /root/dsh-plugin-review -czf backup-media-$(date +%F).tar.gz data/media
 - 未上 TLS 前，会话 Cookie 靠 `DSH_REVIEW_INSECURE_COOKIES=1` 降级（**明文过网**）；
   上了 HTTPS 必须删掉这一行，否则等于长期用不安全 Cookie。
 
-### TLS 步骤
+### TLS（2026-10-18 已在 review.lingshulab.com 落地，按这个顺序做）
 
-1. 证书放到 `/root/dsh-plugin-review/certs/{fullchain.pem,privkey.pem}`；
-2. 取消 `nginx/conf.d/default.conf` 里 443 server 段的注释，重新 `up -d --build`；
-3. 删掉 `docker/.env` 里的 `DSH_REVIEW_INSECURE_COOKIES=1`；
-4. 把 80 的站点改成 301 到 https；OAuth App 的 callback 同步改成 `https://<域名>/api/auth/github/callback`；
-5. 验证：证书链、`__Host-dsh_session` 是否真的落下、完整登录 → onboarding → 管理员可用。
+> 现在的 `nginx/conf.d/default.conf` **已经启用了 443 并把 80 改成 301 跳转**。
+> 也就是说：**证书不在位时 nginx 起不来**（`cannot load certificate`）。这是刻意的 ——
+> 入口起不来，比悄悄退化成明文 HTTP 好查（会话 Cookie 带 `Secure`，明文下浏览器直接丢弃，
+> 表现是"登录接口 200，下一次请求又变匿名"）。
+
+1. **签证书**（宿主机；nginx 占着 80，所以先停它）：
+   ```bash
+   apt-get install -y certbot
+   cd /root/dsh-plugin-review/repo/docker && docker compose stop nginx
+   certbot certonly --standalone -d review.lingshulab.com \
+     --register-unsafely-without-email --agree-tos --non-interactive
+   ```
+2. **把证书放进挂载目录**（compose 只挂这一个目录，私钥不进镜像、不进 git）：
+   ```bash
+   mkdir -p /root/dsh-plugin-review/certs
+   cp /etc/letsencrypt/live/review.lingshulab.com/{fullchain,privkey}.pem /root/dsh-plugin-review/certs/
+   chmod 644 /root/dsh-plugin-review/certs/fullchain.pem
+   chmod 600 /root/dsh-plugin-review/certs/privkey.pem
+   ```
+3. **续期自动搬运**（certbot 的定时器只续期，不会帮你复制进挂载目录）：
+   在 `/etc/letsencrypt/renewal-hooks/deploy/dsh-review-nginx.sh` 里复制两个文件并
+   `docker compose exec -T nginx nginx -s reload`（仓库 `deploy/` 下有同内容脚本）。
+4. **应用侧同步改三处**（缺一处就会"能开首页、登录却失败"）：
+   `docker/.env` 的 `GITHUB_REDIRECT_URI` / `SITE_ORIGIN` 换成 `https://<域名>/…`；
+   GitHub OAuth App 的 **Authorization callback URL** 换成 `https://<域名>/api/auth/github/callback`；
+   nginx 的 `server_name` 与 80 的跳转地址换成同一个域名。
+5. **验证**：
+   ```bash
+   curl -sI https://review.lingshulab.com/ | head -1      # 200
+   curl -sI http://review.lingshulab.com/ | head -1       # 301
+   echo | openssl s_client -connect review.lingshulab.com:443 -servername review.lingshulab.com 2>/dev/null | grep 'Verify return code'
+   docker compose logs --tail=20 web | grep http_request   # client_ip 应是真实访客地址
+   ```
+   最后真点一次登录，确认 `__Host-dsh_session` 落下、`/onboarding` 可达。
+
+> ⚠️ 明文部署时用来降级的 `DSH_REVIEW_INSECURE_COOKIES=1`（见 §7）**上了 HTTPS 必须删掉**，
+> 否则等于长期用不安全 Cookie。当前线上没有这一行。
 
 ### 可选加固（未默认开启，避免在未实测环境里引入启动失败）
 
