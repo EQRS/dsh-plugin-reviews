@@ -217,6 +217,16 @@ tar -C /root/dsh-plugin-review -czf backup-media-$(date +%F).tar.gz data/media
 > ⚠️ 明文部署时用来降级的 `DSH_REVIEW_INSECURE_COOKIES=1`（见 §7）**上了 HTTPS 必须删掉**，
 > 否则等于长期用不安全 Cookie。当前线上没有这一行。
 
+### 已知故障：重建 web 之后全站 502（已修）
+
+`docker compose up -d web`（例如换 `.env` 里的凭据）会**重建容器 → 换一个新 IP**。
+nginx 默认只在启动时解析 `upstream` 里的 `web` 域名，之后一直往旧 IP 发请求：
+
+* 现象：全站 **502**，但 `docker compose ps` 里 web 显示 `healthy`、容器内 `curl 127.0.0.1:3000/api/health` 也正常；
+* 旧做法：每次重建 web 都得顺手 `docker compose restart nginx`（容易忘，忘了就是线上挂着）；
+* 现做法：`nginx.conf` 里显式 `resolver 127.0.0.11 valid=10s ipv6=off;`，
+  `upstream dsh_web { zone dsh_web 64k; server web:3000 resolve; }` —— nginx 按 Docker 内置 DNS
+  定期重解析，**重建 web 不再需要动 nginx**（2026-10-18 实测：`--force-recreate web` 后直接 200）。
 ### 可选加固（未默认开启，避免在未实测环境里引入启动失败）
 
 - nginx 容器 `read_only: true` + `tmpfs: [/var/cache/nginx, /var/run]`；
