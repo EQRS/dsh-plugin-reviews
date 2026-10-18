@@ -202,3 +202,35 @@ DSH_ACCEPTANCE_BASE=http://127.0.0.1:3100 node scripts/acceptance-catalog-browse
 2. **首个管理员**：`BOOTSTRAP_ADMIN_GITHUB_ID` 已按本地配置写入；**当站内一个管理员都没有时**，
    该 GitHub 数字 ID 首次登录即被提升为管理员（用户名不算数，只看数字 ID）。
 3. （可选）加只读 `GITHUB_TOKEN`：单轮发现从约 4 个提到约 30 个候选、请求预算 58 → 400。
+
+---
+
+## 13. 2026-10-18（第三轮）：备份恢复点 + 首次填充插件库
+
+### 13.1 备份（`参数与管理规则.md §81`，此前"一份备份都没有"）
+
+* `scripts/backup.mjs`：SQLite **在线热备**（`db.backup()`；WAL 下 `cp` 会漏未 checkpoint 的事务）
+  + 媒体打包 + `manifest.json`（schema / 各表行数 / integrity / sha256 / 耗时），**生成后当场自检**，
+  不合格退出码非 0；保留最近 14 份。
+* `scripts/restore-backup.mjs`：**先验后写** —— sha256 不符 / 副本完整性不过 → 拒绝；
+  写回前把现库改名 `app.sqlite.before-restore-<ts>`（不删）；媒体需显式 `--media`。
+* 落点：`/root/dsh-plugin-review/backups/`（**与数据目录分开挂载**，数据出问题时备份还在）。
+* 定时：`dsh-review-backup.timer`（`OnCalendar=03:00` + `Persistent=true` + 5min 随机偏移），
+  执行 `docker compose run --rm --no-deps web node scripts/backup.mjs --label auto --keep 14`。
+* 手动：后台「存储与备份」组 → 「立即备份」（`POST /api/admin/backups`，与定时同一脚本）。
+* 演练：`tests/backup.test.ts` 6 条（真跑脚本）—— 清单与行数一致、篡改一个字节被 sha256 拒绝、
+  未加 `--force` 不覆盖、保留策略、库缺失时明确失败；线上首次手动备份实测
+  `592 KB / integrity ok / users=13 plugins=9`。
+* ⚠️ 同机备份**不防整机丢失**；异地副本仍要自己定期拉走（见 `docs/备份与恢复.md` §6）。
+
+### 13.2 首次填充插件库
+
+* 现状：9 → **21** 个插件（一轮 `dsh plugin in:description` 捞出 12 个，单轮只花 26 次核心请求）。
+* 机制：`dsh-review-discovery-drip.timer` 每 **40 分钟**排一轮，轮换 5 个搜索词
+  （`topic:dsh-plugin` / `dsh-plugin in:name` / `topic:deepseek-harness` / `dsh plugin in:description` / `topic:dsh`）。
+  40 分钟节拍 ≈ 39 次核心请求/小时，安全压在未认证的 60/h 之下。
+* 只**排任务**，探测与收录仍由常驻 worker 执行（与每日定时同一条路径）。填满后：
+  `systemctl disable --now dsh-review-discovery-drip.timer`。
+* 未认证上限仍在：如果加一个只读 `GITHUB_TOKEN`，可以一次性批量跑完（无需等 40 分钟节拍）。
+* 实测：第二轮 `topic:deepseek-harness` 因配额被第一轮吃满而 `HTTP 403` —— 处理器把它判为
+  **限流**并保留已收录结果（不是失败、也不会清空数据）。

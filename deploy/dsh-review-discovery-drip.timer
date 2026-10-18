@@ -1,12 +1,12 @@
-# 每 70 分钟触发一次（开机 10 分钟后先跑一次，之后按"上次激活 + 70min"循环）。
+# 每 40 分钟触发一次（开机 10 分钟后先跑一次，之后按"上次激活 + 40min"循环）。
 #
 # 用 OnUnitActiveSec 而不是 OnCalendar：上面要的是"间隔"，不是"每天几点"。
 [Unit]
-Description=DSH Plugin Review · 首次填充定时器（每 70 分钟）
+Description=DSH Plugin Review · 首次填充定时器（每 40 分钟）
 
 [Timer]
 OnBootSec=10min
-OnUnitActiveSec=70min
+OnUnitActiveSec=40min
 Unit=dsh-review-discovery-drip.service
 
 [Install]

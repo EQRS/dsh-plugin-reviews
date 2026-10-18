@@ -18,8 +18,8 @@ topic:dsh
 '
 
 # 用"每 70 分钟换一个"的节拍选词：不依赖外部状态文件，重启也不会乱。
-# 4200 秒 = 70 分钟（unauth 配额 60/h，留 10 分钟余量）
-slot=$(( $(date +%s) / 4200 ))
+# 2400 秒 = 40 分钟：实测单轮只花 ~26 次核心请求，40 分钟节拍 ≈ 39 次/小时，安全压在 60/h 之下
+slot=$(( $(date +%s) / 2400 ))
 count=$(printf '%s\n' "$QUERIES" | grep -c .)
 idx=$(( slot % count ))
 query=$(printf '%s\n' "$QUERIES" | grep . | sed -n "$((idx + 1))p")
