@@ -1,0 +1,24 @@
+# 首次填充期：每 70 分钟排一轮自动发现（换着搜索词）。
+#
+# 为什么是 70 分钟：未认证的 GitHub 核心接口 60 次/小时，一轮发现大约吃满 58 次 ——
+# 更密的节拍只会拿到 403。配了只读 GITHUB_TOKEN 之后可以把这个定时器停掉、改成批量跑。
+#
+# 安装：
+#   install -m 755 deploy/discovery-drip.sh /root/dsh-plugin-review/repo/deploy/
+#   install -m 644 deploy/dsh-review-discovery-drip.service /etc/systemd/system/
+#   install -m 644 deploy/dsh-review-discovery-drip.timer   /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now dsh-review-discovery-drip.timer
+# 填满后停掉：
+#   systemctl disable --now dsh-review-discovery-drip.timer
+
+[Unit]
+Description=DSH Plugin Review · 首次填充：轮换搜索词排队发现
+Documentation=https://github.com/furongjun-lingshu/dsh-plugin-reviews
+
+[Service]
+Type=oneshot
+ExecStart=/root/dsh-plugin-review/repo/deploy/discovery-drip.sh
+Nice=15
+
+[Install]
+WantedBy=multi-user.target
