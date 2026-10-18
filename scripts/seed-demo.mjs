@@ -48,11 +48,17 @@ curlCall('PUT', '/api/drafts', {
 });
 
 // 提交走 PATCH（保存走 PUT，方法语义唯一 —— 见 README §5 缺陷 11）
+// 五状态判定自迁移 0009 起必填；演示数据给「真有用」+ 一条证据，
+// 这样演示页能同时展示判定徽章与证据链区块（不是空壳）。
 const sub = curlCall('PATCH', '/api/drafts', {
   draftId: draft.data.draftId, expectedSaveVersion: 1, requestKey: `demo-submit-${RUN}`,
   title: '演示评测：用 dsh-memory 整理科研资料',
   bodyMarkdown: '## 用它做什么\n\n把散落的文献笔记整理成可检索的资料库。\n\n## 效果怎么样\n\n检索很快，中文两字词也能命中。\n\n## 有什么问题\n\n首次索引较慢。',
   pluginVersion: { kind: 'known', value: '1.2.0' }, dshVersion: { kind: 'known', value: '0.3.1' },
+  verdict: 'helpful',
+  evidenceRefs: [
+    { url: 'https://github.com/acme/dsh-memory-demo', note: '演示用证据：仓库 README 的检索示例' },
+  ],
 });
 
 // 管理员登录 + 通过

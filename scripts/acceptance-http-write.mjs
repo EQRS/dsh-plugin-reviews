@@ -98,6 +98,8 @@ const save = call('PUT', '/api/drafts', {
 check('保存草稿 save_version=1', save.ok === true && save.data?.saveVersion === 1, JSON.stringify(save.data ?? save));
 
 // 3) 提交（PATCH）
+//    五状态判定自迁移 0009 起**必填**（`idea.md`/dsh-bench v3.0）：验收这里给「还说不准」——
+//    它不需要证据链（本身就是信息不足的表达），正好与 e2e-chain 里"真有用 + 证据"互补覆盖。
 const subParsed = call('PATCH', '/api/drafts', {
   draftId: draft.data.draftId,
   expectedSaveVersion: 1,
@@ -106,6 +108,7 @@ const subParsed = call('PATCH', '/api/drafts', {
   bodyMarkdown: '## 用它做什么\n\n通过 HTTP 验收链路写入。',
   pluginVersion: { kind: 'known', value: '1.2.0' },
   dshVersion: { kind: 'known', value: '0.3.1' },
+  verdict: 'undetermined',
 });
 check('提交生成快照与提交记录', subParsed.ok === true && !!subParsed.data?.submissionId, JSON.stringify(subParsed.data ?? subParsed));
 
