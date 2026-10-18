@@ -11,5 +11,6 @@ node_modules/
 next-env.d.ts
 tsconfig.tsbuildinfo
 
-# 备份产物（库副本 + 媒体包），只在本地/服务器落盘，绝不进版本库
-backups/
+# 备份产物（库副本 + 媒体包），只在本地/服务器落盘，绝不进版本库。
+# ⚠️ 必须带前导斜杠：ackups/ 会连带忽略 src/app/api/admin/backups/（实测踩过）。
+/backups/
