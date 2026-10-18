@@ -35,6 +35,10 @@ RUN npm ci --include=dev
 # ---------- 构建层 ----------
 FROM deps AS builder
 COPY tsconfig.json next.config.ts ./
+# server.mjs 是**自定义生产入口**（`node server.mjs`，见 runner 的 CMD）。
+# 它必须在这里进来：runner 只从 builder 复制文件，而 builder 少复制它，
+# 构建会直接失败（`failed to calculate checksum ... "/app/server.mjs": not found`）。
+COPY server.mjs ./
 COPY src ./src
 COPY migrations ./migrations
 COPY scripts ./scripts

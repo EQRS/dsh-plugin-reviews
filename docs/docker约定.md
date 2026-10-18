@@ -59,6 +59,11 @@ systemctl restart docker
 docker info --format '{{.DockerRootDir}}'                   # 应输出 /root/docker
 ```
 
+> ⚠️ **`daemon.json` 必须是纯配置，一个注释键都不能带。** Docker 会拒绝任何未知字段
+> （`unable to configure the Docker daemon ... directives don't match any configuration option: _comment`），
+> 后果是 **dockerd 直接起不来**。这份文件早先确实带过一个 `_comment` 文档数组 ——
+> 照上面那条命令装下去，docker.service 会当场躺平（2026-10-18 实测踩到）。说明只能写在本文件里。
+
 > 已经有镜像/容器时改 `data-root` 等于换了一块存储：它们仍在 `/var/lib/docker` 里。
 > 维护窗口里做，或者先 `docker system prune -a`。
 
