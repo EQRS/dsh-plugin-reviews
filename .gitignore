@@ -10,3 +10,6 @@ node_modules/
 .env
 next-env.d.ts
 tsconfig.tsbuildinfo
+
+# 备份产物（库副本 + 媒体包），只在本地/服务器落盘，绝不进版本库
+backups/

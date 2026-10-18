@@ -1,0 +1,31 @@
+# DSH 插件测评站 · 每日完整恢复点（03:00 Asia/Shanghai）
+#
+# 为什么用 systemd timer 而不是 cron：timer 有 `Persistent=true`（关机错过的那次会在开机后补跑）
+# 与 `systemctl list-timers` 的可观测性；cron 什么都不告诉你。
+#
+# 为什么要 `docker compose run` 而不是宿主上直接跑 node：
+#   * 备份逻辑（scripts/backup.mjs）依赖 better-sqlite3 的原生模块，宿主上不一定装得上；
+#   * 容器里的 UID 10001 与数据目录属主一致，写备份不会留下 root 属主的文件。
+#
+# 安装：
+#   install -m 644 deploy/dsh-review-backup.service /etc/systemd/system/
+#   install -m 644 deploy/dsh-review-backup.timer   /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now dsh-review-backup.timer
+# 手测（不等到 03:00）：
+#   systemctl start dsh-review-backup.service && journalctl -u dsh-review-backup -n 30 --no-pager
+
+[Unit]
+Description=DSH Plugin Review · 每日备份（库 + 媒体 + 清单）
+Documentation=https://github.com/furongjun-lingshu/dsh-plugin-reviews
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/dsh-plugin-review/repo/docker
+# --no-deps：不要因为备份去拉起 migrate/web/worker；备份只需要读数据目录。
+# 备份失败时退出码非 0（脚本里 integrity/counts 不合格也算失败），systemd 会记成 failed。
+ExecStart=/usr/bin/docker compose run --rm --no-deps web node scripts/backup.mjs --label auto --keep 14
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target

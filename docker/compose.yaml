@@ -34,6 +34,8 @@ services:
     env_file: ['.env']
     user: '${DSH_REVIEW_UID:-10001}:${DSH_REVIEW_GID:-10001}'
     environment:
+      # 容器时区：迁移日志、备份目录名等按本地时间（03:00 的备份就叫 030000，不是 UTC 19:00）
+      TZ: Asia/Shanghai
       DSH_REVIEW_DB_PATH: /app/.data/app.sqlite
     volumes:
       - '${DSH_REVIEW_DATA_DIR:-/root/dsh-plugin-review/data}:/app/.data'
@@ -47,15 +49,22 @@ services:
     env_file: ['.env']
     user: '${DSH_REVIEW_UID:-10001}:${DSH_REVIEW_GID:-10001}'
     environment:
+      # 容器时区：备份目录名等按本地时间（03:00 的备份就叫 030000，不是 UTC 19:00）
+      TZ: Asia/Shanghai
       DSH_REVIEW_DB_PATH: /app/.data/app.sqlite
       DSH_REVIEW_MEDIA_ROOT: /app/.data/media
       PORT: '3000'
       # web 只挂在内部网络、由 nginx 反代 → 允许信任反代传来的真实 IP 头。
       # 直接把 web 端口发布到公网时必须改成 0（否则客户端可伪造 X-Real-IP）。
       DSH_REVIEW_TRUST_PROXY: '1'
+      # 备份落点：后台「立即备份」与每日定时都写这里（宿主 /root 下的同一个目录）。
+      BACKUP_ROOT: /app/backups
+      BACKUP_KEEP: '14'
     # 刻意**不发布端口**：对外只有 nginx。调试时临时加 '127.0.0.1:3101:3000' 即可。
     volumes:
       - '${DSH_REVIEW_DATA_DIR:-/root/dsh-plugin-review/data}:/app/.data'
+      # 备份目录单独挂（与数据目录分开：数据坏了不该把备份一起带走）。
+      - '${DSH_REVIEW_BACKUPS_DIR:-/root/dsh-plugin-review/backups}:/app/backups'
     restart: unless-stopped
     stop_grace_period: 15s
     logging:
@@ -75,6 +84,8 @@ services:
     env_file: ['.env']
     user: '${DSH_REVIEW_UID:-10001}:${DSH_REVIEW_GID:-10001}'
     environment:
+      # 容器时区：备份目录名等按本地时间（03:00 的备份就叫 030000，不是 UTC 19:00）
+      TZ: Asia/Shanghai
       DSH_REVIEW_DB_PATH: /app/.data/app.sqlite
       DSH_REVIEW_MEDIA_ROOT: /app/.data/media
     volumes:

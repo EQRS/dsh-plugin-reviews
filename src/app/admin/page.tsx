@@ -15,6 +15,7 @@ import { AdminDecisionForm } from '@/components/admin-decision-form';
 import { BackLink } from '@/components/back-link';
 import { AdminSettingsForm } from '@/components/admin-settings-form';
 import { AdminDiscoveryPanel } from '@/components/admin-discovery-panel';
+import { AdminBackupPanel } from '@/components/admin-backup-panel';
 import { AdminUserPanel } from '@/components/admin-user-panel';
 import { buildHealthReport } from '@/server/platform/health';
 import { submissionStateLabels } from '@/packages/common/status-text';
@@ -232,9 +233,10 @@ export default async function AdminPage({
         </p>
       </section>
 
-      {/* 顺序按"管理员日常先看什么"排：先看同步有没有跑、再改参数、最后管人。 */}
+      {/* 顺序按"管理员日常先看什么"排：先看同步有没有跑、再改参数、再看备份、最后管人。 */}
       <AdminDiscoveryPanel />
       <AdminSettingsForm />
+      <AdminBackupPanel />
       <AdminUserPanel />
     </div>
   );

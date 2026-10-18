@@ -1,0 +1,18 @@
+# 每日 03:00（服务器本地时区，Asia/Shanghai）跑一次完整恢复点。
+#
+# Persistent=true：关机/重启错过的那一次，开机后会补跑一次 ——
+# 备份任务最怕"正好那天机器重启了"，而补跑能补上这个洞。
+#
+# RandomizedDelaySec：整点任务容易和别的东西撞（比如 certbot 的 renew 也在凌晨），
+# 给个几分钟随机偏移，避开同一秒的 IO 竞争。
+[Unit]
+Description=DSH Plugin Review · 每日备份定时器（03:00）
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+RandomizedDelaySec=5m
+Persistent=true
+Unit=dsh-review-backup.service
+
+[Install]
+WantedBy=timers.target
