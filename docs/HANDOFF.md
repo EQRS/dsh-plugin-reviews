@@ -17,8 +17,8 @@
 | 测试 | **30 文件 / 519 条全绿**（`npm test`） |
 | 类型检查 | `pnpm typecheck` 通过，且开着 `noUnusedLocals` / `noUnusedParameters` |
 | 迁移 | 到 `0009_review_verdict.sql`（编号执行、事务内、外键校验） |
-| 已知线上 | **2026-10-18 起：`http://5.231.26.36` 跑 Docker 四角色**（migrate / web / worker / nginx），数据在宿主 `/root/dsh-plugin-review/data`。⚠️ 该机 2026-10-17 被重装：**旧库、旧 `.env`、旧部署目录全部丢失**，现网从空库重建（见 §12） |
-| 未上 | 域名未解析到本机、**TLS 未配**（现在是明文 HTTP；443 端口已发布，但 nginx 的 TLS server 段仍是注释） |
+| 已知线上 | **https://review.lingshulab.com**（Let’s Encrypt 证书，80 只做 301 跳转）。2026-10-18 跑 Docker 四角色（migrate / web / worker / nginx），数据在宿主 `/root/dsh-plugin-review/data`。⚠️ 该机 2026-10-17 被重装：**旧库、旧 `.env`、旧部署目录全部丢失**，现网从空库重建（见 §12） |
+| 未上 | 备份（每日 03:00 恢复点）、只读 `GITHUB_TOKEN`、favicon 与错误页之类的细节 |
 
 ## 2. 关键路径
 
@@ -175,6 +175,9 @@ DSH_ACCEPTANCE_BASE=http://127.0.0.1:3100 node scripts/acceptance-catalog-browse
 
 * 容器：`migrate`（Exited 0）/ `web`（healthy）/ `worker`（healthy）/ `nginx`（healthy，80+443 已发布）
 * 库结构：`0009_review_verdict.sql`；`selfcheck` → `missingTables: []`、`problems: []`
+* TLS：`https://review.lingshulab.com`（Let’s Encrypt，2027-01-16 到期，`certbot.timer` 自动续期；
+  续期后由 `/etc/letsencrypt/renewal-hooks/deploy/dsh-review-nginx.sh` 把证书搬进
+  `/root/dsh-plugin-review/certs` 并 reload nginx）。80 全量 301 到 HTTPS。
 * 部署参数：`DSH_REVIEW_ALLOW_TEST_LOGIN=0`（**公网必须关**）、`DSH_REVIEW_CONTENT_SCREEN=basic`、
   `DSH_REVIEW_TRUST_PROXY=1`（compose 里给 web）、无 `GITHUB_TOKEN`（未决，见 §12.5）
 * 首轮自动发现：worker 启动即排当天任务，`searched_repos=60 plugins_found=4 accepted=4`，
@@ -190,10 +193,12 @@ DSH_ACCEPTANCE_BASE=http://127.0.0.1:3100 node scripts/acceptance-catalog-browse
 
 ### 12.5 待主人做的两件事
 
-1. **GitHub OAuth 回调**：站点用 OAuth App `dsh-plugin-review-dev`，回调现设为
-   `http://5.231.26.36/api/auth/github/callback`。未登录状态无法判定 GitHub 是否认这个地址
-   （实测：未登记的回调与我们的回调在未登录时表现**相同**，都显示登录页）——
-   点一次登录即知。若报 redirect_uri 不匹配，把这个 URL 加进该 App 的 Authorization callback URL。
+1. **GitHub OAuth 回调（唯一还挡着登录的一步，只能在 GitHub 后台改）**：
+   站点发出的 `redirect_uri` 已经是 `https://review.lingshulab.com/api/auth/github/callback`
+   （Client ID `Ov23liMF9kujrLNxhBZ3`，App 名 `dsh-plugin-review-dev`）。
+   请到 GitHub → Settings → Developer settings → OAuth Apps → 该 App，把
+   **Authorization callback URL** 改成这个地址（Homepage URL 建议同步改成 `https://review.lingshulab.com`）。
+   改完直接点站点右上角「登录」即可。
 2. **首个管理员**：`BOOTSTRAP_ADMIN_GITHUB_ID` 已按本地配置写入；**当站内一个管理员都没有时**，
    该 GitHub 数字 ID 首次登录即被提升为管理员（用户名不算数，只看数字 ID）。
 3. （可选）加只读 `GITHUB_TOKEN`：单轮发现从约 4 个提到约 30 个候选、请求预算 58 → 400。
