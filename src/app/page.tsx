@@ -9,6 +9,7 @@
  */
 
 import Link from 'next/link';
+import { HomeFeed } from '@/components/home-feed';
 import { getDb } from '@/server/platform/db';
 import { resolveVisibilityInTx } from '@/server/modules/content';
 import { createCatalogService } from '@/server/modules/catalog';
@@ -115,7 +116,8 @@ export default async function HomePage() {
         ) : null}
       </section>
 
-      <div className="twocol">
+      {/* 双栏内容默认只占一屏，超出部分点「展开全部」（主人要求：一页长度 + 展开）。 */}
+      <HomeFeed>
         {/* 主栏：最新评测 */}
         <section className="panel" aria-labelledby="home-reviews">
           <div className="section-head">
@@ -213,7 +215,7 @@ export default async function HomePage() {
             </>
           )}
         </aside>
-      </div>
+      </HomeFeed>
     </div>
   );
 }
