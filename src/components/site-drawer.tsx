@@ -255,6 +255,11 @@ export function SiteDrawer({
                 ) : null}
               </>
             )}
+
+            <p className="menu-label">站点</p>
+            <Link href="/spec" role="menuitem" className="menu-row" onClick={() => close()}>
+              {row('review', '测评规范')}
+            </Link>
           </aside>
         </>
       ) : null}
