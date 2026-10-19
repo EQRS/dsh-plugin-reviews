@@ -1,3 +1,5 @@
+import type { SqliteDatabase } from '@/server/platform/db';
+import type { CallerContext } from '@/server/platform/context';
 /**
  * catalog 模块对外类型（契约 已删除的设计稿《模块签名契约》 第 2 节）。
  */
@@ -73,7 +75,10 @@ export interface PluginView {
   authorLogin: string | null;
   manifestVersion: string | null;
   infoUpdatedAt: number | null;
+  /** 原始 GitHub topics（仓库级，未加工）。 */
   topics: string[];
+  /** 命中用途分类的展示名（迁移 0010，按 sort_order 排序；未命中为空数组）。 */
+  categories: string[];
   ownerLogin: string | null;
   ownerAvatarUrl: string | null;
   repoUpdatedAt: number | null;
@@ -103,6 +108,8 @@ export interface PluginSummary {
   ownerLogin: string | null;
   ownerAvatarUrl: string | null;
   topics: string[];
+  /** 命中用途分类的展示名（迁移 0010）；未命中为空数组，页面显示「未分类」。 */
+  categories: string[];
   authorLogin: string | null;
   manifestVersion: string | null;
   infoUpdatedAt: number | null;
@@ -116,18 +123,44 @@ export interface PluginSummary {
 export interface PluginDirectoryQuery extends PageRequest {
   /** 关键词：匹配展示名 / 仓库全名 / 简介（中文子串可用，`%` `_` 会被转义）。 */
   q?: string;
-  /** 用途标签：命中 repositories.topics 里的任意一个；`__none__` 表示"未分类"。 */
+  /** 用途标签：命中 repositories.topics 里的任意一个；`__none__` 表示"没有 topics"。 */
   tag?: string;
+  /**
+   * 用途分类（迁移 0010）：`slug` 命中该分类认领的任一 topic；
+   * `__none__` 表示"没有命中任何可见分类"。**这是页面 chip 行用的口径**。
+   */
+  category?: string;
   hasReviews?: 'all' | 'yes' | 'no';
   /** info = 资料更新时间（默认）；reviews = 公开评测数。 */
   sort?: 'info' | 'reviews';
 }
 
-/** 标签聚合项（用于筛选 chip 行）。 */
+/** 标签聚合项（原始 topics 视角；用于诊断与后台"待归类 topics"）。 */
 export interface PluginTagSummary {
-  /** `__none__` = 未分类（topics 为空或全是非法值）。 */
+  /** `__none__` = 没有 topics。 */
   tag: string;
   pluginCount: number;
+}
+
+/** 用途分类聚合项（页面 chip 行用）。 */
+export interface PluginCategorySummary {
+  slug: string;
+  label: string;
+  /**
+   * 覆盖的**不同仓库**数 —— 不是插件数。
+   * 一个仓库拆出 11 个 packages 时，插件数会被放大 11 倍，而"有多少个仓库用得上这个分类"
+   * 才是用户能理解的口径。
+   */
+  repositoryCount: number;
+  pluginCount: number;
+  sortOrder: number;
+  isVisible: boolean;
+}
+
+/** 后台维护用的完整分类记录（含认领的 topics）。 */
+export interface PluginCategoryRecord extends PluginCategorySummary {
+  topics: string[];
+  updatedAt: number;
 }
 
 export interface CatalogService {
@@ -150,6 +183,20 @@ export interface CatalogService {
   getPlugin(pluginId: string): Promise<PluginView | null>;
   listPlugins(req: PluginDirectoryQuery): Promise<PageResult<PluginSummary>>;
   listPluginTags(): Promise<PluginTagSummary[]>;
+  /** 原始 topics 视角：每个 topic 覆盖多少**不同仓库**、是否已被某个分类认领（后台"待归类"用）。 */
+  listTopicUsage(): Promise<Array<{ topic: string; repositoryCount: number; mapped: boolean }>>;
+  /** 可见分类 + 覆盖的不同仓库数（页面 chip 行用）。 */
+  listCategories(): Promise<PluginCategorySummary[]>;
+  /** 全部分类（含隐藏），后台维护用。 */
+  listAllCategories(): Promise<PluginCategoryRecord[]>;
+  /** 新增或更新一个分类（管理员）。 */
+  upsertCategory(
+    ctx: CallerContext,
+    input: { slug: string; label: string; topics: string[]; sortOrder?: number; isVisible?: boolean },
+    db?: SqliteDatabase,
+  ): Promise<PluginCategoryRecord>;
+  /** 删除一个分类（管理员）。返回是否真的删掉了一行。 */
+  deleteCategory(ctx: CallerContext, slug: string, db?: SqliteDatabase): Promise<{ deleted: boolean }>;
 }
 
 /** 仅需 userId 的最小上下文形状；避免 catalog 依赖不必要的字段。 */

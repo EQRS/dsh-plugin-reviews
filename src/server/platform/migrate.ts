@@ -151,6 +151,8 @@ export const REQUIRED_TABLES = [
   'rate_limiter_flexible',
   // 0008：站内通知（新评论通知内容作者、回复通知被回复人）
   'notifications',
+  // 0010：用途分类（把 GitHub topics 映射成可维护的中文分类）
+  'plugin_categories',
 ] as const;
 
 export function selfCheck(db: SqliteDatabase): SelfCheckResult {

@@ -22,6 +22,7 @@
 
 import type { SqliteDatabase } from '@/server/platform/db';
 import { getDb } from '@/server/platform/db';
+import { isAdmin, type CallerContext } from '@/server/platform/context';
 import { withRead, withTransaction } from '@/server/platform/tx';
 import { digest } from '@/server/platform/digest';
 import { newId } from '@/server/platform/id';
@@ -34,6 +35,8 @@ import type {
   CallerContextLike,
   CatalogProbe,
   CatalogService,
+  PluginCategoryRecord,
+  PluginCategorySummary,
   PluginDirectoryQuery,
   PluginSummary,
   PluginTagSummary,
@@ -45,6 +48,77 @@ export const ACCEPT_PLUGIN_ACTION = 'catalog.accept_plugin_submission';
 
 /** 目录筛选里"未分类"的固定标签值（URL 里也用它，前端与后端共用这一个常量）。 */
 export const UNCLASSIFIED_TAG = '__none__';
+
+/**
+ * "没有命中任何可见分类"的筛选值（迁移 0010 引入）。
+ *
+ * 与 `UNCLASSIFIED_TAG` 的区别要记住：
+ *   * `UNCLASSIFIED_TAG` = 仓库**没有任何 topics**（原始数据缺失）；
+ *   * `UNCATEGORIZED_CATEGORY` = 有 topics，但**没有一个被分类认领**（需要去后台补映射）。
+ * 两者都不该被悄悄合并 —— 前者是抓取问题，后者是运营待办。
+ */
+export const UNCATEGORIZED_CATEGORY = '__none__';
+
+/** 分类 slug 的合法形态：小写字母数字与连字符，2–32 位（要进 URL）。 */
+const CATEGORY_SLUG_RE = /^[a-z0-9][a-z0-9-]{1,31}$/;
+
+/** 单个 topic 的合法形态（GitHub 的 topics 规则：小写字母数字 + `-` `_` `.`）。 */
+const TOPIC_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
+/** 分类输入的规范化（后台写入前统一校验；错误带字段路径，前端能直接标红）。 */
+function normalizeCategorySlug(raw: unknown): string {
+  const slug = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (slug === UNCATEGORIZED_CATEGORY) {
+    throw err.input('`__none__` 是"未分类"的保留值，不能用作分类标识。', [{ path: 'slug', message: '保留值' }]);
+  }
+  if (!CATEGORY_SLUG_RE.test(slug)) {
+    throw err.input('分类标识需为 2–32 位小写字母/数字/连字符（会进 URL）。', [
+      { path: 'slug', message: '取值不合法' },
+    ]);
+  }
+  return slug;
+}
+
+function normalizeCategoryLabel(raw: unknown): string {
+  const label = typeof raw === 'string' ? raw.trim() : '';
+  if (label.length === 0 || label.length > 20) {
+    throw err.input('分类名称需为 1–20 个字符。', [{ path: 'label', message: '取值不合法' }]);
+  }
+  return label;
+}
+
+function normalizeCategoryTopics(raw: unknown): string[] {
+  if (!Array.isArray(raw)) {
+    throw err.input('topics 必须是字符串数组。', [{ path: 'topics', message: '类型不合法' }]);
+  }
+  const out: string[] = [];
+  for (const item of raw) {
+    const topic = typeof item === 'string' ? item.trim().toLowerCase() : '';
+    if (!TOPIC_RE.test(topic)) {
+      throw err.input(`topic 不合法：${String(item).slice(0, 40)}（只允许小写字母/数字/._-，≤64 字符）`, [
+        { path: 'topics', message: '取值不合法' },
+      ]);
+    }
+    if (!out.includes(topic)) out.push(topic);
+  }
+  if (out.length === 0) {
+    throw err.input('至少要认领一个 topic，否则这个分类永远不会命中任何仓库。', [
+      { path: 'topics', message: '不能为空' },
+    ]);
+  }
+  if (out.length > 50) {
+    throw err.input('一个分类最多认领 50 个 topic。', [{ path: 'topics', message: '最多 50 个' }]);
+  }
+  return out;
+}
+
+function normalizeSortOrder(raw: unknown): number {
+  if (raw === undefined) return 100;
+  if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 0 || raw > 9999) {
+    throw err.input('排序值需为 0–9999 的整数。', [{ path: 'sortOrder', message: '取值不合法' }]);
+  }
+  return raw;
+}
 
 /**
  * **公开评测计数**：目录里唯一的判据来源（筛选、排序、卡片数字都用它）。
@@ -81,8 +155,7 @@ export function escapeLikePattern(input: string): string {
 }
 
 /** topics 列（JSON 数组文本）→ 字符串数组；坏数据一律按"没有标签"处理，绝不抛错。 */
-export function parseTopics(raw: string | null): string[] {
-  if (raw === null) return [];
+export function parseTopics(raw: string | null): string[] {  if (raw === null) return [];
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
@@ -90,6 +163,35 @@ export function parseTopics(raw: string | null): string[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * 批量取「仓库 → 命中的分类展示名」映射（**一次查询**，避免 N+1）。
+ *
+ * 为什么按仓库算而不是按插件算：分类来自仓库级 topics，同一仓库的 11 个 packages
+ * 会得到**同一组**分类。按仓库查一次再分发，既省查询也保证同仓插件分类完全一致。
+ */
+function categoriesByRepository(conn: SqliteDatabase, repositoryIds: string[]): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  if (repositoryIds.length === 0) return out;
+  const placeholders = repositoryIds.map(() => '?').join(', ');
+  const rows = conn
+    .prepare(
+      `SELECT DISTINCT r.id AS repository_id, c.slug, c.label, c.sort_order
+         FROM repositories r
+         JOIN json_each(r.topics) rt
+         JOIN plugin_categories c ON c.is_visible = 1
+         JOIN json_each(c.topics) ct ON ct.value = rt.value
+        WHERE r.id IN (${placeholders})
+        ORDER BY c.sort_order ASC, c.slug ASC`,
+    )
+    .all(...repositoryIds) as Array<{ repository_id: string; slug: string; label: string }>;
+  for (const row of rows) {
+    const list = out.get(row.repository_id) ?? [];
+    list.push(row.label);
+    out.set(row.repository_id, list);
+  }
+  return out;
 }
 
 /** 由浏览条件拼出 WHERE 子句与参数（计数与取列表**共用**，保证 total 与 items 口径一致）。 */
@@ -111,6 +213,28 @@ export function buildDirectoryWhere(req: PluginDirectoryQuery): { clause: string
   } else if (req.tag) {
     conditions.push('EXISTS (SELECT 1 FROM json_each(r.topics) je WHERE je.value = ?)');
     params.push(req.tag);
+  }
+
+  // 分类筛选（迁移 0010）：一条 SQL 表达"该仓库的任一 topic 被该分类认领"。
+  // `json_each(NULL)` 不产生行，所以没有 topics 的仓库自然不会被任何分类命中 ✓。
+  const category = req.category?.trim();
+  if (category === UNCATEGORIZED_CATEGORY) {
+    conditions.push(
+      `NOT EXISTS (
+         SELECT 1 FROM plugin_categories c, json_each(c.topics) ct
+          WHERE c.is_visible = 1
+            AND ct.value IN (SELECT value FROM json_each(r.topics))
+       )`,
+    );
+  } else if (category) {
+    conditions.push(
+      `EXISTS (
+         SELECT 1 FROM plugin_categories c, json_each(c.topics) ct
+          WHERE c.is_visible = 1 AND c.slug = ?
+            AND ct.value IN (SELECT value FROM json_each(r.topics))
+       )`,
+    );
+    params.push(category);
   }
 
   if (req.hasReviews === 'yes') conditions.push(`${PUBLIC_REVIEW_COUNT_SQL} > 0`);
@@ -518,6 +642,7 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
           manifestVersion: row.manifest_version,
           infoUpdatedAt: row.info_updated_at,
           topics: parseTopics(row.topics),
+          categories: categoriesByRepository(conn, [row.repository_id]).get(row.repository_id) ?? [],
           ownerLogin: row.owner_login,
           ownerAvatarUrl: row.owner_avatar_url,
           repoUpdatedAt: row.repo_updated_at,
@@ -551,7 +676,7 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
           .prepare(
             `SELECT p.id AS plugin_id, p.plugin_path, p.updated_at, p.info_updated_at,
                     p.display_name, p.description AS plugin_description, p.author_login, p.manifest_version,
-                    r.full_name, r.html_url, r.is_archived, r.availability_state,
+                    r.id AS repository_id, r.full_name, r.html_url, r.is_archived, r.availability_state,
                     r.description AS repo_description, r.topics, r.owner_login, r.owner_avatar_url, r.repo_updated_at,
                     ${PUBLIC_REVIEW_COUNT_SQL} AS public_review_count
                FROM plugins p
@@ -569,6 +694,7 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
           plugin_description: string | null;
           author_login: string | null;
           manifest_version: string | null;
+          repository_id: string;
           full_name: string;
           html_url: string;
           is_archived: number;
@@ -581,6 +707,11 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
           public_review_count: number;
         }[];
 
+        // 分类按仓库一次性取好再分发（同一仓库的多个插件共享同一组分类）
+        const categoriesMap = categoriesByRepository(
+          conn,
+          [...new Set(rows.map((r) => r.repository_id))],
+        );
         const items: PluginSummary[] = rows.map((r) => ({
           pluginId: r.plugin_id,
           pluginPath: r.plugin_path,
@@ -594,6 +725,7 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
           ownerLogin: r.owner_login,
           ownerAvatarUrl: r.owner_avatar_url,
           topics: parseTopics(r.topics),
+          categories: categoriesMap.get(r.repository_id) ?? [],
           authorLogin: r.author_login,
           manifestVersion: r.manifest_version,
           infoUpdatedAt: r.info_updated_at,
@@ -638,6 +770,218 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
         if (none.c > 0) out.push({ tag: UNCLASSIFIED_TAG, pluginCount: none.c });
         return out;
       }, db);
+    },
+
+    /**
+     * 原始 topics 视角：每个 topic 覆盖多少**不同仓库**、是否已被分类认领。
+     *
+     * 与 `listPluginTags` 的区别：这个按 distinct repository 计数（monorepo 不放大），
+     * 并标出 `mapped` —— 后台「分类管理」据此列出"还没归类的 topics"，避免凭空猜分类。
+     */
+    async listTopicUsage(): Promise<Array<{ topic: string; repositoryCount: number; mapped: boolean }>> {
+      return withRead((conn) => {
+        const rows = conn
+          .prepare(
+            `SELECT rt.value AS topic,
+                    COUNT(DISTINCT r.id) AS repo_count,
+                    EXISTS (
+                      SELECT 1 FROM plugin_categories c, json_each(c.topics) ct
+                       WHERE ct.value = rt.value
+                    ) AS mapped
+               FROM repositories r, json_each(r.topics) rt
+              GROUP BY rt.value
+              ORDER BY repo_count DESC, topic ASC`,
+          )
+          .all() as Array<{ topic: string; repo_count: number; mapped: number }>;
+        return rows.map((r) => ({ topic: r.topic, repositoryCount: r.repo_count, mapped: r.mapped === 1 }));
+      }, db);
+    },
+
+    /**
+     * 可见分类聚合（页面 chip 行）。
+     *
+     * **计数口径是 distinct repository**：一个仓库拆 11 个 packages 时，如果按插件数算，
+     * 这个仓库的话题会让每个分类都 +11 —— 用户看到的是"很多人在用"，实际只有一个仓库。
+     */
+    async listCategories(): Promise<PluginCategorySummary[]> {
+      return withRead((conn) => {
+        const rows = conn
+          .prepare(
+            `SELECT c.slug, c.label, c.sort_order,
+                    COUNT(DISTINCT r.id) AS repository_count,
+                    COUNT(DISTINCT p.id) AS plugin_count
+               FROM plugin_categories c
+               JOIN json_each(c.topics) ct
+               JOIN repositories r
+                 ON EXISTS (SELECT 1 FROM json_each(r.topics) rt WHERE rt.value = ct.value)
+               JOIN plugins p ON p.repository_id = r.id
+              WHERE c.is_visible = 1
+              GROUP BY c.slug, c.label, c.sort_order
+              ORDER BY c.sort_order ASC, c.slug ASC`,
+          )
+          .all() as Array<{
+          slug: string;
+          label: string;
+          sort_order: number;
+          repository_count: number;
+          plugin_count: number;
+        }>;
+
+        const out: PluginCategorySummary[] = rows.map((r) => ({
+          slug: r.slug,
+          label: r.label,
+          repositoryCount: r.repository_count,
+          pluginCount: r.plugin_count,
+          sortOrder: r.sort_order,
+          isVisible: true,
+        }));
+
+        // 「未分类」= 有插件、但仓库 topics 没被任何可见分类认领（含 topics 为 NULL 的情况）。
+        const none = conn
+          .prepare(
+            `SELECT COUNT(DISTINCT r.id) AS repository_count, COUNT(DISTINCT p.id) AS plugin_count
+               FROM plugins p
+               JOIN repositories r ON r.id = p.repository_id
+              WHERE NOT EXISTS (
+                      SELECT 1 FROM plugin_categories c, json_each(c.topics) ct
+                       WHERE c.is_visible = 1
+                         AND ct.value IN (SELECT value FROM json_each(r.topics))
+                    )`,
+          )
+          .get() as { repository_count: number; plugin_count: number };
+        if (none.plugin_count > 0) {
+          out.push({
+            slug: UNCATEGORIZED_CATEGORY,
+            label: '未分类',
+            repositoryCount: none.repository_count,
+            pluginCount: none.plugin_count,
+            sortOrder: 9_999,
+            isVisible: true,
+          });
+        }
+        return out;
+      }, db);
+    },
+
+    /** 全部分类（含隐藏）—— 后台维护用。 */
+    async listAllCategories(): Promise<PluginCategoryRecord[]> {
+      return withRead((conn) => {
+        const rows = conn
+          .prepare(
+            `SELECT c.slug, c.label, c.topics, c.sort_order, c.is_visible, c.updated_at,
+                    (SELECT COUNT(DISTINCT r.id)
+                       FROM repositories r, json_each(r.topics) rt
+                      WHERE rt.value IN (SELECT value FROM json_each(c.topics))) AS repository_count,
+                    (SELECT COUNT(DISTINCT p.id)
+                       FROM plugins p
+                       JOIN repositories r ON r.id = p.repository_id
+                      WHERE EXISTS (SELECT 1 FROM json_each(r.topics) rt
+                                     WHERE rt.value IN (SELECT value FROM json_each(c.topics)))) AS plugin_count
+               FROM plugin_categories c
+              ORDER BY c.sort_order ASC, c.slug ASC`,
+          )
+          .all() as Array<{
+          slug: string;
+          label: string;
+          topics: string;
+          sort_order: number;
+          is_visible: number;
+          updated_at: number;
+          repository_count: number;
+          plugin_count: number;
+        }>;
+        return rows.map((r) => ({
+          slug: r.slug,
+          label: r.label,
+          topics: parseTopics(r.topics) ?? [],
+          repositoryCount: r.repository_count,
+          pluginCount: r.plugin_count,
+          sortOrder: r.sort_order,
+          isVisible: r.is_visible === 1,
+          updatedAt: r.updated_at,
+        }));
+      }, db);
+    },
+
+    /** 新增或更新分类（管理员）。slug 是主键，冲突即更新。 */
+    async upsertCategory(
+      ctx: CallerContext,
+      input: { slug: string; label: string; topics: string[]; sortOrder?: number; isVisible?: boolean },
+      injectedDb?: SqliteDatabase,
+    ): Promise<PluginCategoryRecord> {
+      if (!isAdmin(ctx)) throw err.forbidden('只有管理员可以维护用途分类。');
+      const slug = normalizeCategorySlug(input.slug);
+      const label = normalizeCategoryLabel(input.label);
+      const topics = normalizeCategoryTopics(input.topics);
+      const sortOrder = normalizeSortOrder(input.sortOrder);
+      const isVisible = input.isVisible === undefined ? true : input.isVisible === true;
+      const now = Date.now();
+
+      const run = (conn: SqliteDatabase): PluginCategoryRecord => {
+        // 重名校验：两个分类同名会让 chip 行出现两个一模一样的项，用户无法区分。
+        // 这里**拒绝**而不是自动改名 —— 自动改名会悄悄改变线上展示，运营更难排查。
+        const clash = conn
+          .prepare('SELECT slug FROM plugin_categories WHERE label = ? AND slug <> ?')
+          .get(label, slug) as { slug: string } | undefined;
+        if (clash) {
+          throw err.input(`分类名称「${label}」已被分类 ${clash.slug} 使用。`, [
+            { path: 'label', message: '与既有分类重名' },
+          ]);
+        }
+
+        conn
+          .prepare(
+            `INSERT INTO plugin_categories (slug, label, topics, sort_order, is_visible, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (slug) DO UPDATE SET
+               label = excluded.label,
+               topics = excluded.topics,
+               sort_order = excluded.sort_order,
+               is_visible = excluded.is_visible,
+               updated_at = excluded.updated_at`,
+          )
+          .run(slug, label, JSON.stringify(topics), sortOrder, isVisible ? 1 : 0, now, now);
+
+        const row = conn
+          .prepare('SELECT slug, label, topics, sort_order, is_visible, updated_at FROM plugin_categories WHERE slug = ?')
+          .get(slug) as {
+          slug: string;
+          label: string;
+          topics: string;
+          sort_order: number;
+          is_visible: number;
+          updated_at: number;
+        };
+        return {
+          slug: row.slug,
+          label: row.label,
+          topics: parseTopics(row.topics) ?? [],
+          repositoryCount: 0,
+          pluginCount: 0,
+          sortOrder: row.sort_order,
+          isVisible: row.is_visible === 1,
+          updatedAt: row.updated_at,
+        };
+      };
+
+      if (injectedDb) {
+        return withTransaction((tx) => run(tx.db), injectedDb);
+      }
+      return withTransaction((tx) => run(tx.db), db);
+    },
+
+    /** 删除分类（管理员）。看不见的分类同样可删（后台要能清理）。 */
+    async deleteCategory(ctx: CallerContext, slug: string, injectedDb?: SqliteDatabase): Promise<{ deleted: boolean }> {
+      if (!isAdmin(ctx)) throw err.forbidden('只有管理员可以维护用途分类。');
+      const normalized = normalizeCategorySlug(slug);
+      const run = (conn: SqliteDatabase): { deleted: boolean } => {
+        const result = conn.prepare('DELETE FROM plugin_categories WHERE slug = ?').run(normalized);
+        return { deleted: result.changes > 0 };
+      };
+      if (injectedDb) {
+        return withTransaction((tx) => run(tx.db), injectedDb);
+      }
+      return withTransaction((tx) => run(tx.db), db);
     },
   };
 }

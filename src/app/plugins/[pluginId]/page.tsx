@@ -66,13 +66,21 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ p
           {/* 元信息只留作者 + 用途分类（+ 归档警示） */}
           <div className="plugin-meta">
             <span>作者 {author}</span>
-            {(plugin.topics.length > 0 ? plugin.topics : ['未分类']).map((t) => (
-              <span key={t} className="tag site">
-                {t}
+            {/* 展示**分类**（中文、可筛选）；原始 topics 挪到下面一行小字 ——
+                分类是运营口径，topics 是抓取原料，两者都保留但不混在一起。 */}
+            {(plugin.categories.length > 0 ? plugin.categories : ['未分类']).map((c) => (
+              <span key={c} className="tag site">
+                {c}
               </span>
             ))}
             {plugin.repository.isArchived ? <span className="tag warn">已归档</span> : null}
           </div>
+
+          {plugin.topics.length > 0 ? (
+            <p className="muted" style={{ margin: '6px 0 0', fontSize: 12 }}>
+              原始 topics：{plugin.topics.join(' · ')}
+            </p>
+          ) : null}
 
           <p className="plugin-desc">{plugin.description ?? '暂无简介'}</p>
         </div>

@@ -12,7 +12,6 @@ import Link from 'next/link';
 import { getDb } from '@/server/platform/db';
 import { resolveVisibilityInTx } from '@/server/modules/content';
 import { createCatalogService } from '@/server/modules/catalog';
-import { UNCLASSIFIED_TAG } from '@/server/modules/catalog/service';
 import { formatDateTimeOr } from '@/packages/common/time';
 
 export const dynamic = 'force-dynamic';
@@ -54,17 +53,18 @@ function pluginLabel(row: Row): string | null {
   return `${base}${subPath}`;
 }
 
-/** 分类链接只带 tag 一个条件——首页不做组合筛选，进目录后再叠加。 */
-function tagHref(tag: string | null): string {
-  if (tag === null) return '/plugins';
-  return `/plugins?tag=${encodeURIComponent(tag)}`;
+/** 分类链接只带 cat 一个条件——首页不做组合筛选，进目录后再叠加。 */
+function categoryHref(slug: string | null): string {
+  if (slug === null) return '/plugins';
+  return `/plugins?cat=${encodeURIComponent(slug)}`;
 }
 
 export default async function HomePage() {
   const reviews = latestPublicReviews(6);
   const catalog = createCatalogService({ db: getDb() });
   const recentPlugins = await catalog.listPlugins({ page: 1, page_size: 12 });
-  const tags = await catalog.listPluginTags();
+  // 页面 chip 行用**分类**（中文、按不同仓库计数），不再直接暴露原始 topics
+  const categories = await catalog.listCategories();
 
   return (
     <div>
@@ -99,15 +99,15 @@ export default async function HomePage() {
         </form>
 
         {/* 分类为空（还没收录）时整行不渲染 */}
-        {tags.length > 0 ? (
+        {categories.length > 0 ? (
           <div className="filters" role="navigation" aria-label="按用途分类浏览" style={{ marginBottom: 0 }}>
             {/* 「用途分类」标签按主人要求去掉：这一排本来就是分类 chip，标题是多余的 */}
-            <Link href={tagHref(null)} className="active">
+            <Link href={categoryHref(null)} className="active">
               全部
             </Link>
-            {tags.slice(0, 10).map((t) => (
-              <Link key={t.tag} href={tagHref(t.tag)}>
-                {t.tag === UNCLASSIFIED_TAG ? '未分类' : t.tag} <span className="count">{t.pluginCount}</span>
+            {categories.slice(0, 10).map((c) => (
+              <Link key={c.slug} href={categoryHref(c.slug)}>
+                {c.label} <span className="count">{c.repositoryCount}</span>
               </Link>
             ))}
             {/* 「更多插件 →」按主人要求去掉：分类 chip 本身已能进目录，多一个出口反而显乱 */}

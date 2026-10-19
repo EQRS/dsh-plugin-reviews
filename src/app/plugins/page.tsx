@@ -10,7 +10,7 @@
 import Link from 'next/link';
 import { getDb } from '@/server/platform/db';
 import { createCatalogService } from '@/server/modules/catalog';
-import { UNCLASSIFIED_TAG } from '@/server/modules/catalog/service';
+import { UNCATEGORIZED_CATEGORY } from '@/server/modules/catalog/service';
 import { formatDateTimeOr } from '@/packages/common/time';
 import type { PluginSummary } from '@/server/modules/catalog/types';
 
@@ -20,6 +20,9 @@ const PAGE_SIZE = 12;
 
 interface DirectoryConditions {
   q?: string;
+  /** 分类筛选（迁移 0010，页面 chip 行用）：分类 slug 或 __none__。 */
+  cat?: string;
+  /** 原始 GitHub topic 精确筛选（旧链接兼容；页面不再生成这类链接）。 */
   tag?: string;
   hasReviews: 'all' | 'yes' | 'no';
   sort: 'info' | 'reviews';
@@ -37,6 +40,7 @@ function readConditions(sp: Record<string, string | string[] | undefined>): Dire
   return {
     // 关键词截断到 100 字：搜索框不是注入口
     q: firstValue(sp.q)?.trim().slice(0, 100) || undefined,
+    cat: firstValue(sp.cat)?.slice(0, 40) || undefined,
     tag: firstValue(sp.tag)?.slice(0, 64) || undefined,
     hasReviews: hasReviewsRaw === 'yes' || hasReviewsRaw === 'no' ? hasReviewsRaw : 'all',
     sort: firstValue(sp.sort) === 'reviews' ? 'reviews' : 'info',
@@ -49,6 +53,7 @@ function listHref(current: DirectoryConditions, over: Partial<DirectoryCondition
   const merged = { ...current, page: undefined, ...over } as DirectoryConditions & { page?: number };
   const params = new URLSearchParams();
   if (merged.q) params.set('q', merged.q);
+  if (merged.cat) params.set('cat', merged.cat);
   if (merged.tag) params.set('tag', merged.tag);
   if (merged.hasReviews !== 'all') params.set('has_reviews', merged.hasReviews);
   if (merged.sort !== 'info') params.set('sort', merged.sort);
@@ -90,10 +95,13 @@ function PluginCard({ plugin }: { plugin: PluginSummary }) {
         <p className="clamp-2">{plugin.description ?? '暂无简介'}</p>
 
         <div>
-          {plugin.topics.length === 0 ? (
-            <Chip text="未分类" />
+          {plugin.categories.length > 0 ? (
+            // 分类（中文、按不同仓库计数）优先；原始 topics 只在详情页展示，避免噪声上卡片
+            plugin.categories.slice(0, 6).map((c) => <Chip key={c} text={c} tone="tag" />)
+          ) : plugin.topics.length > 0 ? (
+            plugin.topics.slice(0, 3).map((t) => <Chip key={t} text={t} />)
           ) : (
-            plugin.topics.slice(0, 6).map((t) => <Chip key={t} text={t} tone="tag" />)
+            <Chip text="未分类" />
           )}
           {plugin.publicReviewCount > 0 ? (
             <Chip text={`${plugin.publicReviewCount} 篇公开评测`} />
@@ -126,11 +134,13 @@ export default async function PluginsPage({
     page: conditions.page,
     page_size: PAGE_SIZE,
     q: conditions.q,
+    category: conditions.cat,
     tag: conditions.tag,
     hasReviews: conditions.hasReviews,
     sort: conditions.sort,
   });
-  const tags = await catalog.listPluginTags();
+  // 侧栏 chip 用分类（中文、按不同仓库计数）
+  const categories = await catalog.listCategories();
 
   // 空结果时再问一次"不带条件时有多少" —— 这样能把"目录为空"与"筛选没匹配到"分开。
   const totalWithoutFilter =
@@ -157,22 +167,27 @@ export default async function PluginsPage({
       </div>
 
       <div className="catalog-layout">
-        {/* 左栏：用途分类（无标签即"未分类"） */}
-        {tags.length > 0 ? (
+        {/* 左栏：用途分类（迁移 0010；计数是**不同仓库数**，不是插件数） */}
+        {categories.length > 0 ? (
           <aside className="panel" aria-label="用途分类">
             <p className="side-title">用途分类</p>
             <nav className="side-nav">
-              <Link href={listHref(conditions, { tag: undefined })} className={conditions.tag ? '' : 'active'}>
+              <Link href={listHref(conditions, { cat: undefined })} className={conditions.cat ? '' : 'active'}>
                 <span>全部</span>
               </Link>
-              {tags.map((t) => (
+              {categories.map((c) => (
                 <Link
-                  key={t.tag}
-                  href={listHref(conditions, { tag: t.tag })}
-                  className={conditions.tag === t.tag ? 'active' : ''}
+                  key={c.slug}
+                  href={listHref(conditions, { cat: c.slug })}
+                  className={conditions.cat === c.slug ? 'active' : ''}
+                  title={
+                    c.slug === UNCATEGORIZED_CATEGORY
+                      ? '没有命中任何分类的插件（去后台补映射）'
+                      : `覆盖 ${c.repositoryCount} 个仓库 / ${c.pluginCount} 个插件`
+                  }
                 >
-                  <span className="truncate">{t.tag === UNCLASSIFIED_TAG ? '未分类' : t.tag}</span>
-                  <span className="count">{t.pluginCount}</span>
+                  <span className="truncate">{c.label}</span>
+                  <span className="count">{c.repositoryCount}</span>
                 </Link>
               ))}
             </nav>

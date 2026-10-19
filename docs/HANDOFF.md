@@ -243,3 +243,45 @@ gitignore 的目录规则匹配**任意层级**，于是 `src/app/api/admin/back
 
 修法：改成 `/backups/`（只忽略仓库根那一个），并在 `.gitignore` 里留注释说明。
 教训：`git status` 里**没看到**新文件时别默认"忘了 add"，先 `git check-ignore -v <path>` 问一句。
+
+---
+
+## 14. 2026-10-19：用途分类（topics → 中文分类，计数改 distinct repository）
+
+### 14.1 起因（线上实测的三个问题）
+
+* chip 行直接拿 GitHub topics 当标签：`dsh-plugin` 覆盖 46/50、`deepseek-harness` 40/50 —— 没有区分度；
+* 仓库级 topics 被复制到该仓库每个插件：`hyzyn/dsh-plugin-kit` 一个仓库 11 个 packages，
+  让 `docker`/`rss`/`ftp`/`ssh` 各 +11，计数被单仓放大；
+* 标签是英文原样，没有中文口径。
+
+### 14.2 做了什么
+
+| 动作 | 落点 |
+|---|---|
+| 新表 `plugin_categories`（slug/label/topics/sort_order/is_visible）+ 10 个种子分类 | `migrations/0010_plugin_categories.sql` |
+| 分类聚合：**distinct repository** 计数 + 「未分类」算出来 | `catalog/service.ts` `listCategories()` |
+| 筛选：`?cat=<slug>`（`__none__` = 未命中任何分类）；原始 `?tag=` 仍保留（旧链接兼容） | `buildDirectoryWhere()` |
+| 插件条目带分类展示名（按仓库批量取，避免 N+1） | `categoriesByRepository()` |
+| 原始 topics 视角 + 是否被认领（后台"待归类"） | `listTopicUsage()` |
+| 后台「分类管理」：增删改、重名校验、点选未归类 topic 入草稿 | `/api/admin/categories` + `admin-category-panel.tsx` |
+| 页面：首页 chip、目录左栏、卡片、详情页（分类为主、原始 topics 降为小字） | `app/page.tsx`、`app/plugins/**` |
+| 文档 | `docs/分类与标签.md` |
+
+### 14.3 口径与边界
+
+* **分类 = 多对多视图**，不是互斥分区；一个 topic 被两个分类认领时插件同时出现在两处。
+* **计数按仓库**（`repositoryCount`），同时保留 `pluginCount` 供后台对照 —— 首页/左栏显示前者。
+* 「未分类」两个概念别混：`__none__`（有 topics 但没被认领 → 运营待办）vs
+  `UNCLASSIFIED_TAG`（没有 topics → 抓取缺失）。
+* 分类是**仓库级**的：同一仓库的多个 packages 共享同一组分类；插件级分类不在本切片。
+* 分类重名被**拒绝**（不自动改名）；隐藏的分类不参与筛选、不进 chip，但后台可见。
+
+### 14.4 验证
+
+* `tests/plugin-categories.test.ts` 8 条：monorepo 不放大计数、噪声不进 chip、未分类是算出来的、
+  同一仓库多插件共享分类且不重复、按分类/未分类筛选、隐藏分类、增删改、五类非法输入、种子数据自检。
+* 全量 **533 测试 / 32 文件**；`tsc` 干净；`build` exit 0。
+
+> 踩坑记录：测试里用真实词汇（memory/rag/docker）当数据会**撞上种子分类的认领关系**，
+> 第一版测试因此把"未分类"断言写错。测试数据一律用 `zz` 前缀隔离。
