@@ -204,9 +204,9 @@
   --width-content: 1360px;
   --width-narrow: 920px;
   --width-reading: 760px;
-  /* M3 小型顶栏 64dp；移动端底部导航栏 80dp */
+  /* M3 小型顶栏 64dp；移动端底部导航栏 56dp */
   --header-height: 64px;
-  --nav-bar-height: 80px;
+  --nav-bar-height: 56px;
   --target: 48px;
   /* M3 按钮高度 40dp（原 38 与 M3 不符，按规范取 40） */
   --control-height: 40px;
@@ -631,12 +631,34 @@ p {
   white-space: nowrap;
 }
 
-/* 双栏：正文 2/3 + 辅栏 1/3（页面布局.md §3） */
+/* 双栏：正文 2/3 + 辅栏 1/3（页面布局.md §3）。
+   align-items 用默认的 stretch：两栏面板**底部对齐**，右侧插件列表更长时，
+   左侧评测卡不会在半截就收边；评测条数由 page.tsx 控制在相近高度。 */
 .twocol {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
   gap: 24px;
-  align-items: start;
+  align-items: stretch;
+}
+
+/* ---------------------------------------------- 首页内容折叠（一页 + 展开）
+   默认把双栏内容裁到「浏览器一页」的高度：底部渐隐，下面给一枚「展开全部」。
+   真实上限由 HomeFeed 量出后写进内联 style；这里的 max-height 只是 JS 未就绪时的回退。 */
+.home-feed.is-collapsed {
+  overflow: hidden;
+  max-height: min(720px, calc(100svh - 460px));
+}
+.home-feed.is-clipped {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 120px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 120px), transparent);
+}
+.home-feed-toggle {
+  display: flex;
+  justify-content: center;
+  margin-top: 20px;
+}
+.home-feed-toggle .button {
+  gap: 6px;
 }
 
 /* 阅读页专用两栏（参照 .read-layout：正文主栏 + 固定 300px 辅栏）
@@ -2297,14 +2319,16 @@ input[type='search']:focus {
   --chip-radius: var(--md-sys-shape-corner-small);
 }
 
-  /* 搜索行：输入框 + 放大镜按钮**同一行**（主人要求），不再换行占两行 */
+  /* 搜索行：输入框 + 放大镜按钮**同一行**（主人要求），不再换行占两行。
+     窄屏必须 nowrap：允许换行时输入框的固有宽度一挤，按钮就掉到第二行（360px 实测复现）。 */
 .search {
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 10px;
 }
 .search input {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
 }
 /* 放大镜按钮：M3 filled 图标按钮（主色底 + 圆形），与药丸输入框配对 */
@@ -2612,8 +2636,8 @@ input[type='search']:focus {
  * 底部导航栏（M3 navigation bar）—— 移动端主导航
  *
  *
- * M3 规格：高 80dp、容器色 surface-container、图标 24dp + label-medium 12dp、
- * 选中项上方有 64×32 的指示药丸（secondary-container）。
+ * M3 规格：高 56dp（比标准 80dp 收两档，主人两次要求"下栏还是太大"）、容器色 surface-container、
+ * 图标 20dp + label 10dp、选中项上方有 48×24 的指示药丸（secondary-container）。
  * 桌面隐藏；手机/平板显示，并给 body 补足底部留白 + 安全区（刘海屏）。 */
 .nav-bar {
   position: fixed;
@@ -2632,7 +2656,7 @@ input[type='search']:focus {
   grid-auto-flow: column;
   grid-auto-columns: 1fr;
   height: var(--nav-bar-height);
-  max-width: 560px;
+  max-width: 420px;
   margin: 0 auto;
 }
 .nav-bar-item {
@@ -2640,10 +2664,11 @@ input[type='search']:focus {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  padding: 10px 4px 14px;
+  gap: 2px;
+  padding: 4px 4px 6px;
   color: var(--md-sys-color-on-surface-variant);
-  font-size: var(--md-sys-typescale-label-medium-size);
+  font-size: 10px;
+  line-height: 1.2;
   font-weight: 500;
   text-decoration: none;
   -webkit-tap-highlight-color: transparent;
@@ -2652,11 +2677,15 @@ input[type='search']:focus {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 64px;
-  height: 32px;
+  width: 48px;
+  height: 24px;
   border-radius: var(--md-sys-shape-corner-full);
   transition: background-color var(--md-sys-motion-duration-medium2)
     var(--md-sys-motion-easing-emphasized);
+}
+.nav-bar-indicator svg {
+  width: 20px;
+  height: 20px;
 }
 .nav-bar-item.active {
   color: var(--md-sys-color-on-surface);
@@ -2832,6 +2861,13 @@ input[type='search']:focus {
   .read-layout {
     grid-template-columns: minmax(0, 1fr);
     gap: 16px;
+  }
+  /* 手机端底部导航更矮，折叠高度跟着收一档（真值仍由 HomeFeed 量出） */
+  .home-feed.is-collapsed {
+    max-height: calc(100svh - 540px);
+  }
+  .home-feed-toggle {
+    margin-top: 16px;
   }
   .me-side {
     position: static;

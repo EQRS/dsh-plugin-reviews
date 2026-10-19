@@ -9,6 +9,7 @@
  */
 
 import Link from 'next/link';
+import { HomeFeed } from '@/components/home-feed';
 import { getDb } from '@/server/platform/db';
 import { resolveVisibilityInTx } from '@/server/modules/content';
 import { createCatalogService } from '@/server/modules/catalog';
@@ -60,7 +61,9 @@ function categoryHref(slug: string | null): string {
 }
 
 export default async function HomePage() {
-  const reviews = latestPublicReviews(6);
+  // 主栏要跟右栏（12 个插件）一样长：评测行比插件行矮，约 2:1，
+  // 取 24 条让两栏底部大致齐平；两栏等高的兜底在 .twocol 的 align-items: stretch。
+  const reviews = latestPublicReviews(24);
   const catalog = createCatalogService({ db: getDb() });
   const recentPlugins = await catalog.listPlugins({ page: 1, page_size: 12 });
   // 页面 chip 行用**分类**（中文、按不同仓库计数），不再直接暴露原始 topics
@@ -115,7 +118,8 @@ export default async function HomePage() {
         ) : null}
       </section>
 
-      <div className="twocol">
+      {/* 双栏内容默认只占一屏，超出部分点「展开全部」（主人要求：一页长度 + 展开）。 */}
+      <HomeFeed>
         {/* 主栏：最新评测 */}
         <section className="panel" aria-labelledby="home-reviews">
           <div className="section-head">
@@ -213,7 +217,7 @@ export default async function HomePage() {
             </>
           )}
         </aside>
-      </div>
+      </HomeFeed>
     </div>
   );
 }

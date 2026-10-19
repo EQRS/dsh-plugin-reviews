@@ -7,8 +7,8 @@
  * 占满一整行还压住了正文（实测截图确认）。M3 的做法是——顶栏只放标题与动作，
  * 主导航沉到底部，落在拇指自然可达的区域。
  *
- * M3 规格对齐：容器色 surface-container、高 80dp、图标 24dp + label-medium 12dp、
- * 选中项有一个 64×32 的指示药丸（secondary-container）。
+ * M3 规格对齐（按主人要求收两档）：容器色 surface-container、高 56dp、
+ * 图标 20dp + label 10dp、选中项有一个 48×24 的指示药丸（secondary-container）。
  * 桌面（>900px）由 CSS 隐藏，主导航回到顶栏的 primary tabs。
  */
 
