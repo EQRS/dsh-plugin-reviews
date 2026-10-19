@@ -61,7 +61,9 @@ function categoryHref(slug: string | null): string {
 }
 
 export default async function HomePage() {
-  const reviews = latestPublicReviews(6);
+  // 主栏要跟右栏（12 个插件）一样长：评测行比插件行矮，约 2:1，
+  // 取 24 条让两栏底部大致齐平；两栏等高的兜底在 .twocol 的 align-items: stretch。
+  const reviews = latestPublicReviews(24);
   const catalog = createCatalogService({ db: getDb() });
   const recentPlugins = await catalog.listPlugins({ page: 1, page_size: 12 });
   // 页面 chip 行用**分类**（中文、按不同仓库计数），不再直接暴露原始 topics
