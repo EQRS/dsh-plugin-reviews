@@ -37,6 +37,8 @@ export interface CommentView {
   firstPublishedAt: number | null;
   editedAt: number | null;
   deletedAt: number | null;
+  /** 管理员隐藏时间（迁移 0012）。与作者删除不同：隐藏的评论**整条不展示**。 */
+  hiddenAt: number | null;
   /** 顶层评论的回复数（组内回复计数）；回复自身为 0。 */
   replyCount: number;
 }
@@ -76,6 +78,7 @@ interface CommentRow {
   first_published_at: number | null;
   edited_at: number | null;
   deleted_at: number | null;
+  hidden_at: number | null;
 }
 
 // ============================================================
@@ -138,7 +141,7 @@ function toView(row: CommentRow, body: string, replyCount: number): CommentView 
     authorId: row.author_id,
     // 已删除的评论**不留正文**（占位靠 deletedAt 非空表达，页面显示"该评论已被作者删除"）。
     // 这是删除功能的前提：删除只是标记，如果这里照样把 body 读出来，删除等于没删。
-    body: row.deleted_at !== null ? '' : body,
+    body: row.deleted_at !== null || row.hidden_at !== null ? '' : body,
     replyToCommentId: row.reply_to_comment_id,
     rootCommentId: row.root_comment_id,
     publishedRevisionId: row.published_revision_id,
@@ -147,6 +150,7 @@ function toView(row: CommentRow, body: string, replyCount: number): CommentView 
     firstPublishedAt: row.first_published_at,
     editedAt: row.edited_at,
     deletedAt: row.deleted_at,
+    hiddenAt: row.hidden_at,
     replyCount,
   };
 }
@@ -156,7 +160,7 @@ function readCommentRow(db: SqliteDatabase, commentId: string): CommentRow {
     .prepare(
       `SELECT id, content_entity_id, author_id, reply_to_comment_id, root_comment_id,
               published_revision_id, latest_submitted_revision_id,
-              created_at, first_published_at, edited_at, deleted_at
+              created_at, first_published_at, edited_at, deleted_at, hidden_at
        FROM comments WHERE id = ?`,
     )
     .get(commentId) as CommentRow | undefined;
@@ -166,8 +170,8 @@ function readCommentRow(db: SqliteDatabase, commentId: string): CommentRow {
 
 /** 未发布评论没有修订可读；已发布的读**公开修订**，不是最新提交修订。 */
 function readBody(db: SqliteDatabase, row: CommentRow): string {
-  // 已删除：不读任何修订（哪怕它还留着 published_revision_id）。
-  if (row.deleted_at !== null) return '';
+  // 已删除或已被管理员隐藏：不读任何修订（哪怕它还留着 published_revision_id）。
+  if (row.deleted_at !== null || row.hidden_at !== null) return '';
   if (row.published_revision_id) {
     const rev = db
       .prepare('SELECT body FROM comment_revisions WHERE id = ? AND comment_id = ?')
@@ -199,7 +203,7 @@ function countReplies(db: SqliteDatabase, rootCommentId: string): number {
     db
       .prepare(
         `SELECT count(*) AS c FROM comments
-          WHERE root_comment_id = ? AND published_revision_id IS NOT NULL AND deleted_at IS NULL`,
+          WHERE root_comment_id = ? AND published_revision_id IS NOT NULL AND deleted_at IS NULL AND hidden_at IS NULL`,
       )
       .get(rootCommentId) as { c: number }
   ).c;
@@ -628,6 +632,7 @@ export const commentsService = {
       const VISIBLE = `
         content_entity_id = ? AND reply_to_comment_id IS NULL AND root_comment_id IS NULL
         AND published_revision_id IS NOT NULL
+        AND hidden_at IS NULL
         AND (
           deleted_at IS NULL
           OR EXISTS (
@@ -644,7 +649,7 @@ export const commentsService = {
         .prepare(
           `SELECT id, content_entity_id, author_id, reply_to_comment_id, root_comment_id,
                   published_revision_id, latest_submitted_revision_id,
-                  created_at, first_published_at, edited_at, deleted_at
+                  created_at, first_published_at, edited_at, deleted_at, hidden_at
            FROM comments
            WHERE ${VISIBLE}
            ORDER BY first_published_at ASC, id ASC
@@ -682,7 +687,7 @@ export const commentsService = {
         db
           .prepare(
             `SELECT count(*) AS c FROM comments
-              WHERE root_comment_id = ? AND published_revision_id IS NOT NULL AND deleted_at IS NULL`,
+              WHERE root_comment_id = ? AND published_revision_id IS NOT NULL AND deleted_at IS NULL AND hidden_at IS NULL`,
           )
           .get(rootCommentId) as { c: number }
       ).c;
@@ -691,9 +696,9 @@ export const commentsService = {
         .prepare(
           `SELECT id, content_entity_id, author_id, reply_to_comment_id, root_comment_id,
                   published_revision_id, latest_submitted_revision_id,
-                  created_at, first_published_at, edited_at, deleted_at
+                  created_at, first_published_at, edited_at, deleted_at, hidden_at
            FROM comments
-           WHERE root_comment_id = ? AND published_revision_id IS NOT NULL AND deleted_at IS NULL
+           WHERE root_comment_id = ? AND published_revision_id IS NOT NULL AND deleted_at IS NULL AND hidden_at IS NULL
            ORDER BY first_published_at ASC, id ASC
            LIMIT ? OFFSET ?`,
         )

@@ -17,6 +17,7 @@ import { AdminSettingsForm } from '@/components/admin-settings-form';
 import { AdminDiscoveryPanel } from '@/components/admin-discovery-panel';
 import { AdminBackupPanel } from '@/components/admin-backup-panel';
 import { AdminCategoryPanel } from '@/components/admin-category-panel';
+import { AdminReportPanel } from '@/components/admin-report-panel';
 import { AdminUserPanel } from '@/components/admin-user-panel';
 import { buildHealthReport } from '@/server/platform/health';
 import { submissionStateLabels } from '@/packages/common/status-text';
@@ -237,6 +238,7 @@ export default async function AdminPage({
       {/* 顺序按"管理员日常先看什么"排：先看同步有没有跑、再改参数、再看备份、最后管人。 */}
       <AdminDiscoveryPanel />
       <AdminSettingsForm />
+      <AdminReportPanel />
       <AdminCategoryPanel />
       <AdminBackupPanel />
       <AdminUserPanel />

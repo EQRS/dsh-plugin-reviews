@@ -63,6 +63,16 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     unit: '次/时/用户',
   },
   {
+    key: 'rate_limits.reports_per_hour',
+    label: '举报提交上限',
+    description: '每个用户每小时最多提交多少次举报（`idea.md §20` 互动三件套之一）。',
+    kind: 'integer',
+    defaultValue: 20,
+    min: 1,
+    max: 200,
+    unit: '次/时/用户',
+  },
+  {
     key: 'discovery.max_plugins_per_run',
     label: '自动发现每轮收录上限',
     description:

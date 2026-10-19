@@ -13,6 +13,8 @@ import { resolveVisibilityInTx } from '@/server/modules/content';
 import { currentContext } from '@/app/api/_lib/context';
 import { BackLink } from '@/components/back-link';
 import { StartDraftButton } from '@/components/start-draft-button';
+import { FavoriteButton } from '@/components/favorite-button';
+import { createInteractionsService } from '@/server/modules/interactions';
 import { repositoryAvailabilityLabels } from '@/packages/common/status-text';
 import { formatDateTimeOr } from '@/packages/common/time';
 
@@ -26,6 +28,8 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ p
   if (!plugin) notFound();
 
   const ctx = await currentContext();
+  // 收藏状态（未登录恒 false）—— idea.md §15
+  const favorited = await createInteractionsService({ db }).isFavorite(ctx, pluginId);
 
   // 本插件下的公开评测
   const rows = db
@@ -74,6 +78,12 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ p
               </span>
             ))}
             {plugin.repository.isArchived ? <span className="tag warn">已归档</span> : null}
+            {/* 收藏（idea.md §15）：读者把插件收进「我的 → 收藏」 */}
+            <FavoriteButton
+              pluginId={plugin.pluginId}
+              initialFavorited={favorited}
+              authenticated={ctx.userId !== null}
+            />
           </div>
 
           {plugin.topics.length > 0 ? (

@@ -153,6 +153,11 @@ export const REQUIRED_TABLES = [
   'notifications',
   // 0010：用途分类（把 GitHub topics 映射成可维护的中文分类）
   'plugin_categories',
+  // 0012：互动三件套（有帮助 / 收藏 / 举报 + 处理记录）
+  'review_helpful_votes',
+  'plugin_favorites',
+  'reports',
+  'report_handling_records',
 ] as const;
 
 export function selfCheck(db: SqliteDatabase): SelfCheckResult {

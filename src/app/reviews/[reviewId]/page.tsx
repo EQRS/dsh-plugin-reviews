@@ -19,6 +19,9 @@ import { ArticleHero } from '@/components/article-hero';
 import { WithdrawButton } from '@/components/withdraw-button';
 import { AdminHideForm } from '@/components/admin-hide-form';
 import { BackLink } from '@/components/back-link';
+import { HelpfulButton } from '@/components/helpful-button';
+import { ReportButton } from '@/components/report-button';
+import { createInteractionsService } from '@/server/modules/interactions';
 import type { VersionValue } from '@/packages/common/field-rules';
 import { formatDateTime } from '@/packages/common/time';
 import { isVerdictKey, parseEvidenceRefs, verdictDef, type EvidenceRef } from '@/packages/common/verdict';
@@ -49,6 +52,9 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ r
 
   // 作者视角需要"这是不是我的文章"；服务端已经解析过会话，这里只读不多查库。
   const ctx = await currentContext();
+
+  // 有帮助状态（登录时带上「我投过没有」，匿名只给总数）—— idea.md §13
+  const helpful = await createInteractionsService({ db }).helpfulState(reviewId, ctx.userId);
 
   // 不存在的评测走 404 页，而不是把 DomainError 漏成 500（外部实测 2026-10-17：
   // /reviews/<未知ID> 与 /reviews/<非UUID> 均渲染 500 + digest，而 /plugins/<未知> 是 404）。
@@ -190,6 +196,14 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ r
               ) : (
                 <span className="tag" title="这份修订没有给出判定">未给出判定</span>
               )}
+              {/* 读者反馈与举报（idea.md §13、§20）：都是读者视角，放在元信息行末尾 */}
+              <HelpfulButton
+                reviewId={reviewId}
+                initialCount={helpful.count}
+                initialHelpful={helpful.helpful}
+                authenticated={ctx.userId !== null}
+              />
+              <ReportButton targetKind="review" targetId={reviewId} authenticated={ctx.userId !== null} />
             </div>
           </header>
         </div>

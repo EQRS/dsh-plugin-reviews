@@ -11,7 +11,7 @@
 
 import Link from 'next/link';
 
-export type MeSection = 'reviews' | 'notifications' | 'settings';
+export type MeSection = 'reviews' | 'favorites' | 'notifications' | 'settings';
 
 export function MeNav({ current }: { current: MeSection }) {
   return (
@@ -20,6 +20,13 @@ export function MeNav({ current }: { current: MeSection }) {
       <nav className="side-nav">
         <Link href="/me" className={current === 'reviews' ? 'active' : ''} aria-current={current === 'reviews' ? 'page' : undefined}>
           <span>评测</span>
+        </Link>
+        <Link
+          href="/me/favorites"
+          className={current === 'favorites' ? 'active' : ''}
+          aria-current={current === 'favorites' ? 'page' : undefined}
+        >
+          <span>收藏</span>
         </Link>
         <Link
           href="/me/notifications"

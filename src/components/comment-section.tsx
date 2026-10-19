@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ApiError, ErrorNotice, apiFetch, inputStyle, newRequestKey } from './api-client';
 import { formatDateTime } from '@/packages/common/time';
 import { SkeletonLines } from './skeleton';
+import { ReportButton } from './report-button';
 
 interface CommentView {
   commentId: string;
@@ -340,6 +341,12 @@ export function CommentSection({ contentId }: { contentId: string }) {
                   >
                     回复
                   </button>
+                  {/* 举报（idea.md §20）：评论也能举报，结果进管理员队列 */}
+                  <ReportButton
+                    targetKind="comment"
+                    targetId={c.commentId}
+                    authenticated={session?.authenticated === true}
+                  />
                   {/* 只有作者本人看得到编辑/删除；服务端还有一道 ownership 校验兜底 */}
                   {session?.authenticated && session.userId === c.authorId && c.deletedAt === null ? (
                     <>
@@ -380,6 +387,13 @@ export function CommentSection({ contentId }: { contentId: string }) {
                         <li key={r.commentId} style={{ marginBottom: 8, paddingLeft: 10 }}>
                           <CommentMeta comment={r} />
                           <CommentBody comment={r} />
+                          <div style={{ marginTop: 4 }}>
+                            <ReportButton
+                              targetKind="comment"
+                              targetId={r.commentId}
+                              authenticated={session?.authenticated === true}
+                            />
+                          </div>
                         </li>
                       ))}
                       {group.items.length < group.total ? (

@@ -43,7 +43,7 @@ import { log } from './log';
 export const RATE_LIMIT_TABLE = 'rate_limiter_flexible';
 
 /** 业务动作：一个动作一个独立额度。 */
-export type RateLimitAction = 'comment_change' | 'plugin_submission';
+export type RateLimitAction = 'comment_change' | 'plugin_submission' | 'report';
 
 export interface RateLimitRule {
   action: RateLimitAction;
@@ -70,6 +70,13 @@ export const RATE_LIMIT_RULES: Record<RateLimitAction, RateLimitRule> = {
     points: 10,
     durationMs: 3_600_000,
     description: '每用户每小时最多 10 次新的指定插件提交检查',
+  },
+  report: {
+    action: 'report',
+    specKey: 'rate_limits.reports_per_hour',
+    points: 20,
+    durationMs: 3_600_000,
+    description: '每用户每小时最多 20 次举报提交',
   },
 };
 

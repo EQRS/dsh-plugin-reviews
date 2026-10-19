@@ -15,13 +15,15 @@
 
 import type { SqliteDatabase } from '@/server/platform/db';
 import { newId } from '@/server/platform/id';
+import { err } from '@/packages/common/errors';
 
-export type NotificationKind = 'comment_on_content' | 'reply_to_comment';
+export type NotificationKind = 'comment_on_content' | 'reply_to_comment' | 'moderation_result';
 
 export interface NotificationView {
   id: string;
   kind: NotificationKind;
-  commentId: string;
+  /** 评论类通知才有；处理结果通知为 null。 */
+  commentId: string | null;
   contentEntityId: string;
   /** 触发者展示信息（头像缺失时为 null，页面据此回退到文字）。 */
   actorNickname: string;
@@ -112,6 +114,57 @@ export function deliverCommentNotification(
   return { created: true, reason: null, recipientId };
 }
 
+/**
+ * 投递一条「处理结果」通知（举报 / 纠错处理完、或需要用户补充证据时调用）。
+ *
+ * 与评论通知的差别：没有评论，正文位置是一句说明（`detail`），所以 `comment_id` 为空、
+ * kind 是 `moderation_result`（迁移 0013 的 CHECK 会同时验证这两点）。
+ *
+ * 去重键由调用方给（`report_handled:<举报>:<收件人>:<动作>`）：同一次处理重放不会重复通知，
+ * 但"先要求补证据、之后隐藏"是两次不同的处理，应该各发一条。
+ */
+export function deliverModerationResultNotification(
+  db: SqliteDatabase,
+  input: {
+    recipientId: string;
+    actorId: string;
+    contentEntityId: string;
+    detail: string;
+    deduplicationKey: string;
+    now: number;
+  },
+): DeliverResult {
+  const detail = input.detail.trim();
+  if (detail.length === 0) {
+    // 编程错误：处理结果必须有一句人话说明，否则用户收到一条空通知。
+    throw err.internal('处理结果通知缺少说明文字，拒绝写入。');
+  }
+  // 自己不通知自己（数据库 CHECK 兜底；这里先判是为了不去撞约束）
+  if (input.recipientId === input.actorId) {
+    return { created: false, reason: 'self', recipientId: input.recipientId };
+  }
+
+  const inserted = db
+    .prepare(
+      `INSERT INTO notifications
+         (id, recipient_id, kind, actor_id, comment_id, content_entity_id, deduplication_key, detail, read_at, created_at)
+       VALUES (?, ?, 'moderation_result', ?, NULL, ?, ?, ?, NULL, ?)
+       ON CONFLICT (deduplication_key) DO NOTHING`,
+    )
+    .run(
+      newId(input.now),
+      input.recipientId,
+      input.actorId,
+      input.contentEntityId,
+      input.deduplicationKey,
+      detail,
+      input.now,
+    );
+
+  if (inserted.changes === 0) return { created: false, reason: 'duplicate', recipientId: input.recipientId };
+  return { created: true, reason: null, recipientId: input.recipientId };
+}
+
 export interface NotificationsService {
   list(
     userId: string,
@@ -144,7 +197,7 @@ export function createNotificationsService(deps: { db: SqliteDatabase }): Notifi
         .prepare(
           `SELECT n.id, n.kind, n.comment_id, n.content_entity_id, n.read_at, n.created_at,
                   u.nickname AS actor_nickname, u.avatar_url AS actor_avatar_url,
-                  rev.body AS body
+                  rev.body AS body, n.detail AS detail
              FROM notifications n
              JOIN users u ON u.id = n.actor_id
              LEFT JOIN comments c ON c.id = n.comment_id
@@ -157,13 +210,14 @@ export function createNotificationsService(deps: { db: SqliteDatabase }): Notifi
         .all(userId, limit) as Array<{
         id: string;
         kind: NotificationKind;
-        comment_id: string;
+        comment_id: string | null;
         content_entity_id: string;
         read_at: number | null;
         created_at: number;
         actor_nickname: string;
         actor_avatar_url: string | null;
         body: string | null;
+        detail: string | null;
       }>;
 
       return {
@@ -174,7 +228,8 @@ export function createNotificationsService(deps: { db: SqliteDatabase }): Notifi
           contentEntityId: r.content_entity_id,
           actorNickname: r.actor_nickname,
           actorAvatarUrl: r.actor_avatar_url,
-          excerpt: (r.body ?? '（评论已删除）').slice(0, EXCERPT_MAX),
+          // 处理结果通知没有评论正文，正文位置放它自己的说明
+          excerpt: (r.detail ?? r.body ?? '（内容已不可见）').slice(0, EXCERPT_MAX),
           readAt: r.read_at,
           createdAt: r.created_at,
         })),

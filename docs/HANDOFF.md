@@ -285,3 +285,36 @@ gitignore 的目录规则匹配**任意层级**，于是 `src/app/api/admin/back
 
 > 踩坑记录：测试里用真实词汇（memory/rag/docker）当数据会**撞上种子分类的认领关系**，
 > 第一版测试因此把"未分类"断言写错。测试数据一律用 `zz` 前缀隔离。
+
+---
+
+## 15. 2026-10-20：P1 互动三件套（有帮助 / 收藏 / 举报）
+
+### 15.1 做了什么
+
+| 功能 | 落点 |
+|---|---|
+| **有帮助**（一人一票、可取消） | 迁移 `0012` `review_helpful_votes`；`POST/GET /api/reviews/[id]/helpful`；详情页按钮 |
+| **收藏**（插件；整合包等 P4） | `plugin_favorites`；`GET/POST /api/me/favorites`；`/me/favorites` 页 + `me-nav` 新栏目 + 详情页按钮 |
+| **举报**（评测/评论；整合包版本等 P4） | `reports` + `report_handling_records`；`POST /api/reports`（频控 `rate_limits.reports_per_hour`=20 可调）；评测详情与评论区各有入口 |
+| **举报处理** | 后台「举报处理」组：隐藏 / 驳回 / 要求补充证据，原因必填；隐藏会真隐藏（评测走 `content_entities`，评论走新增的 `comments.hidden_*` 三列） |
+| **处理结果通知** | 迁移 `0013` 重建 `notifications`：`kind` 增 `moderation_result`、`comment_id` 可空、新增 `detail`；处理时通知举报人（隐藏时也通知作者） |
+
+### 15.2 关键设计点
+
+* **评论隐藏不复用 `deleted_at`**：作者删除是"本人撤下"（有回复留占位），管理员隐藏是"违规处理"（整条不展示）。
+  三个隐藏列"同生共死"由触发器钉住（`trg_comments_hidden_triplet_update`）。
+* **计数不落冗余列**：有帮助数始终 `COUNT(*)`；实测量级下比维护计数列更省心。
+* **举报去重做成部分唯一索引**：同一人 + 目标 + 原因只允许一条 `state='open'`，处理完后可以再举报。
+* **通知的"哪种类型该带什么"写成 CHECK**：评论类必须带 `comment_id`，`moderation_result` 必须带 `detail`。
+
+### 15.3 验证
+
+* `tests/interactions.test.ts` 8 条：一人一票/可取消、匿名 401、未公开不能投票、收藏切换与列表、
+  举报去重、未公开不能举报、隐藏后内容真的不可见 + 两条通知 + 处理记录、重复处理冲突、评论隐藏后整条消失。
+* 全量 **549 测试 / 35 文件**；`tsc` 干净；`build` exit 0。
+* 迁移先在库副本演练：`applied [0012, 0013]`、`foreignKeyCheck: []`、通知表重建后历史 3 条保留、索引齐全。
+
+### 15.4 仍未做（P2 之后）
+
+评测搜索、资料纠错、整合包（含整合包收藏/举报/审核）、审核结果通知、操作记录查询界面。
