@@ -554,6 +554,10 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
           <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
             一篇评测只给一个判定（对齐 dsh-bench 测评规范：五状态、不给总分、不用星级）。
             「真有用／帮倒忙／没啥差别」必须附证据链；「还说不准／没法测」可以没有。
+            {' '}
+            <Link href="/spec" target="_blank" rel="noreferrer" style={{ whiteSpace: 'nowrap' }}>
+              规则说明：测评规范 ↗
+            </Link>
           </p>
           {VERDICTS.map((v) => (
             <label
