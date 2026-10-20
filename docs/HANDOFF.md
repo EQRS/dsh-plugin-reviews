@@ -357,3 +357,32 @@ SQLite FTS5 默认分词（unicode61）对中文是「整段一个词」，子�
   标题命中排前、索引幂等、插件相关度顺序；
 * 全量 **555 测试 / 36 文件**；tsc 干净；build exit 0；
 * 线上：schema 0014、回填 76 篇、`/reviews?q=记忆` 与 `?q=检索测` 都能出结果、分类/来源筛选 200。
+
+---
+
+## 17. 2026-10-20：P3 资料纠错（迁移 0015 + 0016）
+
+### 17.1 核心不变量：同步值与修正值分开存
+
+* `plugins.display_name / description` **永远是 GitHub 同步来的原值**；
+* 管理员采纳的修正进 `plugin_field_overrides`（UNIQUE(plugin_id, field_key)）；读取时合并（列表一次批量取）；
+* **收录/刷新时跳过被覆盖的字段** —— 否则下一次同步会把修正冲掉，而 override 表里的"谁改的、为什么"还留着，
+  数据与记录就对不上。测试里专门有一条"采纳之后再跑一次同步"钉住它；
+* 「恢复同步资料」= 删一行 override，不需要重新探测 GitHub。
+
+### 17.2 为什么通知表要放开一个约束（迁移 0016）
+
+插件不是 `content_entities` 的一行，而 0013 里通知的 `content_entity_id` 是 NOT NULL。
+0016 放开为可空，并用 CHECK 写死：**只有 `moderation_result` 允许为空**；评论类通知仍然必须有 comment_id 与内容锚点。
+
+### 17.3 字段白名单与边界
+
+只允许纠 `display_name` / `description`；分类（topics）是仓库级的，改一个会波及其它插件，留给后续单独设计。
+
+### 17.4 验证
+
+* `tests/plugin-corrections.test.ts` 5 条：提交去重、五类非法输入、采纳后展示修正值 + 处理记录 +
+  通知（空锚点）、重复处理冲突/越权、**采纳后再同步不覆盖**（含列表页合并覆盖值）；
+* 全量 **574 测试 / 38 文件**；tsc 干净；build exit 0；
+* 副本演练 0015+0016：foreignKeyCheck 空、通知保留、空锚点可写、评论类缺 comment_id 被 CHECK 拒绝；
+* 线上：schema 0016、`POST /api/plugins/{id}/corrections` 匿名 401、`GET /api/admin/corrections` 匿名 403。
