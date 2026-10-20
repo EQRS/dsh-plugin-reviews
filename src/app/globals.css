@@ -206,7 +206,7 @@
   --width-reading: 760px;
   /* M3 小型顶栏 64dp；移动端底部导航栏 56dp */
   --header-height: 64px;
-  --nav-bar-height: 60px;
+  --nav-bar-height: 80px;
   --target: 48px;
   /* M3 按钮高度 40dp（原 38 与 M3 不符，按规范取 40） */
   --control-height: 40px;
@@ -2646,8 +2646,9 @@ input[type='search']:focus {
  * 底部导航栏（M3 navigation bar）—— 移动端主导航
  *
  *
- * M3 规格：高 60dp（介于标准 80dp 与你要求的紧凑版之间）、容器色 surface-container、
- * 图标 24dp + label 12dp（都是 MD3 规范尺寸）、选中项上方 56×28 的指示药丸（secondary-container）。
+ * M3 标准规格：高 80dp、容器色 surface-container、图标 24dp + label 12sp、
+ * 选中项上方 64×32 的指示药丸（secondary-container）。
+ * 之前为"收小"把高度压到 56/60，图标与药丸跟着缩，反而显得畸形；这里回到规范值。
  * 桌面隐藏；手机/平板显示，并给 body 补足底部留白 + 安全区（刘海屏）。 */
 .nav-bar {
   position: fixed;
@@ -2678,11 +2679,11 @@ input[type='search']:focus {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  padding: 6px 4px 8px;
+  gap: 4px;
+  padding: 12px 4px 16px;
   color: var(--md-sys-color-on-surface-variant);
   font-size: 12px;
-  line-height: 1.2;
+  line-height: 16px;
   font-weight: 500;
   text-decoration: none;
   -webkit-tap-highlight-color: transparent;
@@ -2691,8 +2692,8 @@ input[type='search']:focus {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 56px;
-  height: 28px;
+  width: 64px;
+  height: 32px;
   border-radius: var(--md-sys-shape-corner-full);
   transition: background-color var(--md-sys-motion-duration-medium2)
     var(--md-sys-motion-easing-emphasized);
