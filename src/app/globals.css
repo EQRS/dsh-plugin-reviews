@@ -2762,27 +2762,42 @@ input[type='search']:focus {
   .notice {
     padding: 12px 14px;
   }
-  /* 筛选 chip 行：手机上**换行**，不要横向滚动。
-     实测截图：横向滚动会把"排序:"、后台的"需要…"切在屏幕外，用户根本不知道右边还有内容；
-     换行最多两排，看得全、也不用做"隐藏可滚动"的发现成本。 */
+  /* 筛选 chip 行：手机端改成**横向滑动**（主人要求），不再折成多排把页面撑高。
+     隐藏滚动条但保留滑动；overscroll-behavior 防止滑到尽头带动整页横移。 */
   .filters {
-    flex-wrap: wrap;
-    overflow-x: visible;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+  }
+  .filters::-webkit-scrollbar {
+    display: none;
   }
   .filters > * {
     flex: 0 0 auto;
   }
-  /* 分类侧栏：手机上由纵向列表改成横向 chip 行（与首页同一套阅读动作），
-     省掉一整块竖向空间（实测这块原本占约 130px）。 */
+  /* 分类侧栏：手机上由纵向列表改成横向滑动 chip 行（与首页同一套阅读动作）。 */
   .catalog-layout aside .side-nav {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 8px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+  }
+  .catalog-layout aside .side-nav::-webkit-scrollbar {
+    display: none;
   }
   .catalog-layout aside .side-nav a {
     /* 与筛选 chip / .tag 完全同一套标准（之前这里还留着 8px 纵向内边距 → 36px 高，偏大） */
     display: inline-flex;
     align-items: center;
+    /* 不能收缩：否则 flex 会把 chip 挤扁，横向滚动就失效了 */
+    flex: 0 0 auto;
     height: var(--chip-height);
     padding: 0 var(--chip-padding-x);
     border-radius: var(--md-sys-shape-corner-small);
@@ -2790,6 +2805,7 @@ input[type='search']:focus {
     color: var(--md-sys-color-on-surface-variant);
     font-size: var(--chip-font-size);
     font-weight: 500;
+    white-space: nowrap;
   }
   .catalog-layout aside .side-nav a.active {
     background: var(--md-sys-color-secondary-container);
