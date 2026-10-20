@@ -211,8 +211,8 @@ export default async function ReviewsPage({
                                 )}
                                 {/* §22：每条显示"被测版本" */}
                                 <span>{formatVersionLabel('插件', parseVersion(r.plugin_version))}</span>
-                                <span>{r.author_nickname}</span>
-                                <span>{formatDateTimeOr(r.public_updated_at, '时间未知')}</span>
+                                <span className="review-author">{r.author_nickname}</span>
+                                <span className="review-date">{formatDateTimeOr(r.public_updated_at, '时间未知')}</span>
                               </div>
                             </div>
                           </div>

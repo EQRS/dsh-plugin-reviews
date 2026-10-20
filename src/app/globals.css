@@ -206,7 +206,7 @@
   --width-reading: 760px;
   /* M3 小型顶栏 64dp；移动端底部导航栏 56dp */
   --header-height: 64px;
-  --nav-bar-height: 56px;
+  --nav-bar-height: 80px;
   --target: 48px;
   /* M3 按钮高度 40dp（原 38 与 M3 不符，按规范取 40） */
   --control-height: 40px;
@@ -1698,16 +1698,16 @@ button:not(:disabled):active,
   }
 }
 
-/* ---------------------------------------------------------- 回到顶部（滚过一屏才出现） */
+/* ---------------------------------------------------------- 回到顶部（滚过一屏才出现）
+   按钮是**纯图标 FAB**：早期版本在 48px 方块里塞了「↑ 回到顶部」两个 span，
+   文字溢出方块、又被底部导航盖住一半，手机上只剩半个「回」字（主人截图反馈）。
+   现在文案只留在 aria-label / title，视觉上只有箭头。 */
 .back-to-top {
   position: fixed;
   z-index: 900;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-height: 36px;
-  font-size: 13px;
-  font-weight: 600;
+  justify-content: center;
   animation: fx-pop 0.22s cubic-bezier(0.2, 0.7, 0.25, 1) both;
 }
 .back-to-top:hover {
@@ -2257,10 +2257,20 @@ input[type='search']:focus {
   );
   color: var(--md-sys-color-on-primary-container);
 }
-/* FAB 里只留箭头图标（48dp 圆角方块放不下"回到顶部"四个字） */
-.back-to-top > span[aria-hidden] {
-  font-size: 20px;
-  line-height: 1;
+.back-to-top svg {
+  width: 20px;
+  height: 20px;
+}
+/* 手机上必须抬到底部导航之上：原来 bottom:20px 正好落进 56px 高的导航里，
+   z-index 又低于导航，于是只在导航上沿露出半个按钮（主人反馈"莫名其妙出现"）。 */
+@media (max-width: 900px) {
+  .back-to-top {
+    right: 16px;
+    bottom: calc(var(--nav-bar-height) + 16px + env(safe-area-inset-bottom, 0px));
+    width: 44px;
+    height: 44px;
+    border-radius: var(--md-sys-shape-corner-medium);
+  }
 }
 
 /* ------------------------------------- 阅读进度（M3 linear progress indicator） */
@@ -2636,8 +2646,9 @@ input[type='search']:focus {
  * 底部导航栏（M3 navigation bar）—— 移动端主导航
  *
  *
- * M3 规格：高 56dp（比标准 80dp 收两档，主人两次要求"下栏还是太大"）、容器色 surface-container、
- * 图标 20dp + label 10dp、选中项上方有 48×24 的指示药丸（secondary-container）。
+ * M3 标准规格：高 80dp、容器色 surface-container、图标 24dp + label 12sp、
+ * 选中项上方 64×32 的指示药丸（secondary-container）。
+ * 之前为"收小"把高度压到 56/60，图标与药丸跟着缩，反而显得畸形；这里回到规范值。
  * 桌面隐藏；手机/平板显示，并给 body 补足底部留白 + 安全区（刘海屏）。 */
 .nav-bar {
   position: fixed;
@@ -2651,24 +2662,28 @@ input[type='search']:focus {
   background: var(--md-sys-color-surface-container);
   border-top: 1px solid var(--md-sys-color-outline-variant);
 }
+/* 用 flex 而不是 grid：某些手机 WebView（以及 grid 解析失败的降级路径）会把
+   `grid-auto-flow: column` 变成普通块布局，两个 <a> 就上下堆叠 —— 底部栏只露出
+   第一个「插件」，「评测」被顶到视口下面，表现为"点插件后评测莫名消失"（主人实测）。
+   flex 在任何浏览器里都保持同一行，且两个入口等宽。 */
 .nav-bar-inner {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 1fr;
+  display: flex;
   height: var(--nav-bar-height);
   max-width: 420px;
   margin: 0 auto;
 }
 .nav-bar-item {
+  flex: 1 1 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  padding: 4px 4px 6px;
+  gap: 4px;
+  padding: 12px 4px 16px;
   color: var(--md-sys-color-on-surface-variant);
-  font-size: 10px;
-  line-height: 1.2;
+  font-size: 12px;
+  line-height: 16px;
   font-weight: 500;
   text-decoration: none;
   -webkit-tap-highlight-color: transparent;
@@ -2677,15 +2692,15 @@ input[type='search']:focus {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
-  height: 24px;
+  width: 64px;
+  height: 32px;
   border-radius: var(--md-sys-shape-corner-full);
   transition: background-color var(--md-sys-motion-duration-medium2)
     var(--md-sys-motion-easing-emphasized);
 }
 .nav-bar-indicator svg {
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
 }
 .nav-bar-item.active {
   color: var(--md-sys-color-on-surface);
@@ -2817,6 +2832,13 @@ input[type='search']:focus {
     min-height: 0;
     padding: 12px;
   }
+  /* 手机屏幕窄：插件卡不再显示"作者 / 资料更新 / 仓库更新"三行，评测条目不再显示作者与时间。
+     桌面端保留这些信息（只在 ≤900px 隐藏），数据仍在 DOM 里、不删接口字段。 */
+  .plugin-card-meta,
+  .review-author,
+  .review-date {
+    display: none;
+  }
   .item-title {
     font-size: var(--md-sys-typescale-title-small-size);
     line-height: var(--md-sys-typescale-title-small-line);
@@ -2842,6 +2864,38 @@ input[type='search']:focus {
     flex: 0 0 auto;
     white-space: nowrap;
   }
+  /* 评测列表（/reviews）在手机上按 M3 三行列表重排：
+     来源标签从"左列"改成 overline（不再把标题挤成三行），
+     标题占满整行且最多两行；底部一行两端对齐：插件名在左下、版本在右下。 */
+  .catalog-layout .item-head {
+    display: block;
+  }
+  .catalog-layout .item-head .tag {
+    display: inline-flex;
+    margin: 0 0 6px;
+  }
+  .catalog-layout .item-title {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+  .catalog-layout .item-main .list-meta {
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-top: 4px;
+    gap: 12px;
+  }
+  .catalog-layout .item-main .list-meta > *:first-child {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .catalog-layout .item-main .list-meta > *:not(:first-child) {
+    margin-left: auto;
+    text-align: right;
+  }
   /* 表格：横向滚动 + **不换行**。实测窄屏里逐格换行会把表格挤成"文字麻花"，
      不如给足宽度让它横滚（M3 数据表在窄屏也是横滚）。 */
   .panel:has(> table) {
@@ -2862,12 +2916,24 @@ input[type='search']:focus {
     grid-template-columns: minmax(0, 1fr);
     gap: 16px;
   }
-  /* 手机端底部导航更矮，折叠高度跟着收一档（真值仍由 HomeFeed 量出） */
+  /* 手机端不做折叠：首页内容直接向下滚（主人要求）——去掉高度上限、渐隐与按钮；
+     JS 就绪前也用 !important 兜底，避免先闪一下折叠态。 */
   .home-feed.is-collapsed {
-    max-height: calc(100svh - 540px);
+    max-height: none !important;
+    overflow: visible;
+  }
+  .home-feed.is-clipped {
+    -webkit-mask-image: none;
+    mask-image: none;
   }
   .home-feed-toggle {
-    margin-top: 16px;
+    display: none !important;
+  }
+  /* 懒渲染：离屏条目跳过布局与绘制（浏览器原生 content-visibility），
+     contain-intrinsic-size 记住真实高度，滚动条不会跳。 */
+  .home-feed .item-list > .item {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 120px;
   }
   .me-side {
     position: static;

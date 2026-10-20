@@ -9,6 +9,9 @@
  *
  * 内容本来就没超出一屏时不裁剪、也不渲染按钮（空状态、少量数据时保持原样）。
  * 裁剪用 CSS mask 做底部渐隐，而不是盖一层渐变条：面板背景色与竹叶底纹都能自然透出。
+ *
+ * 手机端（≤900px）**不做折叠**：主人要求"一直向下滑"，所以不设高度上限、不出「展开/收起」，
+ * 长列表交给 CSS `content-visibility` 做原生懒渲染（见 globals.css 的移动端媒体查询）。
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -16,7 +19,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 /** 与 globals.css 的移动端断点一致（底部导航只在 ≤900px 出现，折叠时要给它让位）。 */
 const MOBILE_QUERY = '(max-width: 900px)';
 /** 移动端底部导航高度，与 globals.css 的 --nav-bar-height 保持一致。 */
-const NAV_BAR_HEIGHT = 56;
+const NAV_BAR_HEIGHT = 80;
 /** 折叠区下方要给「展开全部」按钮留的高度（按钮 40 + 间距 20）。 */
 const TOGGLE_HEIGHT = 60;
 /** .site-main 的底部内边距：折叠后整页仍要放得下它，否则还会多出一条滚动。 */
@@ -27,6 +30,7 @@ const MIN_HEIGHT = 360;
 export function HomeFeed({ children }: { children: ReactNode }) {
   const feedRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
+  const [mobile, setMobile] = useState(false);
   const [cap, setCap] = useState<number | null>(null);
   const [overflows, setOverflows] = useState(false);
 
@@ -52,6 +56,14 @@ export function HomeFeed({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('resize', onResize);
   }, [measure]);
 
+  useEffect(() => {
+    const mq = window.matchMedia(MOBILE_QUERY);
+    const apply = () => setMobile(mq.matches);
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, []);
+
   const collapsible = overflows && cap !== null;
 
   const collapseAndScrollBack = () => {
@@ -62,6 +74,17 @@ export function HomeFeed({ children }: { children: ReactNode }) {
     }
     setExpanded(false);
   };
+
+  // 手机端不做折叠：直接纵向滚动（懒渲染由 CSS content-visibility 负责）。
+  if (mobile) {
+    return (
+      <div className="home-feed-wrap">
+        <div className="home-feed" id="home-feed">
+          <div className="twocol">{children}</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="home-feed-wrap">
