@@ -109,40 +109,46 @@ export default async function ReviewsPage({
   // 两种空状态分开：真的没有公开评测 vs 有评测但筛选/搜索没命中
   const emptyKind: 'none' | 'all-empty' | 'filtered-empty' = total > 0 ? 'none' : hasFilters ? 'filtered-empty' : 'all-empty';
 
+  // 搜索框放两处：桌面端在右栏评测列表上方，手机端仍在筛选栏最上面；
+  // 同一份表单，靠 CSS 断点只显示一个，避免两套输入逻辑走偏。
+  const searchForm = (className: string) => (
+    <form action="/reviews" method="get" className={`search ${className}`} style={{ marginBottom: 12 }}>
+      <input
+        type="search"
+        name="q"
+        defaultValue={conditions.q}
+        placeholder="搜标题、正文或插件名"
+        aria-label="搜索评测"
+        maxLength={100}
+      />
+      {conditions.source !== 'all' ? <input type="hidden" name="source" value={conditions.source} /> : null}
+      {conditions.cat ? <input type="hidden" name="cat" value={conditions.cat} /> : null}
+      <button type="submit" className="search-go" aria-label="搜索">
+        <svg
+          width="22"
+          height="22"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          aria-hidden="true"
+        >
+          <circle cx="11" cy="11" r="7" />
+          <line x1="16.5" y1="16.5" x2="21" y2="21" />
+        </svg>
+      </button>
+    </form>
+  );
+
   return (
     <div>
       <h1>评测</h1>
 
       <div className="catalog-layout">
         <aside className="panel" aria-label="筛选">
-          {/* 搜索框：GET 到本页，保留其它筛选条件（hidden 域） */}
-          <form action="/reviews" method="get" className="search" style={{ marginBottom: 12 }}>
-            <input
-              type="search"
-              name="q"
-              defaultValue={conditions.q}
-              placeholder="搜标题、正文或插件名"
-              aria-label="搜索评测"
-              maxLength={100}
-            />
-            {conditions.source !== 'all' ? <input type="hidden" name="source" value={conditions.source} /> : null}
-            {conditions.cat ? <input type="hidden" name="cat" value={conditions.cat} /> : null}
-            <button type="submit" className="search-go" aria-label="搜索">
-              <svg
-                width="22"
-                height="22"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                aria-hidden="true"
-              >
-                <circle cx="11" cy="11" r="7" />
-                <line x1="16.5" y1="16.5" x2="21" y2="21" />
-              </svg>
-            </button>
-          </form>
+          {/* 手机端：搜索留在筛选栏最上面（桌面端隐藏，见右栏顶部那份） */}
+          {searchForm('reviews-search-aside')}
 
           <p className="side-title">来源</p>
           <nav className="side-nav">
@@ -188,6 +194,9 @@ export default async function ReviewsPage({
 
         <section>
           <div className="panel">
+            {/* 桌面端：搜索条在评测列表上方（手机端用筛选栏里那份） */}
+            {searchForm('reviews-search-main')}
+
             <p className="muted" style={{ marginTop: 0 }}>
               共 {total} 篇公开评测
               {conditions.q ? `（搜索：${conditions.q}）` : ''}

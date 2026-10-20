@@ -62,7 +62,7 @@ function categoryHref(slug: string | null): string {
   return `/plugins?cat=${encodeURIComponent(slug)}`;
 }
 
-/** 手机端滚动加载的条数参数：只允许在默认值之上增加（防止 URL 把列表清空）。 */
+/** 滚动加载的条数参数：只允许在默认值之上增加（防止 URL 把列表清空）。 */
 function readCount(raw: string | string[] | undefined, fallback: number, max: number): number {
   const value = Number.parseInt((Array.isArray(raw) ? raw[0] : raw) ?? '', 10);
   return Number.isFinite(value) ? Math.min(Math.max(value, fallback), max) : fallback;
@@ -74,9 +74,10 @@ export default async function HomePage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const sp = await searchParams;
-  // 桌面端用默认条数（24 / 12，两栏等高）；手机端滚动时由 LoadMore 递增 rv / pv。
-  const reviewLimit = readCount(sp.rv, 24, 120);
-  const pluginLimit = readCount(sp.pv, 12, 96);
+  // 首屏只取默认条数（24 / 12）；滚动到底部附近时由 LoadMore 递增 rv / pv。
+  // 上限只是防 URL 恶意放大渲染量，必须高于实际总量，否则最后一批会被夹回去、永远加载不完。
+  const reviewLimit = readCount(sp.rv, 24, 1000);
+  const pluginLimit = readCount(sp.pv, 12, 1000);
   const { rows: reviews, total: reviewTotal } = latestPublicReviews(reviewLimit);
   const catalog = createCatalogService({ db: getDb() });
   const recentPlugins = await catalog.listPlugins({ page: 1, page_size: pluginLimit });
@@ -132,7 +133,7 @@ export default async function HomePage({
         ) : null}
       </section>
 
-      {/* 双栏内容默认只占一屏，超出部分点「展开全部」（主人要求：一页长度 + 展开）。 */}
+      {/* 双栏内容：整页一直向下滚，接近底部时自动加载下一批（桌面/手机一致）。 */}
       <HomeFeed>
         {/* 主栏：最新评测 */}
         <section className="panel" aria-labelledby="home-reviews">
@@ -177,7 +178,7 @@ export default async function HomePage({
               ))}
             </ul>
           )}
-          {/* 手机端滚到这里时再向服务端要下一批（桌面端不渲染哨兵）。 */}
+          {/* 滚到这里附近时再向服务端要下一批（桌面端同样生效）。 */}
           <LoadMore param="rv" value={reviewLimit} step={12} total={reviewTotal} />
         </section>
 

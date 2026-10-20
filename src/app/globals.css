@@ -229,7 +229,9 @@
 }
 
 html {
-  scroll-behavior: smooth;
+  /* 不要全局 smooth：Next 在路由切换时会为了"禁用平滑滚动"对页面根片段
+     scrollIntoView()，把顶栏/「返回插件页」直接滚出视口（真机复现：进入评测正文后
+     证据链变成第一个可见元素）。需要平滑的地方用 JS 的 behavior:'smooth'（回到顶部）。 */
   scrollbar-gutter: stable;
   /* 页面纵向滚动条不绘制（参照做法）；内层滚动容器在下面单独交还 */
   scrollbar-width: none;
@@ -291,7 +293,7 @@ textarea {
    上层内容（.site-main）显式抬到 z-index:1；页头/底栏本就在 1000 以上。
 
    设计约束：
-   - 竹枝极淡（7.5% 主色），只做纸面肌理，不抢正文；
+   - 只保留飘落的竹叶，不再有静态竹枝（主人要求删掉"不会动的静态图片"）；
    - 飘叶更淡（≤38%），慢（20~40 秒/片）——轻量、不喧宾；
    - 减少动效偏好（prefers-reduced-motion）时飘叶整体关闭。 */
 .bamboo-backdrop {
@@ -300,28 +302,10 @@ textarea {
   z-index: 0;
   overflow: hidden;
   pointer-events: none;
-  color: var(--md-sys-color-primary); /* 竹枝与叶片取主色（鼠尾草绿） */
+  color: var(--md-sys-color-primary); /* 叶片取主色（鼠尾草绿） */
 }
 .bamboo-backdrop svg {
   display: block;
-}
-
-/* 两角竹枝：对角呼应，只作纸面肌理 */
-.bamboo-branch {
-  position: absolute;
-  width: min(46vw, 360px);
-  height: min(46vw, 360px);
-  opacity: 0.075;
-}
-.bamboo-branch.branch-tl {
-  top: -6%;
-  left: -7%;
-  transform: rotate(6deg) scaleX(-1);
-}
-.bamboo-branch.branch-br {
-  right: -7%;
-  bottom: -6%;
-  transform: rotate(6deg);
 }
 
 /* 飘落竹叶：7 片，各走一条慢速弧线下落（起点/节奏/速度由 --i 决定） */
@@ -329,8 +313,8 @@ textarea {
   position: absolute;
   top: -10vh;
   left: calc(5% + var(--i) * 13.5%);
-  width: 20px;
-  height: 54px;
+  width: 22px;
+  height: 52px;
   opacity: 0;
   animation: bamboo-drift linear infinite;
   animation-duration: calc(20s + var(--i) * 2.8s);
@@ -341,7 +325,8 @@ textarea {
   width: 100%;
   height: 100%;
 }
-.bamboo-leaf:nth-child(odd) {
+/* 奇偶叶片左右镜像，避免 7 片看起来像同一张图复制 */
+.bamboo-leaf:nth-of-type(odd) svg {
   transform: scaleX(-1);
 }
 
@@ -369,7 +354,7 @@ textarea {
   }
 }
 
-/* 减少动效：飘叶不飞（静态装饰保留竹枝） */
+/* 减少动效：飘叶不飞（不再有静态竹枝，背景保持干净） */
 @media (prefers-reduced-motion: reduce) {
   .bamboo-leaf {
     animation: none;
@@ -641,24 +626,9 @@ p {
   align-items: stretch;
 }
 
-/* ---------------------------------------------- 首页内容折叠（一页 + 展开）
-   默认把双栏内容裁到「浏览器一页」的高度：底部渐隐，下面给一枚「展开全部」。
-   真实上限由 HomeFeed 量出后写进内联 style；这里的 max-height 只是 JS 未就绪时的回退。 */
-.home-feed.is-collapsed {
-  overflow: hidden;
-  max-height: min(720px, calc(100svh - 460px));
-}
-.home-feed.is-clipped {
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 120px), transparent);
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 120px), transparent);
-}
-.home-feed-toggle {
-  display: flex;
-  justify-content: center;
-  margin-top: 20px;
-}
-.home-feed-toggle .button {
-  gap: 6px;
+/* 首页栏目切换（仅手机端显示，具体规则见文件末尾的 ≤900px 媒体查询） */
+.home-view-switch {
+  display: none;
 }
 
 /* 阅读页专用两栏（参照 .read-layout：正文主栏 + 固定 300px 辅栏）
@@ -2161,10 +2131,9 @@ input[type='search']:focus {
 /* ------------------------------------------------- 顶栏（M3 small top app bar） */
 .site-header {
   height: var(--header-height);
-  background: var(--md-sys-color-surface);
-  /* 顶栏下的分隔线按主人要求去掉：M3 的 top app bar 本来也不画线，
-     靠"内容从下方开始"的空间关系区分，比一条横线干净。 */
-  border-bottom: none;
+  /* 顶栏透明：不铺一层 surface 底色（主人要求），让页面本身的纸色直接透上来。
+     不画分隔线，也不加 blur —— 滚动时内容从文字下方经过，保持"浮在纸上"的感觉。 */
+  background: transparent;
 }
 .brand {
   font-family: var(--font-heading);
@@ -2385,6 +2354,20 @@ input[type='search']:focus {
 }
 .search-go:hover {
   background: color-mix(in srgb, var(--md-sys-color-primary) 92%, var(--md-sys-color-on-primary));
+}
+
+/* 评测页搜索：桌面端放到右栏顶部（评测列表上方）；手机端仍留在筛选栏最上面。
+   两处共用同一套 .search 样式，用断点只显示其中一个。 */
+.search.reviews-search-main {
+  display: none;
+}
+@media (min-width: 901px) {
+  .search.reviews-search-main {
+    display: flex;
+  }
+  .search.reviews-search-aside {
+    display: none;
+  }
 }
 
 /* ------------------------------------------------------- 手机端侧边抽屉（M3）
@@ -2967,24 +2950,98 @@ input[type='search']:focus {
     grid-template-columns: minmax(0, 1fr);
     gap: 16px;
   }
-  /* 手机端不做折叠：首页内容直接向下滚（主人要求）——去掉高度上限、渐隐与按钮；
-     JS 就绪前也用 !important 兜底，避免先闪一下折叠态。 */
-  .home-feed.is-collapsed {
-    max-height: none !important;
-    overflow: visible;
-  }
-  .home-feed.is-clipped {
-    -webkit-mask-image: none;
-    mask-image: none;
-  }
-  .home-feed-toggle {
-    display: none !important;
-  }
   /* 懒渲染：离屏条目跳过布局与绘制（浏览器原生 content-visibility），
      contain-intrinsic-size 记住真实高度，滚动条不会跳。 */
   .home-feed .item-list > .item {
     content-visibility: auto;
     contain-intrinsic-size: auto 120px;
+  }
+  /* 首页栏目切换：TAG 下方居中；滑块滑动 + 栏目横向滑入。
+     桌面端不显示这一组规则（两栏同时展示，行为不变）。 */
+  .home-feed-wrap {
+    /* 滑入用的是 translateX(26px)：不裁剪的话会把文档临时撑宽 10px，
+       出现横向滚动条 → innerHeight 变化，固定底栏跟着上下跳（真机复现）。 */
+    overflow-x: clip;
+  }
+  .home-view-switch {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 232px;
+    /* 居中（主人要求）：左右 auto，不再靠右 */
+    margin: 0 auto 12px;
+    padding: 4px;
+    border-radius: var(--md-sys-shape-corner-full);
+    background: var(--md-sys-color-surface-container-high);
+    isolation: isolate;
+  }
+  .home-view-switch button {
+    position: relative;
+    z-index: 1;
+    height: 32px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: var(--md-sys-shape-corner-full);
+    background: transparent;
+    color: var(--md-sys-color-on-surface-variant);
+    font: inherit;
+    font-size: 13px;
+    line-height: 32px;
+    cursor: pointer;
+    transition: color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  }
+  .home-view-switch button[aria-pressed='true'] {
+    color: var(--md-sys-color-on-secondary-container);
+  }
+  .home-view-thumb {
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    left: 4px;
+    width: calc(50% - 4px);
+    border-radius: var(--md-sys-shape-corner-full);
+    background: var(--md-sys-color-secondary-container);
+    transition: transform var(--md-sys-motion-duration-medium2) var(--md-sys-motion-easing-emphasized);
+  }
+  .home-view-thumb.is-right {
+    transform: translateX(100%);
+  }
+
+  /* 只显示当前栏目；隐藏的栏目 display:none，里面的懒加载哨兵也不会继续触发 */
+  .twocol[data-view='plugins'] > section {
+    display: none;
+  }
+  .twocol[data-view='reviews'] > aside {
+    display: none;
+  }
+  /* 第一次点击后才播放入场动画，首屏不闪 */
+  .twocol[data-touched='true'][data-view='plugins'] > aside {
+    animation: home-panel-in-right var(--md-sys-motion-duration-medium2)
+      var(--md-sys-motion-easing-emphasized);
+  }
+  .twocol[data-touched='true'][data-view='reviews'] > section {
+    animation: home-panel-in-left var(--md-sys-motion-duration-medium2)
+      var(--md-sys-motion-easing-emphasized);
+  }
+  @keyframes home-panel-in-right {
+    from {
+      opacity: 0;
+      transform: translateX(26px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+  @keyframes home-panel-in-left {
+    from {
+      opacity: 0;
+      transform: translateX(-26px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
   }
   /* 个人中心在手机上不再重复摆一份栏目面板：站点抽屉里已经有同一组入口
      （主人要求：个人设置 / 通知 / 我的评测都不要再出现这块「我的」）。 */
