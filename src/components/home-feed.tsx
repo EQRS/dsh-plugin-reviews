@@ -16,7 +16,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 /** 与 globals.css 的移动端断点一致（底部导航只在 ≤900px 出现，折叠时要给它让位）。 */
 const MOBILE_QUERY = '(max-width: 900px)';
 /** 移动端底部导航高度，与 globals.css 的 --nav-bar-height 保持一致。 */
-const NAV_BAR_HEIGHT = 56;
+const NAV_BAR_HEIGHT = 60;
 /** 折叠区下方要给「展开全部」按钮留的高度（按钮 40 + 间距 20）。 */
 const TOGGLE_HEIGHT = 60;
 /** .site-main 的底部内边距：折叠后整页仍要放得下它，否则还会多出一条滚动。 */

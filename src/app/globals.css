@@ -206,7 +206,7 @@
   --width-reading: 760px;
   /* M3 小型顶栏 64dp；移动端底部导航栏 56dp */
   --header-height: 64px;
-  --nav-bar-height: 56px;
+  --nav-bar-height: 60px;
   --target: 48px;
   /* M3 按钮高度 40dp（原 38 与 M3 不符，按规范取 40） */
   --control-height: 40px;
@@ -1698,16 +1698,16 @@ button:not(:disabled):active,
   }
 }
 
-/* ---------------------------------------------------------- 回到顶部（滚过一屏才出现） */
+/* ---------------------------------------------------------- 回到顶部（滚过一屏才出现）
+   按钮是**纯图标 FAB**：早期版本在 48px 方块里塞了「↑ 回到顶部」两个 span，
+   文字溢出方块、又被底部导航盖住一半，手机上只剩半个「回」字（主人截图反馈）。
+   现在文案只留在 aria-label / title，视觉上只有箭头。 */
 .back-to-top {
   position: fixed;
   z-index: 900;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-height: 36px;
-  font-size: 13px;
-  font-weight: 600;
+  justify-content: center;
   animation: fx-pop 0.22s cubic-bezier(0.2, 0.7, 0.25, 1) both;
 }
 .back-to-top:hover {
@@ -2257,10 +2257,20 @@ input[type='search']:focus {
   );
   color: var(--md-sys-color-on-primary-container);
 }
-/* FAB 里只留箭头图标（48dp 圆角方块放不下"回到顶部"四个字） */
-.back-to-top > span[aria-hidden] {
-  font-size: 20px;
-  line-height: 1;
+.back-to-top svg {
+  width: 20px;
+  height: 20px;
+}
+/* 手机上必须抬到底部导航之上：原来 bottom:20px 正好落进 56px 高的导航里，
+   z-index 又低于导航，于是只在导航上沿露出半个按钮（主人反馈"莫名其妙出现"）。 */
+@media (max-width: 900px) {
+  .back-to-top {
+    right: 16px;
+    bottom: calc(var(--nav-bar-height) + 16px + env(safe-area-inset-bottom, 0px));
+    width: 44px;
+    height: 44px;
+    border-radius: var(--md-sys-shape-corner-medium);
+  }
 }
 
 /* ------------------------------------- 阅读进度（M3 linear progress indicator） */
@@ -2636,8 +2646,8 @@ input[type='search']:focus {
  * 底部导航栏（M3 navigation bar）—— 移动端主导航
  *
  *
- * M3 规格：高 56dp（比标准 80dp 收两档，主人两次要求"下栏还是太大"）、容器色 surface-container、
- * 图标 20dp + label 10dp、选中项上方有 48×24 的指示药丸（secondary-container）。
+ * M3 规格：高 60dp（介于标准 80dp 与你要求的紧凑版之间）、容器色 surface-container、
+ * 图标 24dp + label 12dp（都是 MD3 规范尺寸）、选中项上方 56×28 的指示药丸（secondary-container）。
  * 桌面隐藏；手机/平板显示，并给 body 补足底部留白 + 安全区（刘海屏）。 */
 .nav-bar {
   position: fixed;
@@ -2651,23 +2661,27 @@ input[type='search']:focus {
   background: var(--md-sys-color-surface-container);
   border-top: 1px solid var(--md-sys-color-outline-variant);
 }
+/* 用 flex 而不是 grid：某些手机 WebView（以及 grid 解析失败的降级路径）会把
+   `grid-auto-flow: column` 变成普通块布局，两个 <a> 就上下堆叠 —— 底部栏只露出
+   第一个「插件」，「评测」被顶到视口下面，表现为"点插件后评测莫名消失"（主人实测）。
+   flex 在任何浏览器里都保持同一行，且两个入口等宽。 */
 .nav-bar-inner {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 1fr;
+  display: flex;
   height: var(--nav-bar-height);
   max-width: 420px;
   margin: 0 auto;
 }
 .nav-bar-item {
+  flex: 1 1 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 2px;
-  padding: 4px 4px 6px;
+  padding: 6px 4px 8px;
   color: var(--md-sys-color-on-surface-variant);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.2;
   font-weight: 500;
   text-decoration: none;
@@ -2677,15 +2691,15 @@ input[type='search']:focus {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
-  height: 24px;
+  width: 56px;
+  height: 28px;
   border-radius: var(--md-sys-shape-corner-full);
   transition: background-color var(--md-sys-motion-duration-medium2)
     var(--md-sys-motion-easing-emphasized);
 }
 .nav-bar-indicator svg {
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
 }
 .nav-bar-item.active {
   color: var(--md-sys-color-on-surface);
