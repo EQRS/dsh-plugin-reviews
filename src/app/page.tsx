@@ -10,6 +10,7 @@
 
 import Link from 'next/link';
 import { HomeFeed } from '@/components/home-feed';
+import { LoadMore } from '@/components/load-more';
 import { getDb } from '@/server/platform/db';
 import { resolveVisibilityInTx } from '@/server/modules/content';
 import { createCatalogService } from '@/server/modules/catalog';
@@ -28,7 +29,7 @@ interface Row {
   repo_full_name: string | null;
 }
 
-function latestPublicReviews(limit: number): Row[] {
+function latestPublicReviews(limit: number): { rows: Row[]; total: number } {
   const db = getDb();
   const rows = db
     .prepare(
@@ -43,7 +44,8 @@ function latestPublicReviews(limit: number): Row[] {
     )
     .all() as Row[];
   // 公开资格逐行核验，不另存公开状态字段。
-  return rows.filter((row) => resolveVisibilityInTx(db, row.review_id).publiclyVisible).slice(0, limit);
+  const visible = rows.filter((row) => resolveVisibilityInTx(db, row.review_id).publiclyVisible);
+  return { rows: visible.slice(0, limit), total: visible.length };
 }
 
 /** 评测对应的插件展示名：清单名优先（缺则仓库全名），子目录形态带上子路径；插件被删也不会崩（LEFT JOIN）。 */
@@ -60,12 +62,24 @@ function categoryHref(slug: string | null): string {
   return `/plugins?cat=${encodeURIComponent(slug)}`;
 }
 
-export default async function HomePage() {
-  // 主栏要跟右栏（12 个插件）一样长：评测行比插件行矮，约 2:1，
-  // 取 24 条让两栏底部大致齐平；两栏等高的兜底在 .twocol 的 align-items: stretch。
-  const reviews = latestPublicReviews(24);
+/** 手机端滚动加载的条数参数：只允许在默认值之上增加（防止 URL 把列表清空）。 */
+function readCount(raw: string | string[] | undefined, fallback: number, max: number): number {
+  const value = Number.parseInt((Array.isArray(raw) ? raw[0] : raw) ?? '', 10);
+  return Number.isFinite(value) ? Math.min(Math.max(value, fallback), max) : fallback;
+}
+
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = await searchParams;
+  // 桌面端用默认条数（24 / 12，两栏等高）；手机端滚动时由 LoadMore 递增 rv / pv。
+  const reviewLimit = readCount(sp.rv, 24, 120);
+  const pluginLimit = readCount(sp.pv, 12, 96);
+  const { rows: reviews, total: reviewTotal } = latestPublicReviews(reviewLimit);
   const catalog = createCatalogService({ db: getDb() });
-  const recentPlugins = await catalog.listPlugins({ page: 1, page_size: 12 });
+  const recentPlugins = await catalog.listPlugins({ page: 1, page_size: pluginLimit });
   // 页面 chip 行用**分类**（中文、按不同仓库计数），不再直接暴露原始 topics
   const categories = await catalog.listCategories();
 
@@ -163,6 +177,8 @@ export default async function HomePage() {
               ))}
             </ul>
           )}
+          {/* 手机端滚到这里时再向服务端要下一批（桌面端不渲染哨兵）。 */}
+          <LoadMore param="rv" value={reviewLimit} step={12} total={reviewTotal} />
         </section>
 
         {/* 辅栏：近期更新插件 */}
@@ -185,7 +201,7 @@ export default async function HomePage() {
                       <span className="icon">
                         {p.ownerAvatarUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element
-                          <img src={p.ownerAvatarUrl} alt="" width={42} height={42} />
+                          <img src={p.ownerAvatarUrl} alt="" width={42} height={42} loading="lazy" decoding="async" />
                         ) : (
                           initial
                         )}
@@ -216,6 +232,7 @@ export default async function HomePage() {
               ) : null}
             </>
           )}
+          <LoadMore param="pv" value={pluginLimit} step={6} total={recentPlugins.total} />
         </aside>
       </HomeFeed>
     </div>

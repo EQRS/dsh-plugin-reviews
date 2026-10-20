@@ -2832,6 +2832,13 @@ input[type='search']:focus {
     min-height: 0;
     padding: 12px;
   }
+  /* 手机屏幕窄：插件卡不再显示"作者 / 资料更新 / 仓库更新"三行，评测条目不再显示作者与时间。
+     桌面端保留这些信息（只在 ≤900px 隐藏），数据仍在 DOM 里、不删接口字段。 */
+  .plugin-card-meta,
+  .review-author,
+  .review-date {
+    display: none;
+  }
   .item-title {
     font-size: var(--md-sys-typescale-title-small-size);
     line-height: var(--md-sys-typescale-title-small-line);
@@ -2857,6 +2864,38 @@ input[type='search']:focus {
     flex: 0 0 auto;
     white-space: nowrap;
   }
+  /* 评测列表（/reviews）在手机上按 M3 三行列表重排：
+     来源标签从"左列"改成 overline（不再把标题挤成三行），
+     标题占满整行且最多两行；底部一行两端对齐：插件名在左下、版本在右下。 */
+  .catalog-layout .item-head {
+    display: block;
+  }
+  .catalog-layout .item-head .tag {
+    display: inline-flex;
+    margin: 0 0 6px;
+  }
+  .catalog-layout .item-title {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+  .catalog-layout .item-main .list-meta {
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-top: 4px;
+    gap: 12px;
+  }
+  .catalog-layout .item-main .list-meta > *:first-child {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .catalog-layout .item-main .list-meta > *:not(:first-child) {
+    margin-left: auto;
+    text-align: right;
+  }
   /* 表格：横向滚动 + **不换行**。实测窄屏里逐格换行会把表格挤成"文字麻花"，
      不如给足宽度让它横滚（M3 数据表在窄屏也是横滚）。 */
   .panel:has(> table) {
@@ -2877,12 +2916,24 @@ input[type='search']:focus {
     grid-template-columns: minmax(0, 1fr);
     gap: 16px;
   }
-  /* 手机端底部导航更矮，折叠高度跟着收一档（真值仍由 HomeFeed 量出） */
+  /* 手机端不做折叠：首页内容直接向下滚（主人要求）——去掉高度上限、渐隐与按钮；
+     JS 就绪前也用 !important 兜底，避免先闪一下折叠态。 */
   .home-feed.is-collapsed {
-    max-height: calc(100svh - 540px);
+    max-height: none !important;
+    overflow: visible;
+  }
+  .home-feed.is-clipped {
+    -webkit-mask-image: none;
+    mask-image: none;
   }
   .home-feed-toggle {
-    margin-top: 16px;
+    display: none !important;
+  }
+  /* 懒渲染：离屏条目跳过布局与绘制（浏览器原生 content-visibility），
+     contain-intrinsic-size 记住真实高度，滚动条不会跳。 */
+  .home-feed .item-list > .item {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 120px;
   }
   .me-side {
     position: static;

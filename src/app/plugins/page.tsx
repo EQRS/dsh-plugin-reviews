@@ -79,7 +79,7 @@ function PluginCard({ plugin }: { plugin: PluginSummary }) {
       <span className="icon">
         {plugin.ownerAvatarUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={plugin.ownerAvatarUrl} alt="" width={42} height={42} />
+          <img src={plugin.ownerAvatarUrl} alt="" width={42} height={42} loading="lazy" decoding="async" />
         ) : (
           initial
         )}
@@ -112,7 +112,7 @@ function PluginCard({ plugin }: { plugin: PluginSummary }) {
           {plugin.availabilityState !== 'available' ? <Chip text="仓库暂不可访问" tone="warn" /> : null}
         </div>
 
-        <div className="list-meta" style={{ marginTop: 6 }}>
+        <div className="list-meta plugin-card-meta" style={{ marginTop: 6 }}>
           <span>作者 {plugin.authorLogin ?? plugin.ownerLogin ?? '未知'}</span>
           <span>资料更新 {formatDateTimeOr(plugin.infoUpdatedAt ?? plugin.updatedAt, '未知')}</span>
           <span>仓库更新 {formatDateTimeOr(plugin.repoUpdatedAt, '未知')}</span>
