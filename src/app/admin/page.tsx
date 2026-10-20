@@ -18,6 +18,7 @@ import { AdminDiscoveryPanel } from '@/components/admin-discovery-panel';
 import { AdminBackupPanel } from '@/components/admin-backup-panel';
 import { AdminCategoryPanel } from '@/components/admin-category-panel';
 import { AdminReportPanel } from '@/components/admin-report-panel';
+import { AdminCorrectionPanel } from '@/components/admin-correction-panel';
 import { AdminUserPanel } from '@/components/admin-user-panel';
 import { buildHealthReport } from '@/server/platform/health';
 import { submissionStateLabels } from '@/packages/common/status-text';
@@ -239,6 +240,7 @@ export default async function AdminPage({
       <AdminDiscoveryPanel />
       <AdminSettingsForm />
       <AdminReportPanel />
+      <AdminCorrectionPanel />
       <AdminCategoryPanel />
       <AdminBackupPanel />
       <AdminUserPanel />

@@ -73,6 +73,16 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     unit: '次/时/用户',
   },
   {
+    key: 'rate_limits.corrections_per_hour',
+    label: '资料纠错提交上限',
+    description: '每个用户每小时最多提交多少次插件资料纠错（idea.md §2 / §23）。',
+    kind: 'integer',
+    defaultValue: 10,
+    min: 1,
+    max: 200,
+    unit: '次/时/用户',
+  },
+  {
     key: 'discovery.max_plugins_per_run',
     label: '自动发现每轮收录上限',
     description:

@@ -23,6 +23,7 @@
 import type { SqliteDatabase } from '@/server/platform/db';
 import { getDb } from '@/server/platform/db';
 import { isAdmin, type CallerContext } from '@/server/platform/context';
+import { overridesFor } from '@/server/modules/corrections';
 import { withRead, withTransaction } from '@/server/platform/tx';
 import { digest } from '@/server/platform/digest';
 import { newId } from '@/server/platform/id';
@@ -389,22 +390,21 @@ async function runAccept(params: {
             created = false;
             // 命中既有条目 = 一次"资料刷新"：展示字段一起更新，并推进 info_updated_at
             // （页面上的"资料更新时间"以它为准，而不是每次随便 touch 的 updated_at）。
-            tx.db
-              .prepare(
-                `UPDATE plugins
-                    SET updated_at = ?, display_name = ?, description = ?, author_login = ?,
-                        manifest_version = ?, info_updated_at = ?
-                  WHERE id = ?`,
-              )
-              .run(
-                now,
-                manifest.name,
-                manifest.description,
-                manifest.author,
-                manifest.version,
-                now,
-                pluginId,
-              );
+            // ⚠️ 管理员修正过的字段**不写**（迁移 0015）：同步值只写没被覆盖的列，
+            // 否则下一次刷新会把修正冲掉，而 override 表里的"谁改的、为什么"还留着 —— 数据与记录就对不上。
+            const ov = overridesFor(tx.db, [pluginId]).get(pluginId) ?? {};
+            const setClauses = ['updated_at = ?', 'author_login = ?', 'manifest_version = ?', 'info_updated_at = ?'];
+            const setArgs: unknown[] = [now, manifest.author, manifest.version, now];
+            if (ov.display_name === undefined) {
+              setClauses.push('display_name = ?');
+              setArgs.push(manifest.name);
+            }
+            if (ov.description === undefined) {
+              setClauses.push('description = ?');
+              setArgs.push(manifest.description);
+            }
+            setArgs.push(pluginId);
+            tx.db.prepare(`UPDATE plugins SET ${setClauses.join(', ')} WHERE id = ?`).run(...setArgs);
           } else {
             pluginId = newId(now);
             created = true;
@@ -631,13 +631,15 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
             }
           | undefined;
         if (!row) return null;
+        // 管理员修正过的字段优先于同步值（迁移 0015）
+        const ov = overridesFor(conn, [row.plugin_id]).get(row.plugin_id) ?? {};
         return {
           pluginId: row.plugin_id,
           pluginPath: row.plugin_path,
           createdAt: row.plugin_created_at,
           updatedAt: row.plugin_updated_at,
-          displayName: row.display_name,
-          description: row.plugin_description ?? row.repo_description,
+          displayName: ov.display_name ?? row.display_name,
+          description: ov.description ?? row.plugin_description ?? row.repo_description,
           authorLogin: row.author_login,
           manifestVersion: row.manifest_version,
           infoUpdatedAt: row.info_updated_at,
@@ -730,16 +732,20 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
           conn,
           [...new Set(rows.map((r) => r.repository_id))],
         );
-        const items: PluginSummary[] = rows.map((r) => ({
+        // 管理员修正过的字段优先于同步值（迁移 0015）
+        const overrides = overridesFor(conn, rows.map((r) => r.plugin_id));
+        const items: PluginSummary[] = rows.map((r) => {
+          const ov = overrides.get(r.plugin_id) ?? {};
+          return {
           pluginId: r.plugin_id,
           pluginPath: r.plugin_path,
           repositoryFullName: r.full_name,
           repositoryHtmlUrl: r.html_url,
           isArchived: r.is_archived === 1,
           updatedAt: r.updated_at,
-          displayName: r.display_name,
-          // 插件清单的简介优先；没有才回退仓库简介（**不拼接、不编**）。
-          description: r.plugin_description ?? r.repo_description,
+          displayName: ov.display_name ?? r.display_name,
+          // 插件清单的简介优先；没有才回退仓库简介（**不拼接、不编**）；管理员修正最优先。
+          description: ov.description ?? r.plugin_description ?? r.repo_description,
           ownerLogin: r.owner_login,
           ownerAvatarUrl: r.owner_avatar_url,
           topics: parseTopics(r.topics),
@@ -750,7 +756,8 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
           repoUpdatedAt: r.repo_updated_at,
           publicReviewCount: Number(r.public_review_count ?? 0),
           availabilityState: r.availability_state,
-        }));
+          };
+        });
 
         return buildPage(items, total.c, req);
       }, db);

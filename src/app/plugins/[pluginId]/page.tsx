@@ -14,6 +14,7 @@ import { currentContext } from '@/app/api/_lib/context';
 import { BackLink } from '@/components/back-link';
 import { StartDraftButton } from '@/components/start-draft-button';
 import { FavoriteButton } from '@/components/favorite-button';
+import { CorrectionForm } from '@/components/correction-form';
 import { createInteractionsService } from '@/server/modules/interactions';
 import { repositoryAvailabilityLabels } from '@/packages/common/status-text';
 import { formatDateTimeOr } from '@/packages/common/time';
@@ -82,6 +83,13 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ p
             <FavoriteButton
               pluginId={plugin.pluginId}
               initialFavorited={favorited}
+              authenticated={ctx.userId !== null}
+            />
+            {/* §2：资料反馈（展示名/简介；分类是仓库级，不在这里改） */}
+            <CorrectionForm
+              pluginId={plugin.pluginId}
+              currentName={plugin.displayName}
+              currentDescription={plugin.description}
               authenticated={ctx.userId !== null}
             />
           </div>

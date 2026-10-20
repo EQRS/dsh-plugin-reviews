@@ -24,7 +24,8 @@ export interface NotificationView {
   kind: NotificationKind;
   /** 评论类通知才有；处理结果通知为 null。 */
   commentId: string | null;
-  contentEntityId: string;
+  /** 内容锚点：评论类必填；处理结果（如资料纠错）可能为空。 */
+  contentEntityId: string | null;
   /** 触发者展示信息（头像缺失时为 null，页面据此回退到文字）。 */
   actorNickname: string;
   actorAvatarUrl: string | null;
@@ -128,7 +129,8 @@ export function deliverModerationResultNotification(
   input: {
     recipientId: string;
     actorId: string;
-    contentEntityId: string;
+    /** 可以为空：资料纠错没有对应的内容实体（迁移 0016 放开）。 */
+    contentEntityId: string | null;
     detail: string;
     deduplicationKey: string;
     now: number;
