@@ -19,7 +19,8 @@
     "admin:grant": "node scripts/grant-admin.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check:wording": "node scripts/check-wording.mjs"
   },
   "dependencies": {
     "better-sqlite3": "13.0.3",
