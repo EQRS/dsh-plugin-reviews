@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { BackLink } from './back-link';
+import { DeleteDraftButton } from './delete-draft-button';
 import {
   ApiError,
   ErrorNotice,
@@ -606,9 +607,10 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
           <button type="button" onClick={() => void onSubmit()} disabled={busy} className="button">
             提交审核
           </button>
-          <button type="button" onClick={() => void load()} disabled={busy} className="link-btn">
-            放弃改动并重新载入
-          </button>
+          {/* 删除草稿放最右：与保存/提交拉开距离，避免误点；语义是删除，不再是"放弃改动"。 */}
+          <span style={{ marginLeft: 'auto' }}>
+            <DeleteDraftButton draftId={draftId} redirectTo="/me" />
+          </span>
         </div>
         <p className="muted" style={{ fontSize: 13 }}>
           「提交审核」会先保存、再生成不可变快照并进入待检查状态；提交后的正文不能在草稿里改写。

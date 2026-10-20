@@ -575,3 +575,39 @@ describe('getDraft / getReview：读取真实落库值', () => {
     expect(after.publishedRevision?.revisionId).toBe(rev);
   });
 });
+
+describe('删除草稿', () => {
+  it('本人删除：草稿、保存回执、以及创建时的空壳评测/实体一并清掉；别人不能删', async () => {
+    const { db } = setup();
+    const author = insertUser(db);
+    const created = await reviewsService.createOrGetDraft(
+      caller(author),
+      { pluginId: null, requestKey: 'delete-draft-1' },
+      db,
+    );
+    await reviewsService.saveDraft(
+      caller(author),
+      { draftId: created.draftId, expectedVersion: 0, requestKey: 'delete-save-1', payload: payload() },
+      db,
+    );
+
+    const count = (sql: string, id: string) => (db.prepare(sql).get(id) as { c: number }).c;
+    expect(count('SELECT count(*) AS c FROM content_drafts WHERE id = ?', created.draftId)).toBe(1);
+    expect(count('SELECT count(*) AS c FROM draft_save_receipts WHERE draft_id = ?', created.draftId)).toBe(1);
+
+    await reviewsService.deleteDraft(caller(author), created.draftId, db);
+
+    expect(count('SELECT count(*) AS c FROM content_drafts WHERE id = ?', created.draftId)).toBe(0);
+    expect(count('SELECT count(*) AS c FROM draft_save_receipts WHERE draft_id = ?', created.draftId)).toBe(0);
+    expect(count('SELECT count(*) AS c FROM reviews WHERE id = ?', created.reviewId)).toBe(0);
+    expect(count('SELECT count(*) AS c FROM content_entities WHERE id = ?', created.reviewId)).toBe(0);
+
+    const other = await reviewsService.createOrGetDraft(
+      caller(author),
+      { pluginId: null, requestKey: 'delete-draft-2' },
+      db,
+    );
+    await expectCode(reviewsService.deleteDraft(caller(insertUser(db)), other.draftId, db), ErrorCodes.FORBIDDEN);
+    expect(count('SELECT count(*) AS c FROM content_drafts WHERE id = ?', other.draftId)).toBe(1);
+  });
+});

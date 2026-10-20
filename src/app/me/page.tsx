@@ -25,6 +25,7 @@ import Link from 'next/link';
 import { getDb } from '@/server/platform/db';
 import { currentContext } from '../api/_lib/context';
 import { MeNav } from '@/components/me-nav';
+import { DeleteDraftButton } from '@/components/delete-draft-button';
 import { submissionStateLabels } from '@/packages/common/status-text';
 import type { SubmissionState } from '@/packages/common/field-rules';
 import { formatDateTime } from '@/packages/common/time';
@@ -140,6 +141,9 @@ export default async function MePage() {
                         <span>保存版本 {d.save_version}</span>
                         <span>最近保存 {formatDateTime(d.saved_at)}</span>
                         <code>{d.draft_id}</code>
+                        <span style={{ marginLeft: 'auto' }}>
+                          <DeleteDraftButton draftId={d.draft_id} />
+                        </span>
                       </div>
                     </div>
                   </li>

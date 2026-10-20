@@ -147,3 +147,18 @@ export async function GET(request: Request): Promise<Response> {
     return errorResponse(e, requestId);
   }
 }
+
+/** 删除本人草稿（已提交过的草稿会被服务端拒绝）。 */
+export async function DELETE(request: Request): Promise<Response> {
+  const { requestId } = requestMeta(request);
+  try {
+    const url = new URL(request.url);
+    const draftId = url.searchParams.get('draftId');
+    if (!draftId) throw err.input('缺少 draftId。', [{ path: 'draftId', message: '必填' }]);
+    const ctx = await currentContext();
+    await reviewsService.deleteDraft(ctx, draftId, getDb());
+    return okJson({ deleted: true }, requestId);
+  } catch (e) {
+    return errorResponse(e, requestId);
+  }
+}
