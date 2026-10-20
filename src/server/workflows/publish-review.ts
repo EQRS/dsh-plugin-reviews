@@ -12,6 +12,7 @@ import { nowMs } from '@/server/platform/time';
 import type { SqliteDatabase } from '@/server/platform/db';
 import { getDb } from '@/server/platform/db';
 import { err } from '@/packages/common/errors';
+import { reindexReviewInTx } from '@/server/modules/search';
 import type { SubmissionState } from '@/packages/common/field-rules';
 
 export interface PublishOutcome {
@@ -134,6 +135,11 @@ export function publishReview(
     handle
       .prepare(`UPDATE content_submissions SET processing_state = 'published', state_version = state_version + 1, updated_at = ? WHERE id = ?`)
       .run(now, submissionId);
+
+    // 全文检索索引与"公开修订指针"在**同一个事务**里更新（迁移 0014）：
+    // 少一边就会出现"搜得到但打不开"或"发布了却搜不到"。撤回/隐藏不删索引 ——
+    // 检索层会逐行调 resolveVisibilityInTx，旧索引行不会泄露已下线的内容。
+    reindexReviewInTx(handle, review.id);
 
     return {
       published: true,

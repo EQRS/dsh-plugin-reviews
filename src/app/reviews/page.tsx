@@ -1,62 +1,76 @@
 /**
- * 全站评测列表：只列当前公开文章。
+ * 全站评测列表（`idea.md §22`）：关键词搜索 + 来源筛选 + 用途分类筛选 + 分页。
  *
- *  - 来源筛选：全部／站点／社区（数据在 `reviews.source_kind`）；
- *  - 真实总数 + 分页；
- *  - 条目显示标题、来源、关联插件、作者、时间。
+ * 检索走 `modules/search`（混合检索，原因见迁移 0014）：
+ *   * ≥3 字符 → FTS5 trigram + bm25 相关度；
+ *   * 1–2 字符 → LIKE 子串回退（中文两字词太常见）。
  *
- * 两条纪律：条件留在 URL；两种空状态文案必须不同（列表真的为空 vs 筛选没匹配到）。
+ * 两条纪律保持不变：
+ *  1. **条件留在 URL**（可分享、可返回）；
+ *  2. **两种空状态文案必须不同**（列表真的为空 vs 筛选没匹配到）。
  */
 
 import Link from 'next/link';
 import { getDb } from '@/server/platform/db';
-import { resolveVisibilityInTx } from '@/server/modules/content';
+import { createSearchService, type SearchSource, type ReviewSearchRow } from '@/server/modules/search';
+import { createCatalogService, UNCATEGORIZED_CATEGORY } from '@/server/modules/catalog';
+import { formatVersionLabel } from '@/packages/common/status-text';
+import type { VersionValue } from '@/packages/common/field-rules';
 import { formatDateTimeOr } from '@/packages/common/time';
-
-export const dynamic = 'force-dynamic';
 
 const PAGE_SIZE = 20;
 
-type SourceFilter = 'all' | 'site' | 'community';
-
-interface Row {
-  review_id: string;
-  title: string;
-  source_kind: 'community' | 'site';
-  public_updated_at: number | null;
-  author_nickname: string;
-  plugin_display_name: string | null;
-  plugin_path: string | null;
-  repo_full_name: string | null;
-  plugin_id: string | null;
+interface Conditions {
+  q: string;
+  source: SearchSource;
+  cat: string;
+  page: number;
 }
 
-function readConditions(sp: Record<string, string | string[] | undefined>): {
-  source: SourceFilter;
-  page: number;
-} {
-  const raw = Array.isArray(sp.source) ? sp.source[0] : sp.source;
-  const rawPage = Number.parseInt((Array.isArray(sp.page) ? sp.page[0] : sp.page) ?? '1', 10);
+function firstValue(v: string | string[] | undefined): string | undefined {
+  return Array.isArray(v) ? v[0] : v;
+}
+
+function readConditions(sp: Record<string, string | string[] | undefined>): Conditions {
+  const rawSource = firstValue(sp.source);
+  const rawPage = Number.parseInt(firstValue(sp.page) ?? '1', 10);
   return {
-    source: raw === 'site' || raw === 'community' ? raw : 'all',
+    // 关键词截断到 100 字：搜索框不是注入口
+    q: (firstValue(sp.q) ?? '').trim().slice(0, 100),
+    source: rawSource === 'site' || rawSource === 'community' ? rawSource : 'all',
+    cat: (firstValue(sp.cat) ?? '').trim().slice(0, 40),
     page: Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1,
   };
 }
 
+/** 生成链接：只带"非默认"条件，改条件回第一页。 */
+function listHref(current: Conditions, over: Partial<Conditions> = {}): string {
+  const merged = { ...current, page: 1, ...over };
+  const params = new URLSearchParams();
+  if (merged.q) params.set('q', merged.q);
+  if (merged.source !== 'all') params.set('source', merged.source);
+  if (merged.cat) params.set('cat', merged.cat);
+  if (over.page !== undefined && over.page > 1) params.set('page', String(over.page));
+  const qs = params.toString();
+  return qs.length > 0 ? `/reviews?${qs}` : '/reviews';
+}
+
 /** 与首页同一口径：清单名优先，缺则仓库全名；子目录形态带上子路径。 */
-function pluginLabel(row: Row): string | null {
+function pluginLabel(row: ReviewSearchRow): string | null {
   if (row.repo_full_name === null) return null;
   const base = row.plugin_display_name ?? row.repo_full_name;
   const subPath = row.plugin_path && row.plugin_path !== '.' ? ` / ${row.plugin_path}` : '';
   return `${base}${subPath}`;
 }
 
-function listHref(source: SourceFilter, page = 1): string {
-  const params = new URLSearchParams();
-  if (source !== 'all') params.set('source', source);
-  if (page > 1) params.set('page', String(page));
-  const qs = params.toString();
-  return qs.length > 0 ? `/reviews?${qs}` : '/reviews';
+/** 版本字段是 JSON 文本；坏数据按"未知"处理，绝不抛错（详情页用同一套 formatVersionLabel）。 */
+function parseVersion(raw: string): VersionValue {
+  try {
+    const parsed = JSON.parse(raw) as VersionValue;
+    return parsed && typeof parsed === 'object' ? parsed : { kind: 'unknown' };
+  } catch {
+    return { kind: 'unknown' };
+  }
 }
 
 export default async function ReviewsPage({
@@ -67,63 +81,95 @@ export default async function ReviewsPage({
   const conditions = readConditions(await searchParams);
   const db = getDb();
 
-  const rows = db
-    .prepare(
-      `SELECT r.id AS review_id, rev.title, r.source_kind, ce.public_updated_at,
-              u.nickname AS author_nickname,
-              r.plugin_id, p.display_name AS plugin_display_name, p.plugin_path,
-              repo.full_name AS repo_full_name
-         FROM reviews r
-         JOIN content_entities ce ON ce.id = r.id
-         JOIN users u ON u.id = ce.author_id
-         JOIN review_revisions rev ON rev.id = r.published_revision_id
-         LEFT JOIN plugins p ON p.id = r.plugin_id
-         LEFT JOIN repositories repo ON repo.id = p.repository_id
-        ORDER BY ce.public_updated_at DESC, r.id ASC`,
-    )
-    .all() as Row[];
+  const search = createSearchService({ db });
+  const result = await search.searchReviews({
+    q: conditions.q || undefined,
+    source: conditions.source,
+    category: conditions.cat || undefined,
+    page: conditions.page,
+    page_size: PAGE_SIZE,
+  });
 
-  // 公开资格逐行核验（与首页、插件目录同一判据）。
-  const visible = rows.filter((row) => resolveVisibilityInTx(db, row.review_id).publiclyVisible);
-  const filtered =
-    conditions.source === 'all' ? visible : visible.filter((row) => row.source_kind === conditions.source);
+  const categories = await createCatalogService({ db }).listCategories();
+  const total = result.total;
+  const page = result.page;
+  const totalPages = result.total_pages;
+  const items = result.items;
+  const hasFilters = conditions.q !== '' || conditions.cat !== '' || conditions.source !== 'all';
 
-  const total = filtered.length;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const page = Math.min(conditions.page, totalPages);
-  const items = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-
-  // 两种空状态分开：列表整体为空 vs 只是这个来源没有。
-  const emptyKind: 'none' | 'all-empty' | 'filtered-empty' =
-    total > 0 ? 'none' : visible.length === 0 ? 'all-empty' : 'filtered-empty';
+  // 两种空状态分开：真的没有公开评测 vs 有评测但筛选/搜索没命中
+  const emptyKind: 'none' | 'all-empty' | 'filtered-empty' = total > 0 ? 'none' : hasFilters ? 'filtered-empty' : 'all-empty';
 
   return (
     <div>
       <h1>评测</h1>
 
-      {/* 与插件目录同一套版式：左侧筛选栏 + 右侧结果与分页 */}
       <div className="catalog-layout">
-        <aside className="panel" aria-label="来源筛选">
+        <aside className="panel" aria-label="筛选">
+          {/* 搜索框：GET 到本页，保留其它筛选条件（hidden 域） */}
+          <form action="/reviews" method="get" className="search" style={{ marginBottom: 12 }}>
+            <input
+              type="search"
+              name="q"
+              defaultValue={conditions.q}
+              placeholder="搜标题、正文或插件名"
+              aria-label="搜索评测"
+              maxLength={100}
+            />
+            {conditions.source !== 'all' ? <input type="hidden" name="source" value={conditions.source} /> : null}
+            {conditions.cat ? <input type="hidden" name="cat" value={conditions.cat} /> : null}
+            <button type="submit" aria-label="搜索">
+              搜
+            </button>
+          </form>
+
           <p className="side-title">来源</p>
           <nav className="side-nav">
-            <Link href={listHref('all')} className={conditions.source === 'all' ? 'active' : ''}>
+            <Link href={listHref(conditions, { source: 'all' })} className={conditions.source === 'all' ? 'active' : ''}>
               <span>全部</span>
             </Link>
-            <Link href={listHref('site')} className={conditions.source === 'site' ? 'active' : ''}>
+            <Link href={listHref(conditions, { source: 'site' })} className={conditions.source === 'site' ? 'active' : ''}>
               <span>站点评测</span>
             </Link>
-            <Link href={listHref('community')} className={conditions.source === 'community' ? 'active' : ''}>
+            <Link
+              href={listHref(conditions, { source: 'community' })}
+              className={conditions.source === 'community' ? 'active' : ''}
+            >
               <span>社区评测</span>
             </Link>
           </nav>
+
+          {/* 用途分类：与插件目录同一套分类数据（迁移 0010） */}
+          {categories.length > 0 ? (
+            <>
+              <p className="side-title" style={{ marginTop: 16 }}>
+                用途分类
+              </p>
+              <nav className="side-nav">
+                <Link href={listHref(conditions, { cat: '' })} className={conditions.cat === '' ? 'active' : ''}>
+                  <span>全部</span>
+                </Link>
+                {categories.map((c) => (
+                  <Link
+                    key={c.slug}
+                    href={listHref(conditions, { cat: c.slug })}
+                    className={conditions.cat === c.slug ? 'active' : ''}
+                    title={c.slug === UNCATEGORIZED_CATEGORY ? '没有命中任何分类的插件' : `覆盖 ${c.repositoryCount} 个仓库`}
+                  >
+                    <span className="truncate">{c.label}</span>
+                    <span className="count">{c.repositoryCount}</span>
+                  </Link>
+                ))}
+              </nav>
+            </>
+          ) : null}
         </aside>
 
         <section>
           <div className="panel">
             <p className="muted" style={{ marginTop: 0 }}>
-              {/* 只留"多少篇文章"；"评测与插件分开看待：收录不等于已实测可用。"按主人要求删掉 */}
               共 {total} 篇公开评测
-              {conditions.source !== 'all' ? `（已筛选，全部公开评测 ${visible.length} 篇）` : ''}
+              {conditions.q ? `（搜索：${conditions.q}）` : ''}
               {totalPages > 1 ? ` · 第 ${page} / ${totalPages} 页` : ''}
             </p>
 
@@ -135,8 +181,7 @@ export default async function ReviewsPage({
 
             {emptyKind === 'filtered-empty' ? (
               <p className="empty" style={{ marginBottom: 0 }}>
-                该来源暂时没有公开评测（全部公开评测共 {visible.length} 篇）。
-                <Link href="/reviews">清除筛选</Link>。
+                没有匹配的公开评测（换个关键词，或<Link href="/reviews">清除筛选</Link>）。
               </p>
             ) : null}
 
@@ -148,10 +193,6 @@ export default async function ReviewsPage({
                     return (
                       <li key={r.review_id} className="item">
                         <div className="item-body">
-                          {/*
-                            两列：左边来源标签，右边"标题 + 元信息"。
-                            这样元信息与**标题同列**（主人要求），而不是顶到标签下面另起一列。
-                          */}
                           <div className="item-head">
                             <span className={r.source_kind === 'site' ? 'tag site' : 'tag'}>
                               {r.source_kind === 'site' ? '站点评测' : '社区评测'}
@@ -168,6 +209,8 @@ export default async function ReviewsPage({
                                     {label}
                                   </Link>
                                 )}
+                                {/* §22：每条显示"被测版本" */}
+                                <span>{formatVersionLabel('插件', parseVersion(r.plugin_version))}</span>
                                 <span>{r.author_nickname}</span>
                                 <span>{formatDateTimeOr(r.public_updated_at, '时间未知')}</span>
                               </div>
@@ -182,7 +225,7 @@ export default async function ReviewsPage({
                 {totalPages > 1 ? (
                   <div className="pagination">
                     {page > 1 ? (
-                      <Link href={listHref(conditions.source, page - 1)} className="button">
+                      <Link href={listHref(conditions, { page: page - 1 })} className="button">
                         ← 上一页
                       </Link>
                     ) : (
@@ -194,7 +237,7 @@ export default async function ReviewsPage({
                       {page} / {totalPages}
                     </span>
                     {page < totalPages ? (
-                      <Link href={listHref(conditions.source, page + 1)} className="button">
+                      <Link href={listHref(conditions, { page: page + 1 })} className="button">
                         下一页 →
                       </Link>
                     ) : (

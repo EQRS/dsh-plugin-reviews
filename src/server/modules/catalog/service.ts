@@ -667,10 +667,28 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
         const total = conn.prepare(`SELECT COUNT(*) AS c FROM plugins p JOIN repositories r ON r.id = p.repository_id ${clause}`).get(...params) as { c: number };
 
         // 分页纪律：排序键**必须唯一**（都带 p.id 兜底），否则同 updated_at 的条目翻页会重漏。
+        //
+        // 带关键词时先按**匹配程度**排（`idea.md §18`："搜索结果优先按关键词匹配程度排列"）：
+        //   名称全等 > 名称前缀 > 仓库名前缀 > 其它（名称/简介/仓库名包含）。
+        // 相关度参数排在 WHERE 参数之后（SQL 文本顺序决定绑定顺序），最后才是 LIMIT/OFFSET。
+        const keyword = req.q?.trim();
+        const relevanceParams: string[] = [];
+        let relevanceOrder = '';
+        if (keyword) {
+          const escaped = escapeLikePattern(keyword).toLowerCase();
+          relevanceParams.push(keyword.toLowerCase(), `${escaped}%`, `${escaped}%`);
+          relevanceOrder = `
+            CASE
+              WHEN LOWER(COALESCE(p.display_name, '')) = ? THEN 0
+              WHEN LOWER(COALESCE(p.display_name, '')) LIKE ? ESCAPE '\\' THEN 1
+              WHEN LOWER(r.full_name) LIKE ? ESCAPE '\\' THEN 2
+              ELSE 3
+            END ASC,`;
+        }
         const orderBy =
           req.sort === 'reviews'
-            ? `${PUBLIC_REVIEW_COUNT_SQL} DESC, p.id ASC`
-            : 'p.updated_at DESC, p.id ASC';
+            ? `${relevanceOrder} ${PUBLIC_REVIEW_COUNT_SQL} DESC, p.id ASC`
+            : `${relevanceOrder} p.updated_at DESC, p.id ASC`;
 
         const rows = conn
           .prepare(
@@ -685,7 +703,7 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
               ORDER BY ${orderBy}
               LIMIT ? OFFSET ?`,
           )
-          .all(...params, req.page_size, (req.page - 1) * req.page_size) as {
+          .all(...params, ...relevanceParams, req.page_size, (req.page - 1) * req.page_size) as {
           plugin_id: string;
           plugin_path: string;
           updated_at: number;
