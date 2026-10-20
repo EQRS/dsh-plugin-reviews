@@ -1196,6 +1196,32 @@ label {
 .article-title {
   margin-bottom: 12px;
 }
+/* 标题旁的来源标签（不再塞进下面的元信息行）：与标题首行居中对齐。 */
+.article-title .article-source {
+  display: inline-flex;
+  margin: 0 10px 0 0;
+  vertical-align: middle;
+  font-size: 12px;
+}
+/* 文章页顶栏：返回入口在左，读者动作（有帮助 / 举报）在右，同一条基线。 */
+.article-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: var(--gap-backlink);
+}
+.article-topbar .back-link {
+  margin-bottom: 0;
+}
+.article-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
 .article-meta {
   display: flex;
   flex-wrap: wrap;
@@ -2944,8 +2970,10 @@ input[type='search']:focus {
     content-visibility: auto;
     contain-intrinsic-size: auto 120px;
   }
+  /* 个人中心在手机上不再重复摆一份栏目面板：站点抽屉里已经有同一组入口
+     （主人要求：个人设置 / 通知 / 我的评测都不要再出现这块「我的」）。 */
   .me-side {
-    position: static;
+    display: none;
   }
   .article-layout {
     gap: 16px;

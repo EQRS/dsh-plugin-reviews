@@ -137,7 +137,19 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ r
         修订历史与右侧「版本与时间」就不会一上一下（主人指出过）。
         间距仍走 .back-link 的 --gap-backlink 标准值，与插件详情页一致。
       */}
-      {row.plugin_id ? <BackLink href={`/plugins/${row.plugin_id}`}>返回插件页</BackLink> : null}
+      <div className="article-topbar">
+        {row.plugin_id ? <BackLink href={`/plugins/${row.plugin_id}`}>返回插件页</BackLink> : null}
+        {/* 读者动作放右侧，与返回入口同一条基线（主人要求：有帮助/举报不要埋在元信息里） */}
+        <div className="article-topbar-actions">
+          <HelpfulButton
+            reviewId={reviewId}
+            initialCount={helpful.count}
+            initialHelpful={helpful.helpful}
+            authenticated={ctx.userId !== null}
+          />
+          <ReportButton targetKind="review" targetId={reviewId} authenticated={ctx.userId !== null} />
+        </div>
+      </div>
 
       <div className="article-layout">
         {/*
@@ -181,11 +193,13 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ r
           <ArticleHero seed={row.review_id} />
 
           <header className="article-head">
-            <h1 className="article-title">{row.title}</h1>
-            <div className="article-meta">
-              <span className={row.source_kind === 'site' ? 'tag site' : 'tag'}>
+            <h1 className="article-title">
+              <span className={row.source_kind === 'site' ? 'tag site article-source' : 'tag article-source'}>
                 {row.source_kind === 'site' ? '站点评测' : '社区评测'}
               </span>
+              {row.title}
+            </h1>
+            <div className="article-meta">
               <span>{formatVersionLabel('插件', pluginVersion)}</span>
               <span>{formatVersionLabel('DSH', dshVersion)}</span>
               <span>{row.author_nickname}</span>
@@ -196,14 +210,6 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ r
               ) : (
                 <span className="tag" title="这份修订没有给出判定">未给出判定</span>
               )}
-              {/* 读者反馈与举报（idea.md §13、§20）：都是读者视角，放在元信息行末尾 */}
-              <HelpfulButton
-                reviewId={reviewId}
-                initialCount={helpful.count}
-                initialHelpful={helpful.helpful}
-                authenticated={ctx.userId !== null}
-              />
-              <ReportButton targetKind="review" targetId={reviewId} authenticated={ctx.userId !== null} />
             </div>
           </header>
         </div>

@@ -582,6 +582,43 @@ export const reviewsService = {
       };
     }, db);
   },
+
+  /**
+   * 删除草稿（仅本人；已提交过的草稿不允许删除）。
+   *
+   * 顺序按外键来：回执 → 附件关联 → 草稿本体；如果这篇评测还停留在草稿态
+   * （从没生成过修订快照），把它创建时插入的 reviews / content_entities 空壳一并删掉，
+   * 避免留下"看不到也管不了"的孤儿行。
+   */
+  async deleteDraft(ctx: CallerContext, draftId: string, db?: SqliteDatabase): Promise<void> {
+    const userId = requireActiveUser(ctx);
+    const id = parseDraftId(draftId);
+    return withTransaction((tx) => {
+      const conn = tx.db;
+      const row = readDraftRow(conn, id);
+      if (row.draft_type !== 'review') throw err.unavailable('草稿不存在或已不可访问。');
+      if (row.owner_id !== userId) throw err.forbidden('只能删除自己的草稿。');
+
+      const submitted = conn
+        .prepare('SELECT 1 AS x FROM content_submissions WHERE draft_id = ? LIMIT 1')
+        .get(id) as { x: number } | undefined;
+      if (submitted) throw err.conflict('草稿已提交过，不能删除。');
+
+      conn.prepare('DELETE FROM draft_save_receipts WHERE draft_id = ?').run(id);
+      conn.prepare('DELETE FROM draft_attachment_links WHERE draft_id = ?').run(id);
+      conn.prepare('DELETE FROM content_drafts WHERE id = ?').run(id);
+
+      if (row.review_id) {
+        const hasRevision = conn
+          .prepare('SELECT 1 AS x FROM review_revisions WHERE review_id = ? LIMIT 1')
+          .get(row.review_id) as { x: number } | undefined;
+        if (!hasRevision) {
+          conn.prepare('DELETE FROM reviews WHERE id = ?').run(row.review_id);
+          conn.prepare('DELETE FROM content_entities WHERE id = ?').run(row.review_id);
+        }
+      }
+    }, db);
+  },
 };
 
 /** 分页读取某个作者的草稿列表（工作台用；不属于契约必需项，但保持只读语义）。 */
