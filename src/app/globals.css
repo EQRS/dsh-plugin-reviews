@@ -251,6 +251,9 @@ body {
   margin: 0;
   color: var(--ink);
   overflow-x: hidden;
+  /* 长 URL / 无空格字符串（证据链、commit、仓库名）一律允许断行：
+     真机截图里它们会直接冲出卡片，页面被撑出横向溢出。 */
+  overflow-wrap: break-word;
   /* 柔和纸感：左上鼠尾草光晕 + 右下暖陶土光晕，叠在米白底上。
      极淡（≤6% 透明度），只为质感，不干扰阅读。 */
   background:
@@ -1235,6 +1238,43 @@ label {
   margin: 0;
 }
 
+/* 页面顶栏（插件详情用）：返回入口在左，读者动作在右，同一条基线。
+   与文章页的 .article-topbar 同一套版式，单独命名以便两个 PR 各自独立。 */
+.page-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: var(--gap-backlink);
+}
+.page-topbar .back-link {
+  margin-bottom: 0;
+}
+.page-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+/* 长链接与无空格串：允许在任意位置断行（证据链 URL / commit / 版本号 / 评论正文）。
+   只对"正文类"元素生效，按钮与 chip 仍是 nowrap。 */
+.review-body a,
+.evidence-list,
+.evidence-list a,
+.article-meta,
+.article-meta span,
+.list-meta,
+.list-meta a,
+.comment-body,
+.comment-body a,
+.facts dd,
+.plugin-desc {
+  overflow-wrap: anywhere;
+}
+
 /* 插件详情顶部摘要（页面布局.md §5：图标、名称、仓库作者、简介、用途、上游状态） */
 .plugin-summary {
   display: flex;
@@ -1264,6 +1304,46 @@ label {
   font-size: 14px;
 }
 .plugin-meta .tag {
+  margin: 0;
+}
+/* 分类标签独占一行；数量多时横向滑动，不再和作者/收藏/反馈挤在同一片 */
+.plugin-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+.plugin-categories .tag {
+  margin: 0;
+}
+/* 原始 topics：单行横向滑动的 chips（原来是一坨 "agent · code-review · …" 文字） */
+.plugin-topics {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0 0 10px;
+}
+.plugin-topics-label {
+  flex: 0 0 auto;
+  color: var(--faint);
+  font-size: 12px;
+}
+.plugin-topics-row {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 2px;
+}
+.plugin-topics-row::-webkit-scrollbar {
+  display: none;
+}
+.plugin-topics-row .tag {
+  flex: 0 0 auto;
   margin: 0;
 }
 .plugin-desc {

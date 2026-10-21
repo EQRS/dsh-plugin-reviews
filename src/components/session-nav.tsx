@@ -154,27 +154,31 @@ export function SessionNav() {
           {/*
             手机端的入口：菜单图标 + 侧边抽屉（主人要求把账户入口换成"侧边展开的栏"）。
             桌面端这一段不显示（.drawer-trigger 在宽屏 display:none）。
+            **会话读取完成前不渲染**：否则会先出现一个"访客"抽屉入口，
+            与"正在读取登录状态…"并排，像两个互相矛盾的状态（主人要求）。
           */}
-          <SiteDrawer
-            name={session?.nickname ?? session?.userId ?? '访客'}
-            subtitle={
-              session?.authenticated
-                ? session.accountStatus === 'disabled'
-                  ? `${session.role === 'admin' ? '管理员' : '普通用户'} · 账户已禁用`
-                  : session.role === 'admin'
-                    ? '管理员'
-                    : '普通用户'
-                : '未登录'
-            }
-            initial={(session?.nickname ?? session?.userId ?? '?').slice(0, 1).toUpperCase()}
-            unread={unread}
-            busy={busy}
-            authenticated={session?.authenticated === true}
-            githubConfigured={session?.githubLoginConfigured === true}
-            testLoginEnabled={session?.testLoginEnabled === true}
-            onSignOut={() => void signOut()}
-            onTestLogin={() => void signInForTest()}
-          />
+          {session === null ? null : (
+            <SiteDrawer
+              name={session.nickname ?? session.userId ?? '访客'}
+              subtitle={
+                session.authenticated
+                  ? session.accountStatus === 'disabled'
+                    ? `${session.role === 'admin' ? '管理员' : '普通用户'} · 账户已禁用`
+                    : session.role === 'admin'
+                      ? '管理员'
+                      : '普通用户'
+                  : '未登录'
+              }
+              initial={(session.nickname ?? session.userId ?? '?').slice(0, 1).toUpperCase()}
+              unread={unread}
+              busy={busy}
+              authenticated={session.authenticated === true}
+              githubConfigured={session.githubLoginConfigured === true}
+              testLoginEnabled={session.testLoginEnabled === true}
+              onSignOut={() => void signOut()}
+              onTestLogin={() => void signInForTest()}
+            />
+          )}
         </div>
       </nav>
       {error ? (

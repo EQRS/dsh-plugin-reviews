@@ -171,7 +171,7 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ r
           <section className="panel" style={{ margin: '0 0 16px' }} aria-label="证据链">
             <h2 style={{ fontSize: 15, margin: '0 0 8px' }}>证据链</h2>
             {evidenceRefs.length > 0 ? (
-              <ol style={{ margin: 0, paddingLeft: 20, fontSize: 14, lineHeight: 1.7 }}>
+              <ol className="evidence-list" style={{ margin: 0, paddingLeft: 20, fontSize: 14, lineHeight: 1.7 }}>
                 {evidenceRefs.map((item) => (
                   <li key={item.url}>
                     <a href={item.url} target="_blank" rel="noreferrer noopener">

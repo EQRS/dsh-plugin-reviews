@@ -52,7 +52,25 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ p
 
   return (
     <div>
-      <BackLink href="/plugins">返回插件目录</BackLink>
+      {/* 顶栏：返回在左，收藏 / 反馈在右（与文章页「有帮助」同一套版式） */}
+      <div className="page-topbar">
+        <BackLink href="/plugins">返回插件目录</BackLink>
+        <div className="page-topbar-actions">
+          {/* 收藏（idea.md §15）：读者把插件收进「我的 → 收藏」 */}
+          <FavoriteButton
+            pluginId={plugin.pluginId}
+            initialFavorited={favorited}
+            authenticated={ctx.userId !== null}
+          />
+          {/* §2：资料反馈（展示名/简介；分类是仓库级，不在这里改） */}
+          <CorrectionForm
+            pluginId={plugin.pluginId}
+            currentName={plugin.displayName}
+            currentDescription={plugin.description}
+            authenticated={ctx.userId !== null}
+          />
+        </div>
+      </div>
 
       {/* 顶部摘要 */}
       <header className="plugin-summary">
@@ -68,36 +86,31 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ p
         <div style={{ minWidth: 0 }}>
           <h1 className="plugin-title">{displayName}</h1>
 
-          {/* 元信息只留作者 + 用途分类（+ 归档警示） */}
+          {/* 作者单独一行；分类标签与归档状态各自独占下一行（不再和作者/操作挤成一片） */}
           <div className="plugin-meta">
             <span>作者 {author}</span>
-            {/* 展示**分类**（中文、可筛选）；原始 topics 挪到下面一行小字 ——
-                分类是运营口径，topics 是抓取原料，两者都保留但不混在一起。 */}
+          </div>
+
+          <div className="plugin-categories">
             {(plugin.categories.length > 0 ? plugin.categories : ['未分类']).map((c) => (
               <span key={c} className="tag site">
                 {c}
               </span>
             ))}
             {plugin.repository.isArchived ? <span className="tag warn">已归档</span> : null}
-            {/* 收藏（idea.md §15）：读者把插件收进「我的 → 收藏」 */}
-            <FavoriteButton
-              pluginId={plugin.pluginId}
-              initialFavorited={favorited}
-              authenticated={ctx.userId !== null}
-            />
-            {/* §2：资料反馈（展示名/简介；分类是仓库级，不在这里改） */}
-            <CorrectionForm
-              pluginId={plugin.pluginId}
-              currentName={plugin.displayName}
-              currentDescription={plugin.description}
-              authenticated={ctx.userId !== null}
-            />
           </div>
 
           {plugin.topics.length > 0 ? (
-            <p className="muted" style={{ margin: '6px 0 0', fontSize: 12 }}>
-              原始 topics：{plugin.topics.join(' · ')}
-            </p>
+            <div className="plugin-topics" aria-label="原始 topics">
+              <span className="plugin-topics-label">原始 topics</span>
+              <div className="plugin-topics-row">
+                {plugin.topics.map((t) => (
+                  <span key={t} className="tag">
+                    {t}
+                  </span>
+                ))}
+              </div>
+            </div>
           ) : null}
 
           <p className="plugin-desc">{plugin.description ?? '暂无简介'}</p>
