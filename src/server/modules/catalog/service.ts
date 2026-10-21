@@ -294,6 +294,31 @@ async function runAccept(params: {
         pluginPath: parsed.pluginPath,
       });
       if (manifest === null) {
+        // 只填了仓库根链接时，先探子目录：monorepo 把插件放在 examples/、packages/ 之类很常见。
+        // 直接报"未声明 dsh.bundle"会让人以为这个仓库不是 DSH 插件（实际上只是路径没指到）。
+        if (parsed.pluginPath === ROOT_PLUGIN_PATH && typeof probe.findPluginDirs === 'function') {
+          // 探测是"帮用户找路径"的辅助：它失败时只应退回原理由，
+          // 不该把一次正常的拒绝变成 500（探测本身要读树 + 若干清单，失败概率不低）。
+          let dirs: string[] = [];
+          try {
+            dirs = await probe.findPluginDirs({ owner: parsed.owner, repo: parsed.repo });
+          } catch {
+            dirs = [];
+          }
+          if (dirs.length === 1) {
+            const full = `https://github.com/${parsed.owner}/${parsed.repo}/tree/HEAD/${dirs[0]}`;
+            throw err.input(
+              `这个仓库的 DSH 插件在子目录 ${dirs[0]}，不在根目录。请改用这个链接提交：${full}`,
+              [{ path: 'url', message: `请把链接填到子目录 ${dirs[0]}。` }],
+            );
+          }
+          if (dirs.length > 1) {
+            throw err.input(
+              `这个仓库里有多个 DSH 插件：${dirs.join('、')}。请把链接填到具体的那一个子目录。`,
+              [{ path: 'url', message: `候选子目录：${dirs.join('、')}。` }],
+            );
+          }
+        }
         throw err.input(
           '该目录下的 package.json 没有声明 dsh.bundle，无法作为 DSH 插件收录。',
           [{ path: 'url', message: `路径 ${parsed.pluginPath} 未声明 dsh.bundle。` }],

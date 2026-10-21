@@ -29,6 +29,17 @@ export interface CatalogProbe {
     /** GitHub 仓库 updated_at（UTC 毫秒）；用于展示"仓库更新于"，**不参与排序口径**。 */
     repoUpdatedAt: number | null;
   }>;
+  /**
+   * 找出仓库里**声明了 dsh.bundle 的子目录**（只在根路径读不到清单时调用）。
+   *
+   * 为什么需要：DSH 插件常被放在 monorepo 的子目录（examples/、packages/ 之类），
+   * 只填仓库根链接时根目录根本没有 package.json，原来的错误提示会把
+   * 「路径没指到」说成「不是 DSH 插件」，人会被误导。
+   *
+   * 返回相对仓库根的目录路径，按发现顺序排列；根目录用 '.' 表示。
+   * 可选：探针不实现时，调用方按"读不到清单"处理。
+   */
+  findPluginDirs?(input: { owner: string; repo: string }): Promise<string[]>;
   /** 读取插件子目录 package.json 的 dsh.bundle 声明；不存在或未声明返回 null。 */
   fetchPluginManifest(input: { owner: string; repo: string; pluginPath: string }): Promise<{
     bundlePath: string;
