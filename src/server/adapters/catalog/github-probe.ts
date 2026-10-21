@@ -334,6 +334,53 @@ export function createGithubCatalogProbe(deps: GithubCatalogProbeDeps = {}): Cat
       };
     },
 
+    /**
+     * 找出仓库里声明了 dsh.bundle 的子目录。
+     *
+     * 只读一次树（递归），再对少量候选 package.json 读清单：
+     *  - 排除 node_modules / .git / dist / build 里的清单；
+     *  - 候选上限 12 个，逐个读，读到就停；整体最多 12 次请求，避免把限流打满；
+     *  - 读不出来的候选安静跳过——本方法是"帮用户找路径"的辅助，
+     *    失败不该把原本的拒绝理由盖掉。
+     */
+    async findPluginDirs(input) {
+      assertOnline();
+      const repoRes = await get(`/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}`);
+      if (!repoRes.ok) return [];
+      const repoBody = (await repoRes.json()) as { default_branch?: unknown };
+      const branch = typeof repoBody.default_branch === 'string' ? repoBody.default_branch : 'HEAD';
+
+      const treeRes = await get(
+        `/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+      );
+      if (!treeRes.ok) return [];
+      const tree = (await treeRes.json()) as { tree?: { type?: string; path?: string }[] };
+      const blobs = Array.isArray(tree.tree) ? tree.tree : [];
+
+      const candidates = blobs
+        .filter((e) => e.type === 'blob' && typeof e.path === 'string')
+        .map((e) => e.path as string)
+        .filter((path) => path === 'package.json' || path.endsWith('/package.json'))
+        .filter((path) => !/(^|\/)(node_modules|\.git|dist|build|out|coverage)\//.test(path))
+        .slice(0, 12);
+
+      const found: string[] = [];
+      for (const manifestPath of candidates) {
+        const dir = manifestPath.includes('/') ? manifestPath.slice(0, manifestPath.lastIndexOf('/')) : '.';
+        try {
+          const manifest = await this.fetchPluginManifest({
+            owner: input.owner,
+            repo: input.repo,
+            pluginPath: dir,
+          });
+          if (manifest !== null) found.push(dir);
+        } catch {
+          // 单个候选读失败不影响整体结论
+        }
+      }
+      return found;
+    },
+
     async fetchPluginManifest(input) {
       assertOnline();
       const dir = input.pluginPath === '.' || input.pluginPath === '' ? '' : input.pluginPath;
