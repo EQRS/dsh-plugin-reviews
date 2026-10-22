@@ -15,6 +15,10 @@ import type { ReactNode } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ReviewEditor } from '../src/components/review-editor';
 
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+}));
+
 vi.mock('next/link', () => ({
   default: ({ children, href, ...rest }: { children?: ReactNode; href?: string }) => (
     <a href={href} {...rest}>
@@ -91,6 +95,8 @@ describe('评测编辑器 · 提交前判定必填', () => {
     render(<ReviewEditor draftId="draft-1" />);
 
     await screen.findByText('编辑评测草稿');
+    // 档位是新增的提交必填项：先选档位，才能测到「判定未选」这一条。
+    fireEvent.click(screen.getByRole('radio', { name: '快测' }));
     fireEvent.click(screen.getByRole('button', { name: '提交审核' }));
 
     const hint = await screen.findByRole('alert');
@@ -107,6 +113,7 @@ describe('评测编辑器 · 提交前判定必填', () => {
     render(<ReviewEditor draftId="draft-1" />);
 
     await screen.findByText('编辑评测草稿');
+    fireEvent.click(screen.getByRole('radio', { name: '快测' }));
     fireEvent.click(screen.getByRole('radio', { name: '没法测' }));
     fireEvent.click(screen.getByRole('button', { name: '提交审核' }));
 
