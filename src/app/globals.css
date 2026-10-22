@@ -560,6 +560,9 @@ p {
   min-height: calc(100vh - 200px);
   margin: 0 auto;
   min-width: 0;
+  /* 栏目切换的横向滑入会临时平移 28px：在容器上裁掉，避免出现横向滚动条
+     （否则固定底栏会随 innerHeight 跳一下）。 */
+  overflow-x: clip;
 }
 
 /* .footer 已随页脚删除（主人要求去掉下栏），不留死样式 */
@@ -1629,6 +1632,46 @@ label {
   from { opacity: 0; transform: scale(0.97); }
   to { opacity: 1; transform: none; }
 }
+/* 顶栏栏目切换：MD3 shared axis X —— 新内容从左侧/右侧 28px 滑入并淡入 */
+@keyframes fx-slide-right {
+  from {
+    opacity: 0;
+    transform: translate3d(28px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes fx-slide-left {
+  from {
+    opacity: 0;
+    transform: translate3d(-28px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.fx-slide-right {
+  animation: fx-slide-right var(--md-sys-motion-duration-medium2)
+    var(--md-sys-motion-easing-emphasized-decelerate) both;
+}
+.fx-slide-left {
+  animation: fx-slide-left var(--md-sys-motion-duration-medium2)
+    var(--md-sys-motion-easing-emphasized-decelerate) both;
+}
+/* 账户下拉：从触发键下方滑下（MD3 menu 的 enter） */
+@keyframes fx-menu-down {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -8px, 0) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
 @keyframes fx-sheen {
   from { background-position: -140% 0; }
   to { background-position: 240% 0; }
@@ -1800,7 +1843,9 @@ button:not(:disabled):active,
   right: 0;
   z-index: 1002;
   width: 264px;
-  animation: fx-pop 0.18s cubic-bezier(0.2, 0.7, 0.25, 1) both;
+  transform-origin: top right;
+  animation: fx-menu-down var(--md-sys-motion-duration-short4)
+    var(--md-sys-motion-easing-emphasized-decelerate) both;
 }
 /* 头像：触发键里是 22px 小圆，菜单头部是 36px 圆 */
 .account-avatar {
@@ -2311,7 +2356,7 @@ input[type='search']:focus {
   background: transparent;
   color: var(--md-sys-color-primary);
 }
-.main-nav a.active::after {
+.main-nav a::after {
   content: '';
   position: absolute;
   right: 12px;
@@ -2320,6 +2365,16 @@ input[type='search']:focus {
   height: 3px;
   border-radius: 3px 3px 0 0;
   background: var(--md-sys-color-primary);
+  transform: scaleX(0);
+  transform-origin: center;
+  transition: transform var(--md-sys-motion-duration-short4)
+    var(--md-sys-motion-easing-emphasized);
+}
+.main-nav a:hover::after {
+  transform: scaleX(0.4);
+}
+.main-nav a.active::after {
+  transform: scaleX(1);
 }
 
 /* --------------------------------------------- 账户触发器（M3 色调 chip 形态） */
@@ -2857,6 +2912,13 @@ input[type='search']:focus {
 }
 .nav-bar-item.active .nav-bar-indicator svg {
   color: var(--md-sys-color-on-secondary-container);
+}
+/* 底栏切换：文字与图标颜色跟随 M3 时长过渡，不要瞬切 */
+.nav-bar-item {
+  transition: color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+}
+.nav-bar-indicator svg {
+  transition: color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
 }
 
 /* ============================================================================
