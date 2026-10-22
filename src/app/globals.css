@@ -220,6 +220,121 @@
   --shadow-lg: var(--md-sys-elevation-level3);
 }
 
+/* ============================================================ 深色主题
+   同一套鼠尾草绿品牌色，表面换成深橄榄；只覆盖颜色/阴影角色，
+   形状、排版、动效令牌不动。由 <html data-theme="dark"> 触发。 */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --md-sys-color-primary: #a9c9a3;
+  --md-sys-color-on-primary: #1d3319;
+  --md-sys-color-primary-container: #35502f;
+  --md-sys-color-on-primary-container: #dcead6;
+  --md-sys-color-secondary: #e5c3a9;
+  --md-sys-color-on-secondary: #3a2a1f;
+  --md-sys-color-secondary-container: #5a4232;
+  --md-sys-color-on-secondary-container: #f2e5da;
+  --md-sys-color-tertiary: #a8d4cc;
+  --md-sys-color-on-tertiary: #17332e;
+  --md-sys-color-tertiary-container: #2f4f49;
+  --md-sys-color-on-tertiary-container: #d8ece7;
+  --md-sys-color-error: #ffb4ab;
+  --md-sys-color-on-error: #690005;
+  --md-sys-color-error-container: #93000a;
+  --md-sys-color-on-error-container: #ffdad6;
+
+  --md-sys-color-surface: #121810;
+  --md-sys-color-surface-container-lowest: #0d120c;
+  --md-sys-color-surface-container-low: #171e15;
+  --md-sys-color-surface-container: #1b2319;
+  --md-sys-color-surface-container-high: #252e22;
+  --md-sys-color-surface-container-highest: #303a2c;
+  --md-sys-color-on-surface: #e2e8da;
+  --md-sys-color-on-surface-variant: #bcc8b2;
+  --md-sys-color-outline: #87957c;
+  --md-sys-color-outline-variant: #3f4a39;
+  --md-sys-color-inverse-surface: #e2e8da;
+  --md-sys-color-inverse-on-surface: #2b3628;
+  --md-sys-color-inverse-primary: #4e7a4e;
+  --md-sys-color-scrim: #000000;
+  --md-sys-color-shadow: #000000;
+
+  /* 旧别名里两个写死的墨色/状态色需要单独换掉，其余 var() 别名自动跟随 */
+  --bright: #f0f5e8;
+  --body-text: #d5ddca;
+  --warn-ink: #f0c36a;
+  --warn-bg: color-mix(in srgb, #f0c36a 16%, transparent);
+  --success-ink: #8fd6a1;
+  --success-bg: color-mix(in srgb, #8fd6a1 16%, transparent);
+
+  --md-sys-elevation-level1: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.35);
+  --md-sys-elevation-level2: 0 1px 2px rgba(0, 0, 0, 0.55), 0 4px 10px rgba(0, 0, 0, 0.4);
+  --md-sys-elevation-level3: 0 2px 4px rgba(0, 0, 0, 0.55), 0 8px 18px rgba(0, 0, 0, 0.45);
+  --md-sys-elevation-level4: 0 2px 4px rgba(0, 0, 0, 0.6), 0 10px 24px rgba(0, 0, 0, 0.5);
+  --md-sys-elevation-level5: 0 4px 6px rgba(0, 0, 0, 0.6), 0 14px 32px rgba(0, 0, 0, 0.55);
+}
+
+/* 个人设置 · 外观：M3 switch（只影响主题，不触发任何业务逻辑） */
+.theme-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 0;
+}
+.theme-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.theme-row-title {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+.theme-row-desc {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.md-switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 52px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--md-sys-shape-corner-full);
+  background: var(--md-sys-color-surface-container-highest);
+  cursor: pointer;
+  transition: background-color var(--md-sys-motion-duration-short4)
+    var(--md-sys-motion-easing-standard);
+}
+.md-switch[aria-checked='true'] {
+  background: var(--md-sys-color-primary);
+}
+.md-switch-thumb {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--md-sys-color-outline);
+  transition: transform var(--md-sys-motion-duration-short4)
+      var(--md-sys-motion-easing-emphasized),
+    background-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+}
+.md-switch[aria-checked='true'] .md-switch-thumb {
+  transform: translateX(20px);
+  background: var(--md-sys-color-on-primary);
+}
+.md-switch:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
 /* ------------------------------------------------------------------- 基础 */
 
 *,

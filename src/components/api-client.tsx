@@ -182,4 +182,6 @@ export const inputStyle: React.CSSProperties = {
   padding: '8px 10px',
   fontSize: 15,
   fontFamily: 'inherit',
+  background: 'var(--md-sys-color-surface-container-lowest)',
+  color: 'var(--md-sys-color-on-surface)',
 };
