@@ -26,7 +26,7 @@ import { getDb } from '@/server/platform/db';
 import { currentContext } from '../api/_lib/context';
 import { listDraftSummaries } from '@/server/modules/reviews';
 import { MeNav } from '@/components/me-nav';
-import { DeleteDraftButton } from '@/components/delete-draft-button';
+import { DraftList } from '@/components/draft-list';
 import { submissionStateLabels } from '@/packages/common/status-text';
 import type { SubmissionState } from '@/packages/common/field-rules';
 import { formatDateTime } from '@/packages/common/time';
@@ -39,6 +39,8 @@ interface DraftRow {
   save_version: number;
   saved_at: number;
   title: string;
+  published: boolean;
+  withdrawn: boolean;
 }
 
 interface SubRow {
@@ -47,6 +49,10 @@ interface SubRow {
   processing_state: SubmissionState;
   submitted_at: number;
   review_id: string | null;
+  /** 提交快照的标题（评论提交为 null）。 */
+  title: string | null;
+  /** 目标评测是否已撤回（显示「已撤回」标签）。 */
+  withdrawn_at: number | null;
   /** 目标评测是否已有公开修订——决定给不给链接（没公开的话 /reviews/{id} 只会 404） */
   has_public_revision: number;
 }
@@ -79,16 +85,19 @@ export default async function MePage() {
     save_version: d.saveVersion,
     saved_at: d.savedAt,
     title: d.title,
+    published: d.published,
+    withdrawn: d.withdrawn,
   }));
 
   const subs = db
     .prepare(
       `SELECT s.id AS submission_id, s.submission_type, s.processing_state, s.submitted_at,
-              rev.review_id,
+              rev.review_id, rev.title AS title, ce.withdrawn_at,
               CASE WHEN r.published_revision_id IS NULL THEN 0 ELSE 1 END AS has_public_revision
          FROM content_submissions s
          LEFT JOIN review_revisions rev ON rev.id = s.review_revision_id
          LEFT JOIN reviews r ON r.id = rev.review_id
+         LEFT JOIN content_entities ce ON ce.id = rev.review_id
         WHERE s.submitted_by = ?
         ORDER BY s.submitted_at DESC, s.id DESC`,
     )
@@ -128,27 +137,16 @@ export default async function MePage() {
                 暂无草稿。写评测请到 <Link href="/plugins">插件目录</Link> 选一个插件，从它的详情页开始。
               </p>
             ) : (
-              <ul className="item-list">
-                {drafts.map((d) => (
-                  <li key={d.draft_id} className="item">
-                    <div className="item-body">
-                      <h3>
-                        <Link href={`/me/drafts/${d.draft_id}`}>
-                          {d.title && d.title.trim() !== '' ? d.title : '(尚未填写标题)'}
-                        </Link>
-                      </h3>
-                      <div className="list-meta">
-                        <span>保存版本 {d.save_version}</span>
-                        <span>最近保存 {formatDateTime(d.saved_at)}</span>
-                        <code>{d.draft_id}</code>
-                        <span style={{ marginLeft: 'auto' }}>
-                          <DeleteDraftButton draftId={d.draft_id} />
-                        </span>
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+              <DraftList
+                drafts={drafts.map((d) => ({
+                  draftId: d.draft_id,
+                  title: d.title,
+                  saveVersion: d.save_version,
+                  savedAt: d.saved_at,
+                  published: d.published,
+                  withdrawn: d.withdrawn,
+                }))}
+              />
             )}
           </section>
 
@@ -169,7 +167,13 @@ export default async function MePage() {
                     <li key={s.submission_id} className="item">
                       <div className="item-body">
                         <h3>
-                          {linkable ? (
+                          {s.title && s.title.trim() !== '' ? (
+                            linkable ? (
+                              <Link href={`/reviews/${s.review_id}`}>{s.title}</Link>
+                            ) : (
+                              <span className="muted">{s.title}</span>
+                            )
+                          ) : linkable ? (
                             <Link href={`/reviews/${s.review_id}`}>查看已发布内容</Link>
                           ) : (
                             <span className="muted">尚未公开发布</span>
@@ -180,6 +184,11 @@ export default async function MePage() {
                             {kind}
                           </span>
                           <span className="tag">{submissionStateLabels[s.processing_state]}</span>
+                          {s.withdrawn_at !== null ? (
+                            <span className="tag" style={{ marginLeft: 6 }}>
+                              已撤回
+                            </span>
+                          ) : null}
                         </div>
                         <div className="list-meta" style={{ marginTop: 6 }}>
                           <span>{formatDateTime(s.submitted_at)}</span>
