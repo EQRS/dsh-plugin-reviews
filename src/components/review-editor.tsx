@@ -198,6 +198,8 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
 
   const bodyRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const mdFileRef = useRef<HTMLInputElement | null>(null);
+  const [importingMd, setImportingMd] = useState(false);
   /** 结论面板：提示出现时滚到这里，用户不用自己找是哪一项没选。 */
   const verdictPanelRef = useRef<HTMLDivElement | null>(null);
 
@@ -428,6 +430,48 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
     }
   };
 
+  /**
+   * 导入 Markdown：把 .md/.markdown/.txt 的文本填进正文，**不自动保存**。
+   * 覆盖非空正文前必须二次确认；只接受文本，大小上限 512KB。
+   */
+  const onImportMarkdown = async (file: File) => {
+    setImportingMd(true);
+    setError(null);
+    try {
+      if (!/\.(md|markdown|txt)$/i.test(file.name)) {
+        throw new ApiError(
+          { code: 'input_invalid', message: '只支持 .md / .markdown / .txt 文件。' },
+          400,
+        );
+      }
+      const maxBytes = 512 * 1024;
+      if (file.size > maxBytes) {
+        throw new ApiError(
+          {
+            code: 'input_invalid',
+            message: `Markdown 文件最大 512KB，当前 ${(file.size / 1024).toFixed(0)}KB。`,
+          },
+          400,
+        );
+      }
+      const text = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+        reader.onerror = () =>
+          reject(new ApiError({ code: 'input_invalid', message: '读取文件失败，请重试。' }, 400));
+        reader.readAsText(file);
+      });
+      if (bodyMarkdown.trim().length > 0 && !window.confirm('导入会覆盖当前正文，继续？')) return;
+      setBodyMarkdown(text);
+      setSaved(`已导入「${file.name}」（${text.length} 字），点「保存」写入草稿。`);
+    } catch (e) {
+      setError(e as ApiError);
+    } finally {
+      setImportingMd(false);
+      if (mdFileRef.current) mdFileRef.current.value = '';
+    }
+  };
+
   /** 在光标处插入文本（没有焦点时追加到末尾）。 */
   const insertAtCursor = (snippet: string) => {
     const el = bodyRef.current;
@@ -525,7 +569,26 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
             <label htmlFor="body" style={{ fontWeight: 600 }}>
               Markdown 正文
             </label>
-            <span style={{ marginLeft: 'auto' }}>
+            <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 8 }}>
+              <input
+                ref={mdFileRef}
+                type="file"
+                accept=".md,.markdown,.txt,text/markdown,text/plain"
+                style={{ display: 'none' }}
+                aria-label="导入 Markdown 文件"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void onImportMarkdown(file);
+                }}
+              />
+              <button
+                type="button"
+                disabled={importingMd}
+                onClick={() => mdFileRef.current?.click()}
+                className="button"
+              >
+                {importingMd ? '导入中…' : '导入 Markdown'}
+              </button>
               <input
                 ref={fileRef}
                 type="file"
@@ -577,7 +640,7 @@ export function ReviewEditor({ draftId }: { draftId: string }) {
             value={bodyMarkdown}
             onChange={(e) => setBodyMarkdown(e.target.value)}
             rows={18}
-            placeholder={'支持 Markdown。\n\n用「插入图片」可上传 PNG/JPEG/WebP（≤10MB），成功后会把图片语法插到光标处。'}
+            placeholder={'支持 Markdown。\n\n用「导入 Markdown」可把 .md 文件内容填进正文；用「插入图片」可上传 PNG/JPEG/WebP（≤10MB），成功后会把图片语法插到光标处。'}
             style={{ ...inputStyle, fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 14, lineHeight: 1.6 }}
           />
         </div>

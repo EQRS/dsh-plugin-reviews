@@ -664,4 +664,53 @@ export async function listDrafts(
   }, db);
 }
 
+/** 「我的评测」草稿列表用的摘要：标题取**当前草稿载荷**，不是首次提交的修订标题。 */
+export interface DraftSummary {
+  draftId: string;
+  reviewId: string | null;
+  saveVersion: number;
+  savedAt: number;
+  title: string;
+}
+
+/**
+ * 草稿摘要列表（我的评测页）。
+ *
+ * 这里的 title 必须来自 `content_drafts.payload`：草稿是「可继续改」的，
+ * 第一次保存后标题还可能变；如果读 `review_revisions.title`（只在提交时生成），
+ * 页面就会永远显示第一次提交/提交前的标题——这是本轮修掉的缺陷。
+ *
+ * 对坏 JSON 用 json_valid 兜底为 null，调用方显示「(尚未填写标题)」，不抛 500。
+ */
+export async function listDraftSummaries(
+  ctx: CallerContext,
+  db?: SqliteDatabase,
+): Promise<DraftSummary[]> {
+  const userId = requireActiveUser(ctx);
+  return withRead((conn) => {
+    const rows = conn
+      .prepare(
+        `SELECT id, review_id, save_version, saved_at,
+                CASE WHEN json_valid(payload) THEN json_extract(payload, '$.title') ELSE NULL END AS title
+           FROM content_drafts
+          WHERE owner_id = ? AND draft_type = 'review'
+          ORDER BY saved_at DESC, id DESC`,
+      )
+      .all(userId) as {
+      id: string;
+      review_id: string | null;
+      save_version: number;
+      saved_at: number;
+      title: string | null;
+    }[];
+    return rows.map((row) => ({
+      draftId: row.id,
+      reviewId: row.review_id,
+      saveVersion: row.save_version,
+      savedAt: row.saved_at,
+      title: row.title ?? '',
+    }));
+  }, db);
+}
+
 export type ReviewsService = typeof reviewsService;

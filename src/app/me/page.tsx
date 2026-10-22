@@ -24,6 +24,7 @@
 import Link from 'next/link';
 import { getDb } from '@/server/platform/db';
 import { currentContext } from '../api/_lib/context';
+import { listDraftSummaries } from '@/server/modules/reviews';
 import { MeNav } from '@/components/me-nav';
 import { DeleteDraftButton } from '@/components/delete-draft-button';
 import { submissionStateLabels } from '@/packages/common/status-text';
@@ -34,10 +35,10 @@ export const dynamic = 'force-dynamic';
 
 interface DraftRow {
   draft_id: string;
-  review_id: string;
+  review_id: string | null;
   save_version: number;
   saved_at: number;
-  title: string | null;
+  title: string;
 }
 
 interface SubRow {
@@ -70,16 +71,15 @@ export default async function MePage() {
   }
 
   const db = getDb();
-  const drafts = db
-    .prepare(
-      `SELECT d.id AS draft_id, d.review_id, d.save_version, d.saved_at, rev.title
-         FROM content_drafts d
-         LEFT JOIN review_revisions rev ON rev.review_id = d.review_id
-        WHERE d.owner_id = ?
-        GROUP BY d.id
-        ORDER BY d.saved_at DESC, d.id DESC`,
-    )
-    .all(ctx.userId) as DraftRow[];
+  // 标题取草稿当前载荷（不是首次提交的修订标题）；服务层已按 owner 过滤。
+  const draftSummaries = await listDraftSummaries(ctx);
+  const drafts: DraftRow[] = draftSummaries.map((d) => ({
+    draft_id: d.draftId,
+    review_id: d.reviewId,
+    save_version: d.saveVersion,
+    saved_at: d.savedAt,
+    title: d.title,
+  }));
 
   const subs = db
     .prepare(

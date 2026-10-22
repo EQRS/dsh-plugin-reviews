@@ -22,7 +22,7 @@ import {
   insertUser,
   type TestDb,
 } from './support/db';
-import { reviewsService, type DraftPayload } from '../src/server/modules/reviews';
+import { reviewsService, listDraftSummaries, type DraftPayload } from '../src/server/modules/reviews';
 import type { CallerContext } from '../src/server/platform/context';
 import { ErrorCodes, isDomainError } from '../src/packages/common/errors';
 import { newId } from '../src/server/platform/id';
@@ -610,5 +610,95 @@ describe('删除草稿', () => {
     );
     await expectCode(reviewsService.deleteDraft(caller(insertUser(db)), other.draftId, db), ErrorCodes.FORBIDDEN);
     expect(count('SELECT count(*) AS c FROM content_drafts WHERE id = ?', other.draftId)).toBe(1);
+  });
+});
+
+describe('listDraftSummaries：标题取当前草稿载荷', () => {
+  it('保存两次不同标题：摘要返回最新标题，而不是第一次 / 修订标题', async () => {
+    const { db } = setup();
+    const author = insertUser(db);
+    const repo = insertRepository(db);
+    const plugin = insertPlugin(db, repo);
+    const created = await reviewsService.createOrGetDraft(
+      caller(author),
+      { pluginId: plugin, requestKey: 'sum-1' },
+      db,
+    );
+
+    await reviewsService.saveDraft(
+      caller(author),
+      { draftId: created.draftId, expectedVersion: 0, requestKey: 'sum-s1', payload: payload({ title: '第一次标题' }) },
+      db,
+    );
+    await reviewsService.saveDraft(
+      caller(author),
+      { draftId: created.draftId, expectedVersion: 1, requestKey: 'sum-s2', payload: payload({ title: '第二次标题' }) },
+      db,
+    );
+
+    const list = await listDraftSummaries(caller(author), db);
+    expect(list).toHaveLength(1);
+    expect(list[0].draftId).toBe(created.draftId);
+    expect(list[0].title).toBe('第二次标题');
+    expect(list[0].saveVersion).toBe(2);
+  });
+
+  it('从未提交过（没有 review_revisions）也返回草稿标题', async () => {
+    const { db } = setup();
+    const author = insertUser(db);
+    const repo = insertRepository(db);
+    const plugin = insertPlugin(db, repo);
+    const created = await reviewsService.createOrGetDraft(
+      caller(author),
+      { pluginId: plugin, requestKey: 'sum-never' },
+      db,
+    );
+    await reviewsService.saveDraft(
+      caller(author),
+      { draftId: created.draftId, expectedVersion: 0, requestKey: 'sum-never-s', payload: payload({ title: '还没提交的标题' }) },
+      db,
+    );
+
+    const revisions = db.prepare('SELECT count(*) AS c FROM review_revisions').get() as { c: number };
+    expect(revisions.c).toBe(0);
+
+    const list = await listDraftSummaries(caller(author), db);
+    expect(list[0].title).toBe('还没提交的标题');
+  });
+
+  it('只返回本人草稿', async () => {
+    const { db } = setup();
+    const author = insertUser(db);
+    const other = insertUser(db);
+    const repo = insertRepository(db);
+    const plugin = insertPlugin(db, repo);
+    await reviewsService.createOrGetDraft(caller(author), { pluginId: plugin, requestKey: 'sum-a' }, db);
+    await reviewsService.createOrGetDraft(caller(other), { pluginId: plugin, requestKey: 'sum-b' }, db);
+
+    const mine = await listDraftSummaries(caller(author), db);
+    const others = await listDraftSummaries(caller(other), db);
+    expect(mine).toHaveLength(1);
+    expect(others).toHaveLength(1);
+    expect(mine[0].draftId).not.toBe(others[0].draftId);
+  });
+
+  it('合法 JSON 但没有 title 键：标题回落空串（页面显示「尚未填写标题」）', async () => {
+    const { db } = setup();
+    const author = insertUser(db);
+    const repo = insertRepository(db);
+    const plugin = insertPlugin(db, repo);
+    const created = await reviewsService.createOrGetDraft(
+      caller(author),
+      { pluginId: plugin, requestKey: 'sum-bad' },
+      db,
+    );
+    // 数据库有 json_valid(payload) CHECK，坏 JSON 写不进来；这里测「合法但没有 title 键」。
+    db.prepare('UPDATE content_drafts SET payload = ? WHERE id = ?').run(
+      JSON.stringify({ pluginVersion: { kind: 'unknown' }, dshVersion: { kind: 'unknown' }, body: [] }),
+      created.draftId,
+    );
+
+    const list = await listDraftSummaries(caller(author), db);
+    expect(list[0].title).toBe('');
   });
 });
