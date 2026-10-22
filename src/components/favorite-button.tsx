@@ -47,9 +47,11 @@ export function FavoriteButton({
         title={authenticated ? '收藏这个插件，可在「我的 → 收藏」里找到' : '登录后可以收藏'}
         aria-pressed={favorited}
         style={{
-          background: favorited ? '#4e7a4e' : 'transparent',
-          color: favorited ? '#FFFFFF' : '#2456B8',
-          border: `1px solid ${favorited ? '#4e7a4e' : '#DBE1EA'}`,
+          background: favorited ? 'var(--md-sys-color-primary)' : 'transparent',
+          color: favorited ? 'var(--md-sys-color-on-primary)' : 'var(--accent)',
+          border: `1px solid ${
+            favorited ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-outline-variant)'
+          }`,
           borderRadius: 999,
           padding: '3px 12px',
           cursor: authenticated ? 'pointer' : 'not-allowed',

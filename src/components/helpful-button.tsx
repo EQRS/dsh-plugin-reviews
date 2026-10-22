@@ -53,9 +53,11 @@ export function HelpfulButton({
         title={authenticated ? '这篇文章对你有帮助吗？' : '登录后可以表达「有帮助」'}
         aria-pressed={helpful}
         style={{
-          background: helpful ? '#4e7a4e' : 'transparent',
-          color: helpful ? '#FFFFFF' : '#2456B8',
-          border: `1px solid ${helpful ? '#4e7a4e' : '#DBE1EA'}`,
+          background: helpful ? 'var(--md-sys-color-primary)' : 'transparent',
+          color: helpful ? 'var(--md-sys-color-on-primary)' : 'var(--accent)',
+          border: `1px solid ${
+            helpful ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-outline-variant)'
+          }`,
           borderRadius: 999,
           padding: '3px 12px',
           cursor: authenticated ? 'pointer' : 'not-allowed',

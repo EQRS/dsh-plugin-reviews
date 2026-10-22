@@ -59,12 +59,12 @@ export function ReportButton({
         onClick={() => (authenticated ? setOpen((v) => !v) : setOpen(false))}
         disabled={!authenticated}
         title={authenticated ? '举报这一项' : '登录后才能举报'}
-        style={{ background: 'none', border: 'none', color: '#B4232A', cursor: authenticated ? 'pointer' : 'not-allowed', padding: 0, fontSize: 13 }}
+        style={{ background: 'none', border: 'none', color: 'var(--md-sys-color-error)', cursor: authenticated ? 'pointer' : 'not-allowed', padding: 0, fontSize: 13 }}
       >
         举报
       </button>
 
-      {done ? <span style={{ color: '#1E5B32' }}>{done}</span> : null}
+      {done ? <span style={{ color: 'var(--success-ink)' }}>{done}</span> : null}
       {error ? <ErrorNotice error={error} onDismiss={() => setError(null)} /> : null}
 
       {open ? (
@@ -80,13 +80,29 @@ export function ReportButton({
           role="dialog"
           aria-label="举报"
         >
-          <div style={{ background: '#FFFFFF', borderRadius: 10, padding: 18, width: 'min(480px, 92vw)' }}>
+          <div
+            style={{
+              background: 'var(--md-sys-color-surface-container-high)',
+              color: 'var(--md-sys-color-on-surface)',
+              borderRadius: 12,
+              padding: 18,
+              width: 'min(480px, 92vw)',
+            }}
+          >
             <h3 style={{ margin: '0 0 10px', fontSize: 16 }}>举报</h3>
-            <label style={{ display: 'block', fontSize: 13, color: '#526174', marginBottom: 4 }}>原因</label>
+            <label style={{ display: 'block', fontSize: 13, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: 4 }}>原因</label>
             <select
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              style={{ width: '100%', padding: '6px 8px', border: '1px solid #DBE1EA', borderRadius: 6, marginBottom: 10 }}
+              style={{
+                width: '100%',
+                padding: '6px 8px',
+                border: '1px solid var(--md-sys-color-outline-variant)',
+                borderRadius: 8,
+                marginBottom: 10,
+                background: 'var(--md-sys-color-surface-container-lowest)',
+                color: 'var(--md-sys-color-on-surface)',
+              }}
             >
               {REASONS.map((r) => (
                 <option key={r.value} value={r.value}>
@@ -94,24 +110,49 @@ export function ReportButton({
                 </option>
               ))}
             </select>
-            <label style={{ display: 'block', fontSize: 13, color: '#526174', marginBottom: 4 }}>
+            <label style={{ display: 'block', fontSize: 13, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: 4 }}>
               补充说明（可选，最多 2000 字）
             </label>
             <textarea
               value={detail}
               onChange={(e) => setDetail(e.target.value)}
               rows={4}
-              style={{ width: '100%', padding: '6px 8px', border: '1px solid #DBE1EA', borderRadius: 6 }}
+              style={{
+                width: '100%',
+                padding: '6px 8px',
+                border: '1px solid var(--md-sys-color-outline-variant)',
+                borderRadius: 8,
+                background: 'var(--md-sys-color-surface-container-lowest)',
+                color: 'var(--md-sys-color-on-surface)',
+              }}
             />
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
-              <button type="button" onClick={() => setOpen(false)} style={{ background: '#FFFFFF', border: '1px solid #DBE1EA', borderRadius: 6, padding: '6px 14px', cursor: 'pointer' }}>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                style={{
+                  background: 'var(--md-sys-color-surface-container-high)',
+                  border: '1px solid var(--md-sys-color-outline-variant)',
+                  color: 'var(--md-sys-color-on-surface)',
+                  borderRadius: 8,
+                  padding: '6px 14px',
+                  cursor: 'pointer',
+                }}
+              >
                 取消
               </button>
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => void submit()}
-                style={{ background: '#B4232A', color: '#FFFFFF', border: 'none', borderRadius: 6, padding: '6px 14px', cursor: 'pointer' }}
+                style={{
+                  background: 'var(--md-sys-color-error)',
+                  color: 'var(--md-sys-color-on-error)',
+                  border: 'none',
+                  borderRadius: 8,
+                  padding: '6px 14px',
+                  cursor: 'pointer',
+                }}
               >
                 {busy ? '提交中…' : '提交举报'}
               </button>

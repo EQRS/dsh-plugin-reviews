@@ -79,7 +79,6 @@ export function PluginSubmitForm() {
       />
       <p className="muted" style={{ fontSize: 13, marginTop: 8 }}>
         检查要求：仓库可访问、<code>package.json</code> 声明了 <code>dsh.bundle</code>、且引用的配置文件存在。
-        任一条不满足都会被拒绝，<strong>不会在目录里留下条目</strong>；已收录的再提交只会刷新资料。
       </p>
 
       {error ? <ErrorNotice error={error} onDismiss={() => setError(null)} /> : null}

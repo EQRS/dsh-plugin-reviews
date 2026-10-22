@@ -22,8 +22,6 @@ export interface FailResult {
   request_id: string;
 }
 
-export type ApiResult<T> = OkResult<T> | FailResult;
-
 export function ok<T>(data: T, requestId: string): OkResult<T> {
   return { ok: true, data, request_id: requestId };
 }
@@ -55,18 +53,6 @@ export const PaginationDefaults = {
   allowed_page_sizes: [10, 20, 50] as const,
   max_page_size: 50,
 } as const;
-
-export function emptyPage<T>(req: PageRequest): PageResult<T> {
-  return {
-    items: [],
-    page: req.page,
-    page_size: req.page_size,
-    total: 0,
-    total_pages: 0,
-    has_previous: false,
-    has_next: false,
-  };
-}
 
 export function buildPage<T>(items: T[], total: number, req: PageRequest): PageResult<T> {
   const totalPages = total === 0 ? 0 : Math.ceil(total / req.page_size);

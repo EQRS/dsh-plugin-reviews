@@ -64,11 +64,11 @@ export function CorrectionForm({
         onClick={() => (authenticated ? setOpen((v) => !v) : setOpen(false))}
         disabled={!authenticated}
         title={authenticated ? '资料有误？告诉我们' : '登录后才能反馈'}
-        style={{ background: 'none', border: 'none', color: '#2456B8', cursor: authenticated ? 'pointer' : 'not-allowed', padding: 0, fontSize: 13 }}
+        style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: authenticated ? 'pointer' : 'not-allowed', padding: 0, fontSize: 13 }}
       >
         反馈资料错误
       </button>
-      {done ? <span style={{ color: '#1E5B32' }}>{done}</span> : null}
+      {done ? <span style={{ color: 'var(--success-ink)' }}>{done}</span> : null}
       {error ? <ErrorNotice error={error} onDismiss={() => setError(null)} /> : null}
 
       {open ? (
@@ -77,18 +77,26 @@ export function CorrectionForm({
           role="dialog"
           aria-label="反馈资料错误"
         >
-          <div style={{ background: '#FFFFFF', borderRadius: 10, padding: 18, width: 'min(560px, 92vw)' }}>
+          <div
+            style={{
+              background: 'var(--md-sys-color-surface-container-high)',
+              color: 'var(--md-sys-color-on-surface)',
+              borderRadius: 12,
+              padding: 18,
+              width: 'min(560px, 92vw)',
+            }}
+          >
             <h3 style={{ margin: '0 0 4px', fontSize: 16 }}>反馈资料错误</h3>
-            <p style={{ margin: '0 0 12px', color: '#526174', fontSize: 13 }}>
+            <p style={{ margin: '0 0 12px', color: 'var(--md-sys-color-on-surface-variant)', fontSize: 13 }}>
               只需要填写要改的部分；留空表示该项没问题。管理员核对后会采纳或驳回。
             </p>
 
-            <label style={{ display: 'block', fontSize: 13, color: '#526174', marginBottom: 4 }}>
+            <label style={{ display: 'block', fontSize: 13, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: 4 }}>
               展示名（现在是：{currentName ?? '（空）'}）
             </label>
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="建议改成…" style={{ ...inputStyle, width: '100%', marginBottom: 10 }} />
 
-            <label style={{ display: 'block', fontSize: 13, color: '#526174', marginBottom: 4 }}>
+            <label style={{ display: 'block', fontSize: 13, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: 4 }}>
               简介（现在是：{currentDescription ?? '（空）'})
             </label>
             <textarea
@@ -99,7 +107,7 @@ export function CorrectionForm({
               style={{ ...inputStyle, width: '100%', marginBottom: 10 }}
             />
 
-            <label style={{ display: 'block', fontSize: 13, color: '#526174', marginBottom: 4 }}>说明（必填）</label>
+            <label style={{ display: 'block', fontSize: 13, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: 4 }}>说明（必填）</label>
             <textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
@@ -108,7 +116,7 @@ export function CorrectionForm({
               style={{ ...inputStyle, width: '100%', marginBottom: 10 }}
             />
 
-            <label style={{ display: 'block', fontSize: 13, color: '#526174', marginBottom: 4 }}>参考链接（可选）</label>
+            <label style={{ display: 'block', fontSize: 13, color: 'var(--md-sys-color-on-surface-variant)', marginBottom: 4 }}>参考链接（可选）</label>
             <input
               value={referenceUrl}
               onChange={(e) => setReferenceUrl(e.target.value)}
@@ -117,7 +125,15 @@ export function CorrectionForm({
             />
 
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
-              <button type="button" onClick={() => setOpen(false)} style={{ ...buttonStyle, background: '#526174' }}>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                style={{
+                  ...buttonStyle,
+                  background: 'var(--md-sys-color-surface-container-highest)',
+                  color: 'var(--md-sys-color-on-surface)',
+                }}
+              >
                 取消
               </button>
               <button

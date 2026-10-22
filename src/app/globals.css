@@ -220,6 +220,121 @@
   --shadow-lg: var(--md-sys-elevation-level3);
 }
 
+/* ============================================================ 深色主题
+   同一套鼠尾草绿品牌色，表面换成深橄榄；只覆盖颜色/阴影角色，
+   形状、排版、动效令牌不动。由 <html data-theme="dark"> 触发。 */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --md-sys-color-primary: #a9c9a3;
+  --md-sys-color-on-primary: #1d3319;
+  --md-sys-color-primary-container: #35502f;
+  --md-sys-color-on-primary-container: #dcead6;
+  --md-sys-color-secondary: #e5c3a9;
+  --md-sys-color-on-secondary: #3a2a1f;
+  --md-sys-color-secondary-container: #5a4232;
+  --md-sys-color-on-secondary-container: #f2e5da;
+  --md-sys-color-tertiary: #a8d4cc;
+  --md-sys-color-on-tertiary: #17332e;
+  --md-sys-color-tertiary-container: #2f4f49;
+  --md-sys-color-on-tertiary-container: #d8ece7;
+  --md-sys-color-error: #ffb4ab;
+  --md-sys-color-on-error: #690005;
+  --md-sys-color-error-container: #93000a;
+  --md-sys-color-on-error-container: #ffdad6;
+
+  --md-sys-color-surface: #121810;
+  --md-sys-color-surface-container-lowest: #0d120c;
+  --md-sys-color-surface-container-low: #171e15;
+  --md-sys-color-surface-container: #1b2319;
+  --md-sys-color-surface-container-high: #252e22;
+  --md-sys-color-surface-container-highest: #303a2c;
+  --md-sys-color-on-surface: #e2e8da;
+  --md-sys-color-on-surface-variant: #bcc8b2;
+  --md-sys-color-outline: #87957c;
+  --md-sys-color-outline-variant: #3f4a39;
+  --md-sys-color-inverse-surface: #e2e8da;
+  --md-sys-color-inverse-on-surface: #2b3628;
+  --md-sys-color-inverse-primary: #4e7a4e;
+  --md-sys-color-scrim: #000000;
+  --md-sys-color-shadow: #000000;
+
+  /* 旧别名里两个写死的墨色/状态色需要单独换掉，其余 var() 别名自动跟随 */
+  --bright: #f0f5e8;
+  --body-text: #d5ddca;
+  --warn-ink: #f0c36a;
+  --warn-bg: color-mix(in srgb, #f0c36a 16%, transparent);
+  --success-ink: #8fd6a1;
+  --success-bg: color-mix(in srgb, #8fd6a1 16%, transparent);
+
+  --md-sys-elevation-level1: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.35);
+  --md-sys-elevation-level2: 0 1px 2px rgba(0, 0, 0, 0.55), 0 4px 10px rgba(0, 0, 0, 0.4);
+  --md-sys-elevation-level3: 0 2px 4px rgba(0, 0, 0, 0.55), 0 8px 18px rgba(0, 0, 0, 0.45);
+  --md-sys-elevation-level4: 0 2px 4px rgba(0, 0, 0, 0.6), 0 10px 24px rgba(0, 0, 0, 0.5);
+  --md-sys-elevation-level5: 0 4px 6px rgba(0, 0, 0, 0.6), 0 14px 32px rgba(0, 0, 0, 0.55);
+}
+
+/* 个人设置 · 外观：M3 switch（只影响主题，不触发任何业务逻辑） */
+.theme-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 0;
+}
+.theme-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.theme-row-title {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+.theme-row-desc {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.md-switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 52px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--md-sys-shape-corner-full);
+  background: var(--md-sys-color-surface-container-highest);
+  cursor: pointer;
+  transition: background-color var(--md-sys-motion-duration-short4)
+    var(--md-sys-motion-easing-standard);
+}
+.md-switch[aria-checked='true'] {
+  background: var(--md-sys-color-primary);
+}
+.md-switch-thumb {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--md-sys-color-outline);
+  transition: transform var(--md-sys-motion-duration-short4)
+      var(--md-sys-motion-easing-emphasized),
+    background-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+}
+.md-switch[aria-checked='true'] .md-switch-thumb {
+  transform: translateX(20px);
+  background: var(--md-sys-color-on-primary);
+}
+.md-switch:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
 /* ------------------------------------------------------------------- 基础 */
 
 *,
@@ -560,6 +675,9 @@ p {
   min-height: calc(100vh - 200px);
   margin: 0 auto;
   min-width: 0;
+  /* 栏目切换的横向滑入会临时平移 28px：在容器上裁掉，避免出现横向滚动条
+     （否则固定底栏会随 innerHeight 跳一下）。 */
+  overflow-x: clip;
 }
 
 /* .footer 已随页脚删除（主人要求去掉下栏），不留死样式 */
@@ -735,7 +853,7 @@ p {
 /* ------------------------------------------------------------ 控件（M3 按钮）
    M3 按钮规范：高度 40dp、**全圆角**、label-large（14/500）、水平内边距 24dp、
    状态层用"容器色 92% + 内容色 8%"叠出来（不换主题色、不抬高）。
-   变体：filled（.primary）／tonal（.tonal）／outlined（.outlined）／text（.text）。 */
+   变体：filled（.primary）／tonal（.tonal）。 */
 .button,
 button.button {
   display: inline-flex;
@@ -790,24 +908,6 @@ button.button:hover {
     var(--md-sys-color-on-secondary-container)
   );
   color: var(--md-sys-color-on-secondary-container);
-}
-.button.outlined {
-  background: transparent;
-  border: 1px solid var(--md-sys-color-outline);
-  color: var(--md-sys-color-primary);
-}
-.button.outlined:hover {
-  background: color-mix(in srgb, var(--md-sys-color-primary) 8%, transparent);
-  color: var(--md-sys-color-primary);
-}
-.button.text {
-  padding: 0 12px;
-  background: transparent;
-  color: var(--md-sys-color-primary);
-}
-.button.text:hover {
-  background: color-mix(in srgb, var(--md-sys-color-primary) 8%, transparent);
-  color: var(--md-sys-color-primary);
 }
 .button:disabled,
 button:disabled {
@@ -1238,8 +1338,6 @@ label {
 .article-meta span,
 .list-meta,
 .list-meta a,
-.comment-body,
-.comment-body a,
 .facts dd,
 .plugin-desc {
   overflow-wrap: anywhere;
@@ -1649,6 +1747,46 @@ label {
   from { opacity: 0; transform: scale(0.97); }
   to { opacity: 1; transform: none; }
 }
+/* 顶栏栏目切换：MD3 shared axis X —— 新内容从左侧/右侧 28px 滑入并淡入 */
+@keyframes fx-slide-right {
+  from {
+    opacity: 0;
+    transform: translate3d(28px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes fx-slide-left {
+  from {
+    opacity: 0;
+    transform: translate3d(-28px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.fx-slide-right {
+  animation: fx-slide-right var(--md-sys-motion-duration-medium2)
+    var(--md-sys-motion-easing-emphasized-decelerate) both;
+}
+.fx-slide-left {
+  animation: fx-slide-left var(--md-sys-motion-duration-medium2)
+    var(--md-sys-motion-easing-emphasized-decelerate) both;
+}
+/* 账户下拉：从触发键下方滑下（MD3 menu 的 enter） */
+@keyframes fx-menu-down {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -8px, 0) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
 @keyframes fx-sheen {
   from { background-position: -140% 0; }
   to { background-position: 240% 0; }
@@ -1820,7 +1958,9 @@ button:not(:disabled):active,
   right: 0;
   z-index: 1002;
   width: 264px;
-  animation: fx-pop 0.18s cubic-bezier(0.2, 0.7, 0.25, 1) both;
+  transform-origin: top right;
+  animation: fx-menu-down var(--md-sys-motion-duration-short4)
+    var(--md-sys-motion-easing-emphasized-decelerate) both;
 }
 /* 头像：触发键里是 22px 小圆，菜单头部是 36px 圆 */
 .account-avatar {
@@ -2163,6 +2303,84 @@ input[type='search']:focus {
   border-bottom: none;
 }
 
+/* 首页辅栏插件卡片：压成「标题 + 一行简介 + 一行元信息」，10 条约一屏 */
+.item-list > .home-plugin-item {
+  min-height: 0;
+  padding: 4px 12px;
+}
+.home-plugin-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  color: inherit;
+}
+.home-plugin-card:hover {
+  color: inherit;
+}
+.home-plugin-item .icon {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+.home-plugin-item .icon img {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
+.home-plugin-item h3 {
+  margin: 0 0 2px;
+  font-size: 14px;
+  line-height: 1.35;
+}
+.home-plugin-item .item-body > .home-plugin-desc {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  overflow: hidden;
+  margin: 0 0 3px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.home-plugin-item .list-meta {
+  margin: 0;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.home-plugin-item .list-meta .tag {
+  height: 18px;
+  margin: 0;
+  padding: 0 6px;
+  font-size: 10px;
+}
+.home-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 16px;
+}
+
+/* 桌面端两栏等高：插件栏把 10 条均分到面板剩余高度，正好填满圆角，
+   不再在按钮下面留一大块空白（主人要求：大小刚好占据这个圆角）。 */
+@media (min-width: 901px) {
+  .home-feed aside.panel {
+    display: flex;
+    flex-direction: column;
+  }
+  .home-feed aside .home-plugin-list {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+  }
+  .home-feed aside .home-plugin-list > .home-plugin-item {
+    flex: 1 1 0;
+  }
+}
+
 /* ---------------------------------------------------------- 提示（M3 容器色）
    M3 没有 banner 之外的"提示"组件，这里按容器色角色映射：
    error → error-container / on-error-container；warn、success 是本站自定义角色（已注明）。 */
@@ -2253,7 +2471,7 @@ input[type='search']:focus {
   background: transparent;
   color: var(--md-sys-color-primary);
 }
-.main-nav a.active::after {
+.main-nav a::after {
   content: '';
   position: absolute;
   right: 12px;
@@ -2262,6 +2480,16 @@ input[type='search']:focus {
   height: 3px;
   border-radius: 3px 3px 0 0;
   background: var(--md-sys-color-primary);
+  transform: scaleX(0);
+  transform-origin: center;
+  transition: transform var(--md-sys-motion-duration-short4)
+    var(--md-sys-motion-easing-emphasized);
+}
+.main-nav a:hover::after {
+  transform: scaleX(0.4);
+}
+.main-nav a.active::after {
+  transform: scaleX(1);
 }
 
 /* --------------------------------------------- 账户触发器（M3 色调 chip 形态） */
@@ -2800,6 +3028,13 @@ input[type='search']:focus {
 .nav-bar-item.active .nav-bar-indicator svg {
   color: var(--md-sys-color-on-secondary-container);
 }
+/* 底栏切换：文字与图标颜色跟随 M3 时长过渡，不要瞬切 */
+.nav-bar-item {
+  transition: color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+}
+.nav-bar-indicator svg {
+  transition: color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+}
 
 /* ============================================================================
  * 移动端版式重构
@@ -2937,6 +3172,14 @@ input[type='search']:focus {
     min-height: 0;
     padding: 12px;
   }
+  /* 首页辅栏只展示 10 条：压到一屏，内边距比通用列表更小；手机上不再显示简介，
+     只留「名字 + 评测数/标签」，10 条稳定放进一屏。 */
+  .item-list > .home-plugin-item {
+    padding: 5px 12px;
+  }
+  .home-plugin-item .item-body > .home-plugin-desc {
+    display: none;
+  }
   /* 手机屏幕窄：插件卡不再显示"作者 / 资料更新 / 仓库更新"三行，评测条目不再显示作者与时间。
      桌面端保留这些信息（只在 ≤900px 隐藏），数据仍在 DOM 里、不删接口字段。 */
   .plugin-card-meta,
@@ -3029,12 +3272,6 @@ input[type='search']:focus {
   .read-layout {
     grid-template-columns: minmax(0, 1fr);
     gap: 16px;
-  }
-  /* 懒渲染：离屏条目跳过布局与绘制（浏览器原生 content-visibility），
-     contain-intrinsic-size 记住真实高度，滚动条不会跳。 */
-  .home-feed .item-list > .item {
-    content-visibility: auto;
-    contain-intrinsic-size: auto 120px;
   }
   /* 首页栏目切换：TAG 下方居中；滑块滑动 + 栏目横向滑入。
      桌面端不显示这一组规则（两栏同时展示，行为不变）。 */
