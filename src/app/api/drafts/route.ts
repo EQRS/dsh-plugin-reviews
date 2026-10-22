@@ -11,7 +11,7 @@
  */
 
 import { getDb } from '@/server/platform/db';
-import { reviewsService } from '@/server/modules/reviews';
+import { reviewsService, type DraftPayload } from '@/server/modules/reviews';
 import { err } from '@/packages/common/errors';
 import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../_lib/context';
 import { submitReview } from '@/server/workflows/submit-review';
@@ -32,8 +32,10 @@ interface EditBody {
   expectedSaveVersion?: unknown;
   /** 五状态判定（dsh-bench 规范）：PATCH 提交时原样透传，校验在 submitReview 内。 */
   verdict?: unknown;
-  /** 证据链（[{url, note?}]）：同上。 */
+  /** 证据链（[{url, note?}]）：PUT 保存与 PATCH 提交共用同一个字段名。 */
   evidenceRefs?: unknown;
+  /** 测评档位（quick/standard/deep/security）：PUT 保存与 PATCH 提交共用。 */
+  assessmentLevel?: unknown;
 }
 
 function requireString(v: unknown, path: string): string {
@@ -43,7 +45,7 @@ function requireString(v: unknown, path: string): string {
   return v;
 }
 
-function draftPayloadOf(body: EditBody) {
+export function draftPayloadOf(body: EditBody): DraftPayload {
   // 结构必须完整：不允许用缺字段静默表达"沿用旧值"（架构第 68.2 节）。
   return {
     title: typeof body.title === 'string' ? body.title : '',
@@ -51,6 +53,12 @@ function draftPayloadOf(body: EditBody) {
     pluginVersion: (body.pluginVersion ?? { kind: 'unknown' }) as VersionValue,
     dshVersion: (body.dshVersion ?? { kind: 'unknown' }) as VersionValue,
     body: Array.isArray(body.body) ? (body.body as { key: string; markdown: string }[]) : [],
+    // 五状态判定与证据链（dsh-bench 规范）：必须随草稿一起保存，否则重新打开
+    // 草稿时判定/证据丢失（提交时又会被当成"没选判定"）。合法性交给
+    // parseDraftPayload 统一 fail-closed 校验，这里只做原样透传。
+    verdict: (body.verdict ?? null) as DraftPayload['verdict'],
+    evidence: (body.evidenceRefs ?? []) as DraftPayload['evidence'],
+    assessmentLevel: (body.assessmentLevel ?? null) as DraftPayload['assessmentLevel'],
   };
 }
 
@@ -124,6 +132,7 @@ export async function PATCH(request: Request): Promise<Response> {
         // （同 draftPayloadOf 的口径），合法性校验在 submitReview 内 fail-closed。
         verdict: typeof body.verdict === 'string' ? body.verdict : null,
         evidenceRefs: body.evidenceRefs,
+        assessmentLevel: typeof body.assessmentLevel === 'string' ? body.assessmentLevel : null,
       },
       getDb(),
     );

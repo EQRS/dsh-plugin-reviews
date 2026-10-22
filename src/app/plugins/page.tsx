@@ -12,6 +12,7 @@ import { getDb } from '@/server/platform/db';
 import { createCatalogService } from '@/server/modules/catalog';
 import { UNCATEGORIZED_CATEGORY } from '@/server/modules/catalog/service';
 import { formatDateTimeOr } from '@/packages/common/time';
+import { tierLabel, securityLabel } from '@/packages/common/assessment';
 import type { PluginSummary } from '@/server/modules/catalog/types';
 
 export const dynamic = 'force-dynamic';
@@ -25,6 +26,7 @@ interface DirectoryConditions {
   /** 原始 GitHub topic 精确筛选（旧链接兼容；页面不再生成这类链接）。 */
   tag?: string;
   hasReviews: 'all' | 'yes' | 'no';
+  assessment: 'all' | 'quick' | 'standard' | 'security';
   sort: 'info' | 'reviews';
   page: number;
 }
@@ -37,12 +39,17 @@ function firstValue(v: string | string[] | undefined): string | undefined {
 function readConditions(sp: Record<string, string | string[] | undefined>): DirectoryConditions {
   const rawPage = Number.parseInt(firstValue(sp.page) ?? '1', 10);
   const hasReviewsRaw = firstValue(sp.has_reviews);
+  const assessmentRaw = firstValue(sp.assessment);
   return {
     // 关键词截断到 100 字：搜索框不是注入口
     q: firstValue(sp.q)?.trim().slice(0, 100) || undefined,
     cat: firstValue(sp.cat)?.slice(0, 40) || undefined,
     tag: firstValue(sp.tag)?.slice(0, 64) || undefined,
     hasReviews: hasReviewsRaw === 'yes' || hasReviewsRaw === 'no' ? hasReviewsRaw : 'all',
+    assessment:
+      assessmentRaw === 'quick' || assessmentRaw === 'standard' || assessmentRaw === 'security'
+        ? assessmentRaw
+        : 'all',
     sort: firstValue(sp.sort) === 'reviews' ? 'reviews' : 'info',
     page: Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1,
   };
@@ -56,6 +63,7 @@ function listHref(current: DirectoryConditions, over: Partial<DirectoryCondition
   if (merged.cat) params.set('cat', merged.cat);
   if (merged.tag) params.set('tag', merged.tag);
   if (merged.hasReviews !== 'all') params.set('has_reviews', merged.hasReviews);
+  if (merged.assessment !== 'all') params.set('assessment', merged.assessment);
   if (merged.sort !== 'info') params.set('sort', merged.sort);
   if (over.page !== undefined && over.page > 1) params.set('page', String(over.page));
   const qs = params.toString();
@@ -108,6 +116,8 @@ function PluginCard({ plugin }: { plugin: PluginSummary }) {
           ) : (
             <Chip text="暂无评测" />
           )}
+          <Chip text={tierLabel(plugin.assessmentTier)} />
+          <Chip text={securityLabel(plugin.securityAudit)} tone={plugin.securityAudit === true ? 'tag' : 'plain'} />
           {plugin.isArchived ? <Chip text="已归档" tone="warn" /> : null}
           {plugin.availabilityState !== 'available' ? <Chip text="仓库暂不可访问" tone="warn" /> : null}
         </div>
@@ -137,6 +147,7 @@ export default async function PluginsPage({
     category: conditions.cat,
     tag: conditions.tag,
     hasReviews: conditions.hasReviews,
+    assessment: conditions.assessment,
     sort: conditions.sort,
   });
   // 侧栏 chip 用分类（中文、按不同仓库计数）
@@ -218,6 +229,9 @@ export default async function PluginsPage({
               {conditions.hasReviews !== 'all' ? (
                 <input type="hidden" name="has_reviews" value={conditions.hasReviews} />
               ) : null}
+              {conditions.assessment !== 'all' ? (
+                <input type="hidden" name="assessment" value={conditions.assessment} />
+              ) : null}
               {conditions.sort !== 'info' ? <input type="hidden" name="sort" value={conditions.sort} /> : null}
               <button type="submit" className="search-go" aria-label="搜索">
                 {/* 搜索动作简化成放大镜图标按钮（与首页同一形态），与输入框保持同一行 */}
@@ -250,6 +264,24 @@ export default async function PluginsPage({
                     className={conditions.hasReviews === v ? 'active' : ''}
                   >
                     {v === 'all' ? '全部' : v === 'yes' ? '已有评测' : '暂无评测'}
+                  </Link>
+                ))}
+              </div>
+              <div className="filter-group">
+                <span className="group-label">档位：</span>
+                {(['all', 'quick', 'standard', 'security'] as const).map((v) => (
+                  <Link
+                    key={v}
+                    href={listHref(conditions, { assessment: v })}
+                    className={conditions.assessment === v ? 'active' : ''}
+                  >
+                    {v === 'all'
+                      ? '全部'
+                      : v === 'quick'
+                        ? '已快测'
+                        : v === 'standard'
+                          ? '已标测'
+                          : '已安全审计'}
                   </Link>
                 ))}
               </div>
