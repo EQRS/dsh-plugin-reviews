@@ -11,6 +11,7 @@
 
 import { getDb } from '@/server/platform/db';
 import { contentService } from '@/server/modules/content';
+import { reviewsService } from '@/server/modules/reviews';
 import { err } from '@/packages/common/errors';
 import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../../../_lib/context';
 
@@ -29,6 +30,8 @@ export async function POST(
       expectedControlVersion?: unknown;
       reason?: unknown;
       requestKey?: unknown;
+      /** true = 撤回后同时删除作者草稿（可选，默认仅撤回）。 */
+      deleteDraft?: unknown;
     };
 
     if (!Number.isInteger(body.expectedControlVersion)) {
@@ -49,7 +52,15 @@ export async function POST(
       getDb(),
     );
 
-    return okJson({ withdrawnAt: result.withdrawnAt }, requestId);
+    // 撤回已经生效；删除草稿是可选的后置动作。草稿不存在时按「没有草稿可删」处理，
+    // 不把撤回结果变成失败。
+    let draftDeleted = false;
+    if (body.deleteDraft === true) {
+      const deleted = await reviewsService.deleteDraftByReview(ctx, reviewId, getDb());
+      draftDeleted = deleted.deleted;
+    }
+
+    return okJson({ withdrawnAt: result.withdrawnAt, draftDeleted }, requestId);
   } catch (e) {
     return errorResponse(e, requestId);
   }

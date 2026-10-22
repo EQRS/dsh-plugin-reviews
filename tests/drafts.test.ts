@@ -876,4 +876,27 @@ describe('deleteDraft：删除草稿时按需撤回评测', () => {
       ErrorCodes.INPUT_INVALID,
     );
   });
+
+  it('deleteDraftByReview：已撤回评测的草稿可删除；重复调用返回 deleted=false', async () => {
+    const { db } = setup();
+    const fixture = await makeSubmittedDraft(db, { publish: true });
+    // 撤回接口会先更新 content_entities；这里模拟「撤回已完成」的状态。
+    db.prepare(
+      `UPDATE content_entities
+          SET withdrawn_at = ?, withdrawal_reason = ?,
+              visibility_control_version = visibility_control_version + 1
+        WHERE id = ?`,
+    ).run(Date.now(), '测试撤回', fixture.reviewId);
+
+    const first = await reviewsService.deleteDraftByReview(caller(fixture.author), fixture.reviewId, db);
+    expect(first).toEqual({ deleted: true, withdrawn: false });
+
+    const draft = db
+      .prepare('SELECT deleted_at FROM content_drafts WHERE id = ?')
+      .get(fixture.draftId) as { deleted_at: number | null };
+    expect(draft.deleted_at).not.toBeNull();
+
+    const second = await reviewsService.deleteDraftByReview(caller(fixture.author), fixture.reviewId, db);
+    expect(second).toEqual({ deleted: false, withdrawn: false });
+  });
 });

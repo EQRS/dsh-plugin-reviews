@@ -711,6 +711,37 @@ export const reviewsService = {
       return { deleted: unique.length, withdrawn };
     }, db);
   },
+
+  /**
+   * 按评测 ID 删除作者草稿（「撤回并删除草稿」用）。
+   *
+   * 草稿不存在/已删除时返回 `{ deleted: false }`，不报错——撤回已经发生，
+   * 调用方不应因为「没有草稿可删」把撤回结果变成失败。
+   * 已撤回的评测在这里不会再次撤回（withdrawn=false），只删除草稿。
+   */
+  async deleteDraftByReview(
+    ctx: CallerContext,
+    reviewId: string,
+    db?: SqliteDatabase,
+  ): Promise<{ deleted: boolean; withdrawn: boolean }> {
+    const userId = requireActiveUser(ctx);
+    if (typeof reviewId !== 'string' || !isUuidV7(reviewId)) {
+      throw err.input('评测标识格式不正确。', [{ path: 'review_id', message: '必须是规范 UUIDv7' }]);
+    }
+    return withTransaction((tx) => {
+      const row = tx.db
+        .prepare(
+          `SELECT id FROM content_drafts
+              WHERE review_id = ? AND owner_id = ? AND draft_type = 'review' AND deleted_at IS NULL
+              ORDER BY saved_at DESC, id DESC
+              LIMIT 1`,
+        )
+        .get(reviewId, userId) as { id: string } | undefined;
+      if (!row) return { deleted: false, withdrawn: false };
+      const result = deleteDraftInTx(tx.db, userId, row.id);
+      return { deleted: true, withdrawn: result.withdrawn };
+    }, db);
+  },
 };
 
 /** 分页读取某个作者的草稿列表（工作台用；不属于契约必需项，但保持只读语义）。 */
