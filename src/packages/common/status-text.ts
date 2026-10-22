@@ -3,16 +3,7 @@
  * 不散落在各页面里，也不能靠匹配中文判断流程）。
  */
 
-import type {
-  AccountStatus,
-  ModerationResult,
-  RepositoryAvailabilityState,
-  ReviewSourceKind,
-  SubmissionState,
-  TaskState,
-  UserRole,
-  VersionValue,
-} from './field-rules';
+import type { RepositoryAvailabilityState, SubmissionState, VersionValue } from './field-rules';
 
 export const submissionStateLabels: Record<SubmissionState, string> = {
   pending: '已提交，等待处理',
@@ -24,42 +15,10 @@ export const submissionStateLabels: Record<SubmissionState, string> = {
   ineligible: '已失去发布资格',
 };
 
-export const taskStateLabels: Record<TaskState, string> = {
-  queued: '排队中',
-  running: '执行中',
-  retry_wait: '等待重试',
-  succeeded: '执行完成',
-  failed: '执行失败',
-  skipped: '已跳过',
-};
-
-export const moderationResultLabels: Record<ModerationResult, string> = {
-  pass: '检查通过',
-  needs_changes: '需要修改',
-  manual_review: '转人工处理',
-  fault: '检查故障',
-  ineligible: '不再具备处理资格',
-};
-
-export const reviewSourceLabels: Record<ReviewSourceKind, string> = {
-  community: '社区评测',
-  site: '站点评测',
-};
-
 export const repositoryAvailabilityLabels: Record<RepositoryAvailabilityState, string> = {
   unknown: '状态未知',
   available: '可访问',
   unavailable: '暂不可访问',
-};
-
-export const roleLabels: Record<UserRole, string> = {
-  user: '普通用户',
-  admin: '管理员',
-};
-
-export const accountStatusLabels: Record<AccountStatus, string> = {
-  active: '正常',
-  disabled: '已禁用',
 };
 
 /**

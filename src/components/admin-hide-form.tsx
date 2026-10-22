@@ -21,7 +21,7 @@ import { ApiError, ErrorNotice, apiFetch, newRequestKey } from './api-client';
 
 type Action = 'hide' | 'unhide';
 
-export interface ContentVisibilitySnapshot {
+interface ContentVisibilitySnapshot {
   publiclyVisible: boolean;
   withdrawn: boolean;
   hasPublishedRevision: boolean;

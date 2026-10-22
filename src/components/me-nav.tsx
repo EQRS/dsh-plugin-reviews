@@ -11,7 +11,7 @@
 
 import Link from 'next/link';
 
-export type MeSection = 'reviews' | 'favorites' | 'notifications' | 'settings';
+type MeSection = 'reviews' | 'favorites' | 'notifications' | 'settings';
 
 export function MeNav({ current }: { current: MeSection }) {
   return (

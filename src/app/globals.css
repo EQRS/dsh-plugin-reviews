@@ -735,7 +735,7 @@ p {
 /* ------------------------------------------------------------ 控件（M3 按钮）
    M3 按钮规范：高度 40dp、**全圆角**、label-large（14/500）、水平内边距 24dp、
    状态层用"容器色 92% + 内容色 8%"叠出来（不换主题色、不抬高）。
-   变体：filled（.primary）／tonal（.tonal）／outlined（.outlined）／text（.text）。 */
+   变体：filled（.primary）／tonal（.tonal）。 */
 .button,
 button.button {
   display: inline-flex;
@@ -790,24 +790,6 @@ button.button:hover {
     var(--md-sys-color-on-secondary-container)
   );
   color: var(--md-sys-color-on-secondary-container);
-}
-.button.outlined {
-  background: transparent;
-  border: 1px solid var(--md-sys-color-outline);
-  color: var(--md-sys-color-primary);
-}
-.button.outlined:hover {
-  background: color-mix(in srgb, var(--md-sys-color-primary) 8%, transparent);
-  color: var(--md-sys-color-primary);
-}
-.button.text {
-  padding: 0 12px;
-  background: transparent;
-  color: var(--md-sys-color-primary);
-}
-.button.text:hover {
-  background: color-mix(in srgb, var(--md-sys-color-primary) 8%, transparent);
-  color: var(--md-sys-color-primary);
 }
 .button:disabled,
 button:disabled {
@@ -1238,8 +1220,6 @@ label {
 .article-meta span,
 .list-meta,
 .list-meta a,
-.comment-body,
-.comment-body a,
 .facts dd,
 .plugin-desc {
   overflow-wrap: anywhere;
@@ -2163,6 +2143,84 @@ input[type='search']:focus {
   border-bottom: none;
 }
 
+/* 首页辅栏插件卡片：压成「标题 + 一行简介 + 一行元信息」，10 条约一屏 */
+.item-list > .home-plugin-item {
+  min-height: 0;
+  padding: 4px 12px;
+}
+.home-plugin-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  color: inherit;
+}
+.home-plugin-card:hover {
+  color: inherit;
+}
+.home-plugin-item .icon {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+.home-plugin-item .icon img {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
+.home-plugin-item h3 {
+  margin: 0 0 2px;
+  font-size: 14px;
+  line-height: 1.35;
+}
+.home-plugin-item .item-body > .home-plugin-desc {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  overflow: hidden;
+  margin: 0 0 3px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.home-plugin-item .list-meta {
+  margin: 0;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.home-plugin-item .list-meta .tag {
+  height: 18px;
+  margin: 0;
+  padding: 0 6px;
+  font-size: 10px;
+}
+.home-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 16px;
+}
+
+/* 桌面端两栏等高：插件栏把 10 条均分到面板剩余高度，正好填满圆角，
+   不再在按钮下面留一大块空白（主人要求：大小刚好占据这个圆角）。 */
+@media (min-width: 901px) {
+  .home-feed aside.panel {
+    display: flex;
+    flex-direction: column;
+  }
+  .home-feed aside .home-plugin-list {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+  }
+  .home-feed aside .home-plugin-list > .home-plugin-item {
+    flex: 1 1 0;
+  }
+}
+
 /* ---------------------------------------------------------- 提示（M3 容器色）
    M3 没有 banner 之外的"提示"组件，这里按容器色角色映射：
    error → error-container / on-error-container；warn、success 是本站自定义角色（已注明）。 */
@@ -2937,6 +2995,14 @@ input[type='search']:focus {
     min-height: 0;
     padding: 12px;
   }
+  /* 首页辅栏只展示 10 条：压到一屏，内边距比通用列表更小；手机上不再显示简介，
+     只留「名字 + 评测数/标签」，10 条稳定放进一屏。 */
+  .item-list > .home-plugin-item {
+    padding: 5px 12px;
+  }
+  .home-plugin-item .item-body > .home-plugin-desc {
+    display: none;
+  }
   /* 手机屏幕窄：插件卡不再显示"作者 / 资料更新 / 仓库更新"三行，评测条目不再显示作者与时间。
      桌面端保留这些信息（只在 ≤900px 隐藏），数据仍在 DOM 里、不删接口字段。 */
   .plugin-card-meta,
@@ -3029,12 +3095,6 @@ input[type='search']:focus {
   .read-layout {
     grid-template-columns: minmax(0, 1fr);
     gap: 16px;
-  }
-  /* 懒渲染：离屏条目跳过布局与绘制（浏览器原生 content-visibility），
-     contain-intrinsic-size 记住真实高度，滚动条不会跳。 */
-  .home-feed .item-list > .item {
-    content-visibility: auto;
-    contain-intrinsic-size: auto 120px;
   }
   /* 首页栏目切换：TAG 下方居中；滑块滑动 + 栏目横向滑入。
      桌面端不显示这一组规则（两栏同时展示，行为不变）。 */

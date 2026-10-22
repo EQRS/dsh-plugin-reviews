@@ -12,19 +12,19 @@
 
 import type { BusinessError, FieldError } from '@/packages/common/errors';
 
-export interface ApiSuccess<T> {
+interface ApiSuccess<T> {
   ok: true;
   data: T;
   request_id: string;
 }
 
-export interface ApiFailure {
+interface ApiFailure {
   ok: false;
   error: BusinessError;
   request_id: string;
 }
 
-export type ApiEnvelope<T> = ApiSuccess<T> | ApiFailure;
+type ApiEnvelope<T> = ApiSuccess<T> | ApiFailure;
 
 /** 调用 API 失败时抛出的错误：携带后端原始 message 与稳定 code。 */
 export class ApiError extends Error {
@@ -168,16 +168,6 @@ export const buttonStyle: React.CSSProperties = {
   background: 'var(--accent)',
   color: 'var(--on-primary)',
   border: 'none',
-  borderRadius: 6,
-  padding: '8px 14px',
-  cursor: 'pointer',
-  fontSize: 14,
-};
-
-export const secondaryButtonStyle: React.CSSProperties = {
-  background: 'var(--surface)',
-  color: 'var(--accent)',
-  border: '1px solid var(--accent)',
   borderRadius: 6,
   padding: '8px 14px',
   cursor: 'pointer',

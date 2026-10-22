@@ -21,9 +21,6 @@ export default async function NewPluginPage() {
       <BackLink href="/plugins">返回插件目录</BackLink>
 
       <h1>提交插件</h1>
-      <p className="muted" style={{ marginTop: 0 }}>
-        提交一个 GitHub 仓库链接，检查通过后才会建立插件条目。收录不等于已实测可用。
-      </p>
 
       {ctx.userId === null ? (
         <div className="notice warn">

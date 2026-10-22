@@ -4,19 +4,21 @@
  * 视觉：英雄区大字展示标题 + 搜索，直接落在深色底上（不套面板）；
  * 下面双栏面板（最新评测约 2/3 + 近期更新插件约 1/3）。
  *
- * 三块都真实渲染：没数据就显示空状态，不塞样例数据。
- * 插件一块的排序口径必须与 /plugins 一致，否则首页与目录会各说各话。
+ * 两个列表各只取 10 条，面板底部给「查看全部」按钮跳转到对应列表页；
+ * 不再做滚动懒加载（主人要求：一屏看完 + 明确出口）。
  */
 
 import Link from 'next/link';
 import { HomeFeed } from '@/components/home-feed';
-import { LoadMore } from '@/components/load-more';
 import { getDb } from '@/server/platform/db';
 import { resolveVisibilityInTx } from '@/server/modules/content';
 import { createCatalogService } from '@/server/modules/catalog';
 import { formatDateTimeOr } from '@/packages/common/time';
 
 export const dynamic = 'force-dynamic';
+
+/** 首页每个栏目只展示 10 条。 */
+const HOME_LIMIT = 10;
 
 interface Row {
   review_id: string;
@@ -29,7 +31,7 @@ interface Row {
   repo_full_name: string | null;
 }
 
-function latestPublicReviews(limit: number): { rows: Row[]; total: number } {
+function latestPublicReviews(limit: number): Row[] {
   const db = getDb();
   const rows = db
     .prepare(
@@ -45,7 +47,7 @@ function latestPublicReviews(limit: number): { rows: Row[]; total: number } {
     .all() as Row[];
   // 公开资格逐行核验，不另存公开状态字段。
   const visible = rows.filter((row) => resolveVisibilityInTx(db, row.review_id).publiclyVisible);
-  return { rows: visible.slice(0, limit), total: visible.length };
+  return visible.slice(0, limit);
 }
 
 /** 评测对应的插件展示名：清单名优先（缺则仓库全名），子目录形态带上子路径；插件被删也不会崩（LEFT JOIN）。 */
@@ -62,25 +64,10 @@ function categoryHref(slug: string | null): string {
   return `/plugins?cat=${encodeURIComponent(slug)}`;
 }
 
-/** 滚动加载的条数参数：只允许在默认值之上增加（防止 URL 把列表清空）。 */
-function readCount(raw: string | string[] | undefined, fallback: number, max: number): number {
-  const value = Number.parseInt((Array.isArray(raw) ? raw[0] : raw) ?? '', 10);
-  return Number.isFinite(value) ? Math.min(Math.max(value, fallback), max) : fallback;
-}
-
-export default async function HomePage({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
-  const sp = await searchParams;
-  // 首屏只取默认条数（24 / 12）；滚动到底部附近时由 LoadMore 递增 rv / pv。
-  // 上限只是防 URL 恶意放大渲染量，必须高于实际总量，否则最后一批会被夹回去、永远加载不完。
-  const reviewLimit = readCount(sp.rv, 24, 1000);
-  const pluginLimit = readCount(sp.pv, 12, 1000);
-  const { rows: reviews, total: reviewTotal } = latestPublicReviews(reviewLimit);
+export default async function HomePage() {
+  const reviews = latestPublicReviews(HOME_LIMIT);
   const catalog = createCatalogService({ db: getDb() });
-  const recentPlugins = await catalog.listPlugins({ page: 1, page_size: pluginLimit });
+  const recentPlugins = await catalog.listPlugins({ page: 1, page_size: HOME_LIMIT });
   // 页面 chip 行用**分类**（中文、按不同仓库计数），不再直接暴露原始 topics
   const categories = await catalog.listCategories();
 
@@ -157,9 +144,7 @@ export default async function HomePage({
                       </span>
                       <div className="item-main">
                         <h3 className="item-title">
-                          <Link href={`/reviews/${r.review_id}`} className="truncate" style={{ display: 'block' }}>
-                            {r.title}
-                          </Link>
+                          <Link href={`/reviews/${r.review_id}`}>{r.title}</Link>
                         </h3>
                         <div className="list-meta">
                           {pluginLabel(r) === null ? (
@@ -178,8 +163,11 @@ export default async function HomePage({
               ))}
             </ul>
           )}
-          {/* 滚到这里附近时再向服务端要下一批（桌面端同样生效）。 */}
-          <LoadMore param="rv" value={reviewLimit} step={12} total={reviewTotal} />
+          <div className="home-more">
+            <Link href="/reviews" className="button tonal">
+              查看全部评测
+            </Link>
+          </div>
         </section>
 
         {/* 辅栏：近期更新插件 */}
@@ -194,46 +182,40 @@ export default async function HomePage({
             </p>
           ) : (
             <>
-              <ul className="item-list">
+              <ul className="item-list home-plugin-list">
                 {recentPlugins.items.map((p) => {
                   const initial = (p.displayName ?? p.repositoryFullName).slice(0, 1).toUpperCase();
                   return (
-                    <li key={p.pluginId} className="item">
-                      <span className="icon">
-                        {p.ownerAvatarUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={p.ownerAvatarUrl} alt="" width={42} height={42} loading="lazy" decoding="async" />
-                        ) : (
-                          initial
-                        )}
-                      </span>
-                      <div className="item-body">
-                        <h3 className="truncate">{p.displayName ?? p.repositoryFullName}</h3>
-                        <p className="clamp-2" style={{ color: 'var(--muted)', fontSize: 14 }}>
-                          {p.description ?? '暂无简介'}
-                        </p>
-                        <div className="list-meta">
-                          <span>{p.publicReviewCount > 0 ? `${p.publicReviewCount} 篇公开评测` : '暂无评测'}</span>
-                          {p.topics.length > 0 ? (
-                            <span className="tag" style={{ marginRight: 0 }}>
-                              {p.topics[0]}
-                            </span>
-                          ) : null}
-                          <span>资料更新 {formatDateTimeOr(p.infoUpdatedAt ?? p.updatedAt, '未知')}</span>
+                    <li key={p.pluginId} className="item home-plugin-item">
+                      <Link href={`/plugins/${p.pluginId}`} className="home-plugin-card">
+                        <span className="icon">
+                          {p.ownerAvatarUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={p.ownerAvatarUrl} alt="" width={32} height={32} loading="lazy" decoding="async" />
+                          ) : (
+                            initial
+                          )}
+                        </span>
+                        <div className="item-body">
+                          <h3 className="truncate">{p.displayName ?? p.repositoryFullName}</h3>
+                          <p className="home-plugin-desc">{p.description ?? '暂无简介'}</p>
+                          <div className="list-meta">
+                            <span>{p.publicReviewCount > 0 ? `${p.publicReviewCount} 篇公开评测` : '暂无评测'}</span>
+                            {p.topics.length > 0 ? <span className="tag">{p.topics[0]}</span> : null}
+                          </div>
                         </div>
-                      </div>
+                      </Link>
                     </li>
                   );
                 })}
               </ul>
-              {recentPlugins.total > recentPlugins.items.length ? (
-                <p className="muted" style={{ marginTop: 'var(--space-3)', marginBottom: 0 }}>
-                  目录里共有 {recentPlugins.total} 个条目，<Link href="/plugins">查看全部</Link>。
-                </p>
-              ) : null}
+              <div className="home-more">
+                <Link href="/plugins" className="button tonal">
+                  查看全部插件
+                </Link>
+              </div>
             </>
           )}
-          <LoadMore param="pv" value={pluginLimit} step={6} total={recentPlugins.total} />
         </aside>
       </HomeFeed>
     </div>
