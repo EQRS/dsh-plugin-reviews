@@ -14,6 +14,7 @@ import { UNCATEGORIZED_CATEGORY } from '@/server/modules/catalog/service';
 import { formatDateTimeOr } from '@/packages/common/time';
 import { tierLabel, securityLabel } from '@/packages/common/assessment';
 import type { PluginSummary } from '@/server/modules/catalog/types';
+import { PageJump } from '@/components/page-jump';
 
 export const dynamic = 'force-dynamic';
 
@@ -68,6 +69,19 @@ function listHref(current: DirectoryConditions, over: Partial<DirectoryCondition
   if (over.page !== undefined && over.page > 1) params.set('page', String(over.page));
   const qs = params.toString();
   return qs.length > 0 ? `/plugins?${qs}` : '/plugins';
+}
+
+/** 页码跳转模板：保留当前筛选/排序条件（含 PR #23 的 assessment），`__PAGE__` 由客户端替换。 */
+function pageHrefTemplate(current: DirectoryConditions): string {
+  const params = new URLSearchParams();
+  if (current.q) params.set('q', current.q);
+  if (current.cat) params.set('cat', current.cat);
+  if (current.tag) params.set('tag', current.tag);
+  if (current.hasReviews !== 'all') params.set('has_reviews', current.hasReviews);
+  if (current.assessment !== 'all') params.set('assessment', current.assessment);
+  if (current.sort !== 'info') params.set('sort', current.sort);
+  params.set('page', '__PAGE__');
+  return `/plugins?${params.toString()}`;
 }
 
 /** 卡片上的一行小标签（用途标签 / 状态）。颜色语义在 globals.css 的 .tag 家族里。 */
@@ -347,9 +361,11 @@ export default async function PluginsPage({
                       ← 上一页
                     </span>
                   )}
-                  <span className="page-now">
-                    {conditions.page} / {result.total_pages}
-                  </span>
+                  <PageJump
+                    page={conditions.page}
+                    totalPages={result.total_pages}
+                    hrefTemplate={pageHrefTemplate(conditions)}
+                  />
                   {conditions.page < result.total_pages ? (
                     <Link href={listHref(conditions, { page: conditions.page + 1 })} className="button">
                       下一页 →

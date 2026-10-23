@@ -1251,6 +1251,37 @@ label {
   color: var(--faint);
   font-size: 13px;
 }
+/* 双击页码进入输入（PageJump）：悬停给一点底，输入框保持很小，不挤翻页按钮 */
+.pagination .page-jump-trigger {
+  padding: 2px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
+}
+.pagination .page-jump-trigger:hover,
+.pagination .page-jump-trigger:focus-visible {
+  background: var(--md-sys-color-surface-container-high);
+  outline: none;
+}
+.pagination .page-jump-input {
+  width: 52px;
+  padding: 2px 4px;
+  border: 1px solid var(--line, #e3e7dd);
+  border-radius: 6px;
+  background: var(--md-sys-color-surface-container-lowest);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: center;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.pagination .page-jump-input::-webkit-outer-spin-button,
+.pagination .page-jump-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
 .pagination .button[aria-disabled="true"] {
   opacity: 0.4;
   pointer-events: none;
@@ -1436,6 +1467,119 @@ label {
   margin: 0;
   color: var(--body-text);
   overflow-wrap: anywhere;
+}
+
+/* 规范页 · 用词规范：五条规则卡片 + 两张替换表 + 禁用词 chips */
+.wording-rules {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin: 14px 0 18px;
+  padding: 0;
+  list-style: none;
+}
+.wording-rules li {
+  padding: 10px 12px;
+  border: 1px solid var(--line, #e3e7dd);
+  border-radius: 12px;
+  background: var(--md-sys-color-surface-container-low);
+}
+.wording-rules strong {
+  display: block;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.wording-rules span {
+  display: block;
+  margin-top: 4px;
+  color: var(--faint);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.wording-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+}
+.wording-cols > div {
+  min-width: 0;
+}
+.wording-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.wording-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line, #e3e7dd);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.wording-table td:first-child {
+  width: 44%;
+  color: var(--faint);
+}
+.wording-table code {
+  font-size: 12px;
+}
+/* 手机端全局给 .panel 表格加了 nowrap（为了数据表横滚）；用词表是说明文字，
+   必须换行，否则第二列会被裁掉。提高一级特异性覆盖它。 */
+.panel table.wording-table th,
+.panel table.wording-table td {
+  white-space: normal;
+}
+.wording-banned p {
+  margin: 6px 0;
+  font-size: 13px;
+  line-height: 1.9;
+}
+.wording-banned strong {
+  display: inline-block;
+  min-width: 64px;
+  color: var(--faint);
+  font-weight: 500;
+}
+.wording-banned code {
+  display: inline-block;
+  margin: 0 4px 3px 0;
+  padding: 1px 7px;
+  border-radius: var(--md-sys-shape-corner-full);
+  background: var(--md-sys-color-surface-container-high);
+  color: var(--body-text);
+  font-size: 12px;
+}
+.wording-more {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line, #e3e7dd);
+}
+.wording-more summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+.wording-more > *:not(summary) {
+  margin-top: 12px;
+}
+.wording-code {
+  overflow-x: auto;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--md-sys-color-surface-container);
+  font-size: 12px;
+  line-height: 1.7;
+}
+@media (max-width: 900px) {
+  .wording-rules {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .wording-cols {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
 }
 
 .review-body {

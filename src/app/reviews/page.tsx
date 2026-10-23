@@ -14,6 +14,7 @@ import Link from 'next/link';
 import { getDb } from '@/server/platform/db';
 import { createSearchService, type SearchSource, type ReviewSearchRow } from '@/server/modules/search';
 import { createCatalogService, UNCATEGORIZED_CATEGORY } from '@/server/modules/catalog';
+import { PageJump } from '@/components/page-jump';
 import type { VersionValue } from '@/packages/common/field-rules';
 import { formatDateTimeOr } from '@/packages/common/time';
 
@@ -52,6 +53,16 @@ function listHref(current: Conditions, over: Partial<Conditions> = {}): string {
   if (over.page !== undefined && over.page > 1) params.set('page', String(over.page));
   const qs = params.toString();
   return qs.length > 0 ? `/reviews?${qs}` : '/reviews';
+}
+
+/** 页码跳转模板：保留当前搜索/筛选条件，`__PAGE__` 由客户端替换。 */
+function pageHrefTemplate(current: Conditions): string {
+  const params = new URLSearchParams();
+  if (current.q) params.set('q', current.q);
+  if (current.source !== 'all') params.set('source', current.source);
+  if (current.cat) params.set('cat', current.cat);
+  params.set('page', '__PAGE__');
+  return `/reviews?${params.toString()}`;
 }
 
 /** 与首页同一口径：清单名优先，缺则仓库全名；子目录形态带上子路径。 */
@@ -266,9 +277,7 @@ export default async function ReviewsPage({
                         ← 上一页
                       </span>
                     )}
-                    <span className="page-now">
-                      {page} / {totalPages}
-                    </span>
+                    <PageJump page={page} totalPages={totalPages} hrefTemplate={pageHrefTemplate(conditions)} />
                     {page < totalPages ? (
                       <Link href={listHref(conditions, { page: page + 1 })} className="button">
                         下一页 →
