@@ -205,7 +205,7 @@ function readDraftRow(db: SqliteDatabase, draftId: string): DraftRow {
     .prepare(
       `SELECT id, owner_id, draft_type, review_id, base_review_revision_id, payload,
               payload_schema_version, save_version, created_at, saved_at
-       FROM content_drafts WHERE id = ?`,
+       FROM content_drafts WHERE id = ? AND deleted_at IS NULL`,
     )
     .get(draftId) as DraftRow | undefined;
   if (!row) throw err.unavailable('草稿不存在或已不可访问。');
@@ -344,6 +344,74 @@ export function parseDraftPayload(raw: unknown): DraftPayload {
 // 服务实现
 // ============================================================
 
+/** 批量删除一次最多接受的草稿数（防止误操作/滥用）。 */
+export const MAX_BATCH_DELETE = 50;
+
+/**
+ * 删除单份草稿的事务内实现（单删与批量共用）。
+ *
+ * 已发布评测先撤回：直接更新 content_entities（与 contentService.withdraw 同一条约束），
+ * 撤回原因固定写明来源；已撤回/已隐藏时保持原状（不重复撤回）。
+ */
+function deleteDraftInTx(
+  conn: SqliteDatabase,
+  userId: string,
+  draftId: string,
+): { withdrawn: boolean } {
+  const id = parseDraftId(draftId);
+  const row = readDraftRow(conn, id);
+  if (row.draft_type !== 'review') throw err.unavailable('草稿不存在或已不可访问。');
+  if (row.owner_id !== userId) throw err.forbidden('只能删除自己的草稿。');
+
+  let withdrawn = false;
+  if (row.review_id) {
+    const review = conn
+      .prepare('SELECT published_revision_id FROM reviews WHERE id = ?')
+      .get(row.review_id) as { published_revision_id: string | null } | undefined;
+    if (review?.published_revision_id) {
+      const entity = conn
+        .prepare('SELECT withdrawn_at, hidden_at FROM content_entities WHERE id = ?')
+        .get(row.review_id) as { withdrawn_at: number | null; hidden_at: number | null } | undefined;
+      if (entity && entity.withdrawn_at === null && entity.hidden_at === null) {
+        const changed = conn
+          .prepare(
+            `UPDATE content_entities
+                SET withdrawn_at = ?, withdrawal_reason = ?,
+                    visibility_control_version = visibility_control_version + 1
+              WHERE id = ? AND withdrawn_at IS NULL AND hidden_at IS NULL`,
+          )
+          .run(nowMs(), '作者删除草稿时一并撤回。', row.review_id);
+        withdrawn = changed.changes > 0;
+      }
+    }
+  }
+
+  const submitted = conn
+    .prepare('SELECT 1 AS x FROM content_submissions WHERE draft_id = ? LIMIT 1')
+    .get(id) as { x: number } | undefined;
+
+  conn.prepare('DELETE FROM draft_save_receipts WHERE draft_id = ?').run(id);
+  conn.prepare('DELETE FROM draft_attachment_links WHERE draft_id = ?').run(id);
+
+  if (submitted) {
+    // 软删除：保留 content_submissions / review_revisions；唯一索引已改为只约束未删除草稿。
+    conn.prepare('UPDATE content_drafts SET deleted_at = ? WHERE id = ?').run(nowMs(), id);
+  } else {
+    conn.prepare('DELETE FROM content_drafts WHERE id = ?').run(id);
+    if (row.review_id) {
+      const hasRevision = conn
+        .prepare('SELECT 1 AS x FROM review_revisions WHERE review_id = ? LIMIT 1')
+        .get(row.review_id) as { x: number } | undefined;
+      if (!hasRevision) {
+        conn.prepare('DELETE FROM reviews WHERE id = ?').run(row.review_id);
+        conn.prepare('DELETE FROM content_entities WHERE id = ?').run(row.review_id);
+      }
+    }
+  }
+
+  return { withdrawn };
+}
+
 export const reviewsService = {
   /**
    * 新建或复用评测草稿。一篇评测只有一份当前草稿（部分唯一索引兜底）。
@@ -377,7 +445,7 @@ export const reviewsService = {
           `SELECT d.id AS draft_id, d.review_id AS review_id, d.save_version AS save_version
            FROM content_drafts d
            JOIN reviews r ON r.id = d.review_id
-           WHERE d.draft_type = 'review' AND d.owner_id = ? AND r.plugin_id IS ?
+           WHERE d.draft_type = 'review' AND d.deleted_at IS NULL AND d.owner_id = ? AND r.plugin_id IS ?
            ORDER BY d.saved_at DESC, d.id DESC
            LIMIT 1`,
         )
@@ -599,39 +667,79 @@ export const reviewsService = {
   },
 
   /**
-   * 删除草稿（仅本人；已提交过的草稿不允许删除）。
+   * 删除草稿（仅本人）。
    *
-   * 顺序按外键来：回执 → 附件关联 → 草稿本体；如果这篇评测还停留在草稿态
-   * （从没生成过修订快照），把它创建时插入的 reviews / content_entities 空壳一并删掉，
-   * 避免留下"看不到也管不了"的孤儿行。
+   * 语义：
+   *  - 已发布：先在同一个事务里撤回评测（withdrawn_at + 控制版本 +1），再删草稿；
+   *  - 已提交过（content_submissions.draft_id 外键 RESTRICT）：软删除
+   *    （deleted_at 标记 + review_id 置 NULL 释放唯一索引），保留提交与修订历史；
+   *  - 从未提交：物理删除，并清理创建时插入的空壳 reviews / content_entities。
    */
-  async deleteDraft(ctx: CallerContext, draftId: string, db?: SqliteDatabase): Promise<void> {
+  async deleteDraft(
+    ctx: CallerContext,
+    draftId: string,
+    db?: SqliteDatabase,
+  ): Promise<{ withdrawn: boolean }> {
     const userId = requireActiveUser(ctx);
-    const id = parseDraftId(draftId);
+    return withTransaction((tx) => deleteDraftInTx(tx.db, userId, draftId), db);
+  },
+
+  /**
+   * 批量删除草稿：逐份走与单删相同的语义（已发布的一并撤回）。
+   * 全部在同一个事务里完成；任何一份校验失败则整批回滚。
+   */
+  async deleteDrafts(
+    ctx: CallerContext,
+    draftIds: string[],
+    db?: SqliteDatabase,
+  ): Promise<{ deleted: number; withdrawn: number }> {
+    const userId = requireActiveUser(ctx);
+    if (!Array.isArray(draftIds) || draftIds.length === 0) {
+      throw err.input('请选择要删除的草稿。', [{ path: 'draftIds', message: '至少一份' }]);
+    }
+    if (draftIds.length > MAX_BATCH_DELETE) {
+      throw err.input(`一次最多删除 ${MAX_BATCH_DELETE} 份草稿。`, [
+        { path: 'draftIds', message: `超过 ${MAX_BATCH_DELETE} 份` },
+      ]);
+    }
+    const unique = [...new Set(draftIds)];
     return withTransaction((tx) => {
-      const conn = tx.db;
-      const row = readDraftRow(conn, id);
-      if (row.draft_type !== 'review') throw err.unavailable('草稿不存在或已不可访问。');
-      if (row.owner_id !== userId) throw err.forbidden('只能删除自己的草稿。');
-
-      const submitted = conn
-        .prepare('SELECT 1 AS x FROM content_submissions WHERE draft_id = ? LIMIT 1')
-        .get(id) as { x: number } | undefined;
-      if (submitted) throw err.conflict('草稿已提交过，不能删除。');
-
-      conn.prepare('DELETE FROM draft_save_receipts WHERE draft_id = ?').run(id);
-      conn.prepare('DELETE FROM draft_attachment_links WHERE draft_id = ?').run(id);
-      conn.prepare('DELETE FROM content_drafts WHERE id = ?').run(id);
-
-      if (row.review_id) {
-        const hasRevision = conn
-          .prepare('SELECT 1 AS x FROM review_revisions WHERE review_id = ? LIMIT 1')
-          .get(row.review_id) as { x: number } | undefined;
-        if (!hasRevision) {
-          conn.prepare('DELETE FROM reviews WHERE id = ?').run(row.review_id);
-          conn.prepare('DELETE FROM content_entities WHERE id = ?').run(row.review_id);
-        }
+      let withdrawn = 0;
+      for (const draftId of unique) {
+        if (deleteDraftInTx(tx.db, userId, draftId).withdrawn) withdrawn += 1;
       }
+      return { deleted: unique.length, withdrawn };
+    }, db);
+  },
+
+  /**
+   * 按评测 ID 删除作者草稿（「撤回并删除草稿」用）。
+   *
+   * 草稿不存在/已删除时返回 `{ deleted: false }`，不报错——撤回已经发生，
+   * 调用方不应因为「没有草稿可删」把撤回结果变成失败。
+   * 已撤回的评测在这里不会再次撤回（withdrawn=false），只删除草稿。
+   */
+  async deleteDraftByReview(
+    ctx: CallerContext,
+    reviewId: string,
+    db?: SqliteDatabase,
+  ): Promise<{ deleted: boolean; withdrawn: boolean }> {
+    const userId = requireActiveUser(ctx);
+    if (typeof reviewId !== 'string' || !isUuidV7(reviewId)) {
+      throw err.input('评测标识格式不正确。', [{ path: 'review_id', message: '必须是规范 UUIDv7' }]);
+    }
+    return withTransaction((tx) => {
+      const row = tx.db
+        .prepare(
+          `SELECT id FROM content_drafts
+              WHERE review_id = ? AND owner_id = ? AND draft_type = 'review' AND deleted_at IS NULL
+              ORDER BY saved_at DESC, id DESC
+              LIMIT 1`,
+        )
+        .get(reviewId, userId) as { id: string } | undefined;
+      if (!row) return { deleted: false, withdrawn: false };
+      const result = deleteDraftInTx(tx.db, userId, row.id);
+      return { deleted: true, withdrawn: result.withdrawn };
     }, db);
   },
 };
@@ -646,7 +754,7 @@ export async function listDrafts(
   return withRead((conn) => {
     const total = (
       conn
-        .prepare(`SELECT count(*) AS c FROM content_drafts WHERE owner_id = ? AND draft_type = 'review'`)
+        .prepare(`SELECT count(*) AS c FROM content_drafts WHERE owner_id = ? AND draft_type = 'review' AND deleted_at IS NULL`)
         .get(userId) as { c: number }
     ).c;
     const rows = conn
@@ -654,13 +762,80 @@ export async function listDrafts(
         `SELECT id, owner_id, draft_type, review_id, base_review_revision_id, payload,
                 payload_schema_version, save_version, created_at, saved_at
          FROM content_drafts
-         WHERE owner_id = ? AND draft_type = 'review'
+         WHERE owner_id = ? AND draft_type = 'review' AND deleted_at IS NULL
          ORDER BY saved_at DESC, id DESC
          LIMIT ? OFFSET ?`,
       )
       .all(userId, req.page_size, (req.page - 1) * req.page_size) as DraftRow[];
     const items = rows.map((row) => toDraftView(row, readReviewPluginId(conn, row.review_id)));
     return buildPage(items, total, req);
+  }, db);
+}
+
+/** 「我的评测」草稿列表用的摘要：标题取**当前草稿载荷**，不是首次提交的修订标题。 */
+export interface DraftSummary {
+  draftId: string;
+  reviewId: string | null;
+  saveVersion: number;
+  savedAt: number;
+  title: string;
+  /** 这篇评测是否已经发布过（有公开修订指针）。 */
+  published: boolean;
+  /** 是否已撤回（发布过且 withdrawn_at 非空）。 */
+  withdrawn: boolean;
+  /** 撤回所需的乐观锁版本；未发布/未关联评测时为 null。 */
+  controlVersion: number | null;
+}
+
+/**
+ * 草稿摘要列表（我的评测页）。
+ *
+ * 这里的 title 必须来自 `content_drafts.payload`：草稿是「可继续改」的，
+ * 第一次保存后标题还可能变；如果读 `review_revisions.title`（只在提交时生成），
+ * 页面就会永远显示第一次提交/提交前的标题——这是本轮修掉的缺陷。
+ *
+ * 对坏 JSON 用 json_valid 兜底为 null，调用方显示「(尚未填写标题)」，不抛 500。
+ * 已软删除（deleted_at 非空）的草稿不返回。
+ */
+export async function listDraftSummaries(
+  ctx: CallerContext,
+  db?: SqliteDatabase,
+): Promise<DraftSummary[]> {
+  const userId = requireActiveUser(ctx);
+  return withRead((conn) => {
+    const rows = conn
+      .prepare(
+        `SELECT d.id, d.review_id, d.save_version, d.saved_at,
+                CASE WHEN json_valid(d.payload) THEN json_extract(d.payload, '$.title') ELSE NULL END AS title,
+                r.published_revision_id,
+                ce.withdrawn_at,
+                ce.visibility_control_version
+           FROM content_drafts d
+           LEFT JOIN reviews r ON r.id = d.review_id
+           LEFT JOIN content_entities ce ON ce.id = d.review_id
+          WHERE d.owner_id = ? AND d.draft_type = 'review' AND d.deleted_at IS NULL
+          ORDER BY d.saved_at DESC, d.id DESC`,
+      )
+      .all(userId) as {
+      id: string;
+      review_id: string | null;
+      save_version: number;
+      saved_at: number;
+      title: string | null;
+      published_revision_id: string | null;
+      withdrawn_at: number | null;
+      visibility_control_version: number | null;
+    }[];
+    return rows.map((row) => ({
+      draftId: row.id,
+      reviewId: row.review_id,
+      saveVersion: row.save_version,
+      savedAt: row.saved_at,
+      title: row.title ?? '',
+      published: row.published_revision_id !== null,
+      withdrawn: row.withdrawn_at !== null,
+      controlVersion: row.visibility_control_version ?? null,
+    }));
   }, db);
 }
 

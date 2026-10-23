@@ -165,8 +165,8 @@ export async function DELETE(request: Request): Promise<Response> {
     const draftId = url.searchParams.get('draftId');
     if (!draftId) throw err.input('缺少 draftId。', [{ path: 'draftId', message: '必填' }]);
     const ctx = await currentContext();
-    await reviewsService.deleteDraft(ctx, draftId, getDb());
-    return okJson({ deleted: true }, requestId);
+    const result = await reviewsService.deleteDraft(ctx, draftId, getDb());
+    return okJson({ deleted: true, withdrawn: result.withdrawn }, requestId);
   } catch (e) {
     return errorResponse(e, requestId);
   }
