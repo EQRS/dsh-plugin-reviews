@@ -2512,6 +2512,22 @@ input[type='search']:focus {
 /* 桌面端两栏等高：插件栏把 10 条均分到面板剩余高度，正好填满圆角，
    不再在按钮下面留一大块空白（主人要求：大小刚好占据这个圆角）。 */
 @media (min-width: 901px) {
+  /* 桌面首页：压进一屏（常见 1392 高的窗口去掉浏览器 chrome ≈1272），
+     避免滚轮还能轻微拖动整页。只影响首页。 */
+  .site-main:has(.home-page) {
+    padding-bottom: 24px;
+  }
+  html:has(.home-page) {
+    overscroll-behavior-y: none;
+  }
+  .home-page .home-hero {
+    padding-bottom: 20px;
+  }
+  .home-page .home-feed section .item-list > .item {
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
   .home-feed aside.panel {
     display: flex;
     flex-direction: column;

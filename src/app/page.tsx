@@ -72,7 +72,7 @@ export default async function HomePage() {
   const categories = await catalog.listCategories();
 
   return (
-    <div>
+    <div className="home-page">
       {/* 英雄区：站名作为主标题，下面直接是搜索与分类 */}
       <section className="home-hero">
         <h1 className="home-title">DSH 插件评测</h1>
