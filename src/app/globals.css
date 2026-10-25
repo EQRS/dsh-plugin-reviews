@@ -1433,6 +1433,7 @@ label {
   gap: 6px;
   min-width: 0;
   overflow-x: auto;
+  overflow-y: hidden;
   overscroll-behavior-x: contain;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
@@ -3235,6 +3236,9 @@ input[type='search']:focus {
   .filters {
     flex-wrap: nowrap;
     overflow-x: auto;
+    /* overflow-x:auto 会把 overflow-y 也算成 auto，导致 chip 行能上下滚几像素；
+       只允许左右滑，纵向交还给页面滚动。 */
+    overflow-y: hidden;
     overscroll-behavior-x: contain;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
@@ -3252,6 +3256,7 @@ input[type='search']:focus {
     flex-wrap: nowrap;
     gap: 8px;
     overflow-x: auto;
+    overflow-y: hidden;
     overscroll-behavior-x: contain;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
