@@ -179,8 +179,14 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ r
               <ol className="evidence-list" style={{ margin: 0, paddingLeft: 20, fontSize: 14, lineHeight: 1.7 }}>
                 {evidenceRefs.map((item) => (
                   <li key={item.url}>
-                    <a href={item.url} target="_blank" rel="noreferrer noopener">
-                      {item.url}
+                    <a
+                      href={item.url}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      title={item.url}
+                      aria-label={`打开证据链接：${item.url}`}
+                    >
+                      点击跳转
                     </a>
                     {item.note ? <span className="muted">——{item.note}</span> : null}
                   </li>
