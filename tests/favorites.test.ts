@@ -161,4 +161,113 @@ describe('收藏夹', () => {
 
     expect(await service.searchFavorites(caller(user), '不存在的标题')).toHaveLength(0);
   });
+
+  it('收藏夹改名：成功、重名拒绝、默认夹可改名', async () => {
+    const { db } = setup();
+    const user = insertUser(db);
+    const service = createInteractionsService({ db });
+
+    const folder = await service.createFavoriteFolder(caller(user), '旧名字');
+    const other = await service.createFavoriteFolder(caller(user), '另一个夹');
+
+    await service.renameFavoriteFolder(caller(user), folder.folderId, '新名字');
+    let folders = await service.listFavoriteFolders(caller(user));
+    expect(folders.find((f) => f.folderId === folder.folderId)?.name).toBe('新名字');
+
+    await expectCode(
+      service.renameFavoriteFolder(caller(user), folder.folderId, '另一个夹'),
+      ErrorCodes.INPUT_INVALID,
+    );
+    expect(other.name).toBe('另一个夹');
+
+    const defaultFolder = folders.find((f) => f.isDefault)!;
+    await service.renameFavoriteFolder(caller(user), defaultFolder.folderId, '我的默认夹');
+    folders = await service.listFavoriteFolders(caller(user));
+    expect(folders.find((f) => f.folderId === defaultFolder.folderId)?.name).toBe('我的默认夹');
+    expect(folders.find((f) => f.folderId === defaultFolder.folderId)?.isDefault).toBe(true);
+  });
+
+  it('删除收藏夹：夹内收藏一并取消；默认夹不可删；越权拒绝', async () => {
+    const { db } = setup();
+    const user = insertUser(db);
+    const other = insertUser(db);
+    const repo = insertRepository(db);
+    const plugin = insertPlugin(db, repo);
+    const service = createInteractionsService({ db });
+
+    const folder = await service.createFavoriteFolder(caller(user), '待删除夹');
+    await service.setFavorite(caller(user), { pluginId: plugin, folderId: folder.folderId });
+
+    const result = await service.deleteFavoriteFolder(caller(user), folder.folderId);
+    expect(result.removed).toBe(1);
+
+    const folders = await service.listFavoriteFolders(caller(user));
+    expect(folders.find((f) => f.folderId === folder.folderId)).toBeUndefined();
+    const defaultFolder = folders.find((f) => f.isDefault)!;
+    expect(defaultFolder.count).toBe(0);
+
+    // 默认夹不可删
+    await expectCode(
+      service.deleteFavoriteFolder(caller(user), defaultFolder.folderId),
+      ErrorCodes.INPUT_INVALID,
+    );
+
+    // 别人的夹不可删
+    const othersFolder = await service.createFavoriteFolder(caller(other), '别人的夹');
+    await expectCode(
+      service.deleteFavoriteFolder(caller(user), othersFolder.folderId),
+      ErrorCodes.TARGET_UNAVAILABLE,
+    );
+  });
 });
+
+  it('收藏夹内批量取消收藏 / 批量移动', async () => {
+    const { db } = setup();
+    const user = insertUser(db);
+    const other = insertUser(db);
+    const repo = insertRepository(db);
+    const p1 = insertPlugin(db, repo, 'a');
+    const p2 = insertPlugin(db, repo, 'b');
+    const p3 = insertPlugin(db, repo, 'c');
+    const service = createInteractionsService({ db });
+
+    const a = await service.createFavoriteFolder(caller(user), '夹 A');
+    const b = await service.createFavoriteFolder(caller(user), '夹 B');
+    for (const plugin of [p1, p2, p3]) {
+      await service.setFavorite(caller(user), { pluginId: plugin, folderId: a.folderId });
+    }
+
+    const removed = await service.batchFavoriteAction(caller(user), {
+      action: 'remove',
+      pluginIds: [p1],
+    });
+    expect(removed.affected).toBe(1);
+    expect((await service.getFavoriteFolder(caller(user), a.folderId)).plugins).toHaveLength(2);
+
+    const moved = await service.batchFavoriteAction(caller(user), {
+      action: 'move',
+      pluginIds: [p2, p3],
+      folderId: b.folderId,
+    });
+    expect(moved.affected).toBe(2);
+    expect((await service.getFavoriteFolder(caller(user), a.folderId)).plugins).toHaveLength(0);
+    expect((await service.getFavoriteFolder(caller(user), b.folderId)).plugins).toHaveLength(2);
+
+    // 未收藏的插件不能批量操作
+    const p4 = insertPlugin(db, repo, 'd');
+    await expectCode(
+      service.batchFavoriteAction(caller(user), { action: 'remove', pluginIds: [p4] }),
+      ErrorCodes.INPUT_INVALID,
+    );
+
+    // 不能移动到别人的收藏夹
+    const othersFolder = await service.createFavoriteFolder(caller(other), '别人的夹');
+    await expectCode(
+      service.batchFavoriteAction(caller(user), {
+        action: 'move',
+        pluginIds: [p2],
+        folderId: othersFolder.folderId,
+      }),
+      ErrorCodes.INPUT_INVALID,
+    );
+  });

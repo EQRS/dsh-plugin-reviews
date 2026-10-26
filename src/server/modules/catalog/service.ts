@@ -313,10 +313,12 @@ export function buildDirectoryWhere(req: PluginDirectoryQuery): { clause: string
   if (req.hasReviews === 'yes') conditions.push(`${PUBLIC_REVIEW_COUNT_SQL} > 0`);
   if (req.hasReviews === 'no') conditions.push(`${PUBLIC_REVIEW_COUNT_SQL} = 0`);
 
-  // 档位筛选与插件标签同一口径：快测=最高档 1；标测=最高档 2；安全审计=存在 deep/security。
+  // 档位筛选与插件标签同一口径：快测=最高档 1；标测=最高档 2。
   if (req.assessment === 'quick') conditions.push(`${PUBLIC_ASSESSMENT_TIER_SQL} = 1`);
   if (req.assessment === 'standard') conditions.push(`${PUBLIC_ASSESSMENT_TIER_SQL} = 2`);
-  if (req.assessment === 'security') conditions.push(`${PUBLIC_SECURITY_AUDIT_COUNT_SQL} > 0`);
+  // 安全审计单独一栏：yes=存在 deep/security；no=完全没有。
+  if (req.security === 'yes') conditions.push(`${PUBLIC_SECURITY_AUDIT_COUNT_SQL} > 0`);
+  if (req.security === 'no') conditions.push(`${PUBLIC_SECURITY_AUDIT_COUNT_SQL} = 0`);
 
   const clause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   return { clause, params };
@@ -803,10 +805,12 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
               ELSE 3
             END ASC,`;
         }
+        // dir 缺省 = desc（保持旧行为）；相关度排序固定 ASC，方向只作用于主排序键。
+        const direction = req.dir === 'asc' ? 'ASC' : 'DESC';
         const orderBy =
           req.sort === 'reviews'
-            ? `${relevanceOrder} ${PUBLIC_REVIEW_COUNT_SQL} DESC, p.id ASC`
-            : `${relevanceOrder} p.updated_at DESC, p.id ASC`;
+            ? `${relevanceOrder} ${PUBLIC_REVIEW_COUNT_SQL} ${direction}, p.id ASC`
+            : `${relevanceOrder} p.updated_at ${direction}, p.id ASC`;
 
         const rows = conn
           .prepare(

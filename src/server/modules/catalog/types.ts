@@ -153,12 +153,19 @@ export interface PluginDirectoryQuery extends PageRequest {
   hasReviews?: 'all' | 'yes' | 'no';
   /**
    * 测评档位筛选（与插件标签同一口径）：
-   *  - quick：最高档 = 快测；standard：最高档 = 标准测评/深度审计；
-   *  - security：至少一篇公开修订含安全审计（deep/security）。
+   *  - quick：最高档 = 快测；standard：最高档 = 标准测评/深度审计。
    */
-  assessment?: 'all' | 'quick' | 'standard' | 'security';
+  assessment?: 'all' | 'quick' | 'standard';
+  /**
+   * 安全审计筛选（与档位分开，页面独立一栏）：
+   *  - yes：至少一篇公开修订含安全审计（deep/security）；
+   *  - no：没有任何安全审计。
+   */
+  security?: 'all' | 'yes' | 'no';
   /** info = 资料更新时间（默认）；reviews = 公开评测数。 */
   sort?: 'info' | 'reviews';
+  /** 排序方向：asc = 正序；desc = 逆序（默认，保持旧行为）。 */
+  dir?: 'asc' | 'desc';
 }
 
 /** 标签聚合项（原始 topics 视角；用于诊断与后台"待归类 topics"）。 */

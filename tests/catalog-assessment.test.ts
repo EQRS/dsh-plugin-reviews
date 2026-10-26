@@ -126,7 +126,7 @@ describe('插件标签聚合', () => {
 });
 
 describe('档位筛选', () => {
-  it('quick 只命中最高档=快测；standard 命中标准/深度；security 命中含安全审计', async () => {
+  it('quick 只命中最高档=快测；standard 命中标准/深度；安全栏单独筛已/未审计', async () => {
     const { service } = seed([
       { fullName: 'a/quick', updatedAt: 6000, reviews: ['quick'] },
       { fullName: 'b/standard', updatedAt: 5000, reviews: ['standard'] },
@@ -142,8 +142,16 @@ describe('档位筛选', () => {
     const standard = await service.listPlugins(all({ assessment: 'standard' }));
     expect(standard.items.map((i) => i.repositoryFullName).sort()).toEqual(['b/standard', 'c/deep']);
 
-    const security = await service.listPlugins(all({ assessment: 'security' }));
+    const security = await service.listPlugins(all({ security: 'yes' }));
     expect(security.items.map((i) => i.repositoryFullName).sort()).toEqual(['c/deep', 'd/security']);
+
+    const noSecurity = await service.listPlugins(all({ security: 'no' }));
+    expect(noSecurity.items.map((i) => i.repositoryFullName).sort()).toEqual([
+      'a/quick',
+      'b/standard',
+      'e/none',
+      'f/legacy',
+    ]);
 
     const plain = await service.listPlugins(all({ assessment: 'all' }));
     expect(plain.total).toBe(6);
@@ -156,5 +164,21 @@ describe('档位筛选', () => {
     ]);
     const result = await service.listPlugins(all({ assessment: 'quick', hasReviews: 'yes' }));
     expect(result.items.map((i) => i.repositoryFullName)).toEqual(['a/quick']);
+  });
+});
+
+describe('排序方向', () => {
+  it('dir=asc 正序、dir=desc 逆序（默认 desc）', async () => {
+    const { service } = seed([
+      { fullName: 'a/one', updatedAt: 1000 },
+      { fullName: 'b/two', updatedAt: 2000 },
+      { fullName: 'c/three', updatedAt: 3000 },
+    ]);
+
+    const asc = await service.listPlugins(all({ sort: 'info', dir: 'asc' }));
+    expect(asc.items.map((i) => i.repositoryFullName)).toEqual(['a/one', 'b/two', 'c/three']);
+
+    const desc = await service.listPlugins(all({ sort: 'info', dir: 'desc' }));
+    expect(desc.items.map((i) => i.repositoryFullName)).toEqual(['c/three', 'b/two', 'a/one']);
   });
 });
