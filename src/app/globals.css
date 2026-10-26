@@ -2595,9 +2595,18 @@ input[type='search']:focus {
 /* ------------------------------------------------- 顶栏（M3 small top app bar） */
 .site-header {
   height: var(--header-height);
-  /* 顶栏透明：不铺一层 surface 底色（主人要求），让页面本身的纸色直接透上来。
-     不画分隔线，也不加 blur —— 滚动时内容从文字下方经过，保持"浮在纸上"的感觉。 */
-  background: transparent;
+  /* 毛玻璃顶栏：半透明 surface + 背景模糊。滚动时正文从下面经过，
+     文字仍然清楚；浅色/深色都跟随主题 token。 */
+  background: color-mix(in srgb, var(--md-sys-color-surface) 76%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  backdrop-filter: blur(18px) saturate(150%);
+  border-bottom: 1px solid color-mix(in srgb, var(--md-sys-color-outline-variant) 40%, transparent);
+}
+/* 不支持 backdrop-filter 的浏览器退回实色，保证可读 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .site-header {
+    background: var(--md-sys-color-surface);
+  }
 }
 .brand {
   font-family: var(--font-heading);
