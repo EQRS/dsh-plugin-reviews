@@ -17,7 +17,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 
-type GlyphName = 'review' | 'bell' | 'settings' | 'logout' | 'close' | 'chevron';
+type GlyphName = 'review' | 'star' | 'bell' | 'settings' | 'logout' | 'close' | 'chevron';
 
 /** 线性图标：与页头铃铛同一套画法（stroke=currentColor，视觉重量一致）。 */
 function Glyph({ name }: { name: GlyphName }) {
@@ -41,6 +41,13 @@ function Glyph({ name }: { name: GlyphName }) {
           <polyline points="14 3 14 8 19 8" />
           <line x1="9" y1="13" x2="15" y2="13" />
           <line x1="9" y1="17" x2="13" y2="17" />
+        </svg>
+      );
+    case 'star':
+      // 收藏：五角星
+      return (
+        <svg {...common}>
+          <path d="M12 3l2.7 5.5 6 .9-4.3 4.2 1 6-5.4-2.8-5.4 2.8 1-6L3.3 9.4l6-.9z" />
         </svg>
       );
     case 'bell':
@@ -177,6 +184,11 @@ export function AccountMenu({
           <Link href="/me" role="menuitem" className="menu-row" onClick={() => close()}>
             <Glyph name="review" />
             <span className="menu-row-label">评测</span>
+            <Glyph name="chevron" />
+          </Link>
+          <Link href="/me/favorites" role="menuitem" className="menu-row" onClick={() => close()}>
+            <Glyph name="star" />
+            <span className="menu-row-label">收藏</span>
             <Glyph name="chevron" />
           </Link>
           <Link

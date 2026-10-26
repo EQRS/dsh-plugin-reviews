@@ -28,8 +28,10 @@ interface DirectoryConditions {
   /** 原始 GitHub topic 精确筛选（旧链接兼容；页面不再生成这类链接）。 */
   tag?: string;
   hasReviews: 'all' | 'yes' | 'no';
-  assessment: 'all' | 'quick' | 'standard' | 'security';
+  assessment: 'all' | 'quick' | 'standard';
+  security: 'all' | 'yes' | 'no';
   sort: 'info' | 'reviews';
+  dir: 'asc' | 'desc';
   page: number;
 }
 
@@ -42,6 +44,10 @@ function readConditions(sp: Record<string, string | string[] | undefined>): Dire
   const rawPage = Number.parseInt(firstValue(sp.page) ?? '1', 10);
   const hasReviewsRaw = firstValue(sp.has_reviews);
   const assessmentRaw = firstValue(sp.assessment);
+  const securityRaw = firstValue(sp.security);
+  const dirRaw = firstValue(sp.dir);
+  // 兼容旧链接：assessment=security 映射到独立的「安全 = 已安全审计」。
+  const legacySecurity = assessmentRaw === 'security';
   return {
     // 关键词截断到 100 字：搜索框不是注入口
     q: firstValue(sp.q)?.trim().slice(0, 100) || undefined,
@@ -49,10 +55,14 @@ function readConditions(sp: Record<string, string | string[] | undefined>): Dire
     tag: firstValue(sp.tag)?.slice(0, 64) || undefined,
     hasReviews: hasReviewsRaw === 'yes' || hasReviewsRaw === 'no' ? hasReviewsRaw : 'all',
     assessment:
-      assessmentRaw === 'quick' || assessmentRaw === 'standard' || assessmentRaw === 'security'
-        ? assessmentRaw
+      assessmentRaw === 'quick' || assessmentRaw === 'standard' ? assessmentRaw : 'all',
+    security: legacySecurity
+      ? 'yes'
+      : securityRaw === 'yes' || securityRaw === 'no'
+        ? securityRaw
         : 'all',
     sort: firstValue(sp.sort) === 'reviews' ? 'reviews' : 'info',
+    dir: dirRaw === 'asc' ? 'asc' : 'desc',
     page: Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1,
   };
 }
@@ -66,7 +76,9 @@ function listHref(current: DirectoryConditions, over: Partial<DirectoryCondition
   if (merged.tag) params.set('tag', merged.tag);
   if (merged.hasReviews !== 'all') params.set('has_reviews', merged.hasReviews);
   if (merged.assessment !== 'all') params.set('assessment', merged.assessment);
+  if (merged.security !== 'all') params.set('security', merged.security);
   if (merged.sort !== 'info') params.set('sort', merged.sort);
+  if (merged.dir !== 'desc') params.set('dir', merged.dir);
   if (over.page !== undefined && over.page > 1) params.set('page', String(over.page));
   const qs = params.toString();
   return qs.length > 0 ? `/plugins?${qs}` : '/plugins';
@@ -80,7 +92,9 @@ function pageHrefTemplate(current: DirectoryConditions): string {
   if (current.tag) params.set('tag', current.tag);
   if (current.hasReviews !== 'all') params.set('has_reviews', current.hasReviews);
   if (current.assessment !== 'all') params.set('assessment', current.assessment);
+  if (current.security !== 'all') params.set('security', current.security);
   if (current.sort !== 'info') params.set('sort', current.sort);
+  if (current.dir !== 'desc') params.set('dir', current.dir);
   params.set('page', '__PAGE__');
   return `/plugins?${params.toString()}`;
 }
@@ -163,7 +177,9 @@ export default async function PluginsPage({
     tag: conditions.tag,
     hasReviews: conditions.hasReviews,
     assessment: conditions.assessment,
+    security: conditions.security,
     sort: conditions.sort,
+    dir: conditions.dir,
   });
   // 侧栏 chip 用分类（中文、按不同仓库计数）
   const categories = await catalog.listCategories();
@@ -247,7 +263,11 @@ export default async function PluginsPage({
               {conditions.assessment !== 'all' ? (
                 <input type="hidden" name="assessment" value={conditions.assessment} />
               ) : null}
+              {conditions.security !== 'all' ? (
+                <input type="hidden" name="security" value={conditions.security} />
+              ) : null}
               {conditions.sort !== 'info' ? <input type="hidden" name="sort" value={conditions.sort} /> : null}
+              {conditions.dir !== 'desc' ? <input type="hidden" name="dir" value={conditions.dir} /> : null}
               <button type="submit" className="search-go" aria-label="搜索">
                 {/* 搜索动作简化成放大镜图标按钮（与首页同一形态），与输入框保持同一行 */}
                 <svg
@@ -284,19 +304,25 @@ export default async function PluginsPage({
               </div>
               <div className="filter-group">
                 <span className="group-label">档位：</span>
-                {(['all', 'quick', 'standard', 'security'] as const).map((v) => (
+                {(['all', 'quick', 'standard'] as const).map((v) => (
                   <Link
                     key={v}
                     href={listHref(conditions, { assessment: v })}
                     className={conditions.assessment === v ? 'active' : ''}
                   >
-                    {v === 'all'
-                      ? '全部'
-                      : v === 'quick'
-                        ? '已快测'
-                        : v === 'standard'
-                          ? '已标测'
-                          : '已安全审计'}
+                    {v === 'all' ? '全部' : v === 'quick' ? '已快测' : '已标测'}
+                  </Link>
+                ))}
+              </div>
+              <div className="filter-group">
+                <span className="group-label">安全：</span>
+                {(['all', 'yes', 'no'] as const).map((v) => (
+                  <Link
+                    key={v}
+                    href={listHref(conditions, { security: v })}
+                    className={conditions.security === v ? 'active' : ''}
+                  >
+                    {v === 'all' ? '全部' : v === 'yes' ? '已安全审计' : '未安全审计'}
                   </Link>
                 ))}
               </div>
@@ -311,6 +337,22 @@ export default async function PluginsPage({
                     {v === 'info' ? '按资料更新时间' : '按评测数'}
                   </Link>
                 ))}
+                <Link
+                  href={listHref(conditions, { dir: 'asc' })}
+                  className={conditions.dir === 'asc' ? 'active' : ''}
+                  aria-label="按正序排序"
+                  title="正序"
+                >
+                  ↑
+                </Link>
+                <Link
+                  href={listHref(conditions, { dir: 'desc' })}
+                  className={conditions.dir === 'desc' ? 'active' : ''}
+                  aria-label="按逆序排序"
+                  title="逆序"
+                >
+                  ↓
+                </Link>
               </div>
             </div>
 
