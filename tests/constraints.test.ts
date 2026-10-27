@@ -138,12 +138,14 @@ describe('外键与归属约束', () => {
     expect((db.prepare('SELECT count(*) c FROM reviews WHERE id = ?').get(id) as { c: number }).c).toBe(1);
   });
 
-  it('错误子类型被拒绝：本切片不允许写入没有具体子表承接的 pack_release 公共记录', () => {
+  it('pack_release 必须有具体版本承接：孤儿公共记录被外键拒绝，合法配对方可写入', () => {
     const { db } = setup();
     const user = insertUser(db);
     const id = newId();
-    // 本切片未建 plugin_pack_releases。若不在基线里拦住，这条记录会变成没有内容的孤儿行。
-    const msg = expectSqliteError(() => {
+    // 迁移 0021 放开了 content_type 闸门，同时把 pack_release_id 升级为
+    // 指向 plugin_pack_releases(id) 的延迟外键 —— 孤儿行仍然写不进去，
+    // 但拒绝理由从「闸门 CHECK」变成了「没有具体子表承接（外键）」。
+    const orphanMsg = expectSqliteError(() => {
       const run = db.transaction(() => {
         db.prepare(
           `INSERT INTO content_entities (id, content_type, author_id, review_id, pack_release_id, created_at)
@@ -152,11 +154,37 @@ describe('外键与归属约束', () => {
       });
       run();
     });
-    // 放开 pack_release 时必须同时建立子表并改掉这条断言 —— 这就是切片闸门。
-    expect(msg).toMatch(/content_type = 'review'/);
+    expect(orphanMsg).toMatch(/FOREIGN KEY/);
     expect((db.prepare('SELECT count(*) c FROM content_entities WHERE id = ?').get(id) as { c: number }).c).toBe(0);
-  });
 
+    // 正例：先建包与版本，再写公共记录（同一事务，延迟外键在 commit 时配对）
+    const packId = newId();
+    const releaseId = newId();
+    const now = Date.now();
+    const run = db.transaction(() => {
+      db.prepare('INSERT INTO plugin_packs (id, author_id, last_release_number, created_at) VALUES (?, ?, 1, ?)').run(
+        packId,
+        user,
+        now,
+      );
+      db.prepare(
+        `INSERT INTO plugin_pack_releases
+           (id, pack_id, release_number, title, purpose, body_markdown, dsh_version, submitted_at)
+         VALUES (?, ?, 1, '包', '用途', '正文', '{"kind":"unknown"}', ?)`,
+      ).run(releaseId, packId, now);
+      db.prepare(
+        `INSERT INTO content_entities
+           (id, content_type, author_id, review_id, pack_release_id, created_at,
+            first_published_at, public_updated_at, visibility_control_version)
+         VALUES (?, 'pack_release', ?, NULL, ?, ?, ?, ?, 0)`,
+      ).run(releaseId, user, releaseId, now, now, now);
+    });
+    run();
+    expect(
+      (db.prepare('SELECT count(*) c FROM content_entities WHERE id = ?').get(releaseId) as { c: number }).c,
+    ).toBe(1);
+    expect(db.pragma('foreign_key_check')).toEqual([]);
+  });
   it('正确的延迟配对可以提交（证明约束不是靠"永远失败"通过的）', () => {
     const { db } = setup();
     const user = insertUser(db);

@@ -112,7 +112,24 @@ function hasPublishedRevision(db: SqliteDatabase, entityId: string): boolean {
        LIMIT 1`,
     )
     .get(entityId) as { ok: number } | undefined;
-  return row !== undefined;
+  if (row !== undefined) return true;
+
+  // 整合包版本：公开指针就是「已分配发布序号」（架构 §58）。
+  // 旧库还没跑 0020 时表不存在，按“没有公开版本”处理，而不是让查询炸掉。
+  const hasPacks = db
+    .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = 'plugin_pack_releases'")
+    .get() as { ok: number } | undefined;
+  if (!hasPacks) return false;
+  const packRow = db
+    .prepare(
+      `SELECT 1 AS ok
+         FROM plugin_pack_releases rel
+         JOIN plugin_packs p ON p.id = rel.pack_id
+        WHERE rel.id = ? AND rel.release_number IS NOT NULL
+        LIMIT 1`,
+    )
+    .get(entityId) as { ok: number } | undefined;
+  return packRow !== undefined;
 }
 
 function resolve(db: SqliteDatabase, entityId: string): VisibilityResolution {
