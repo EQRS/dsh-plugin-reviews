@@ -21,6 +21,7 @@ import { usePathname } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, ErrorNotice, apiFetch } from './api-client';
 import { AccountMenu } from './account-menu';
+import { ThemeSwitch } from './theme-switch';
 import { SignInMenu } from './sign-in-menu';
 import { SiteDrawer } from './site-drawer';
 
@@ -124,6 +125,7 @@ export function SessionNav() {
         </div>
 
         <div className="account">
+          <ThemeSwitch />
           {session === null ? (
             <span className="muted">正在读取登录状态…</span>
           ) : session.authenticated ? (
