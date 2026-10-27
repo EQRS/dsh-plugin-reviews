@@ -129,7 +129,24 @@ function hasPublishedRevision(db: SqliteDatabase, entityId: string): boolean {
         LIMIT 1`,
     )
     .get(entityId) as { ok: number } | undefined;
-  return packRow !== undefined;
+  if (packRow !== undefined) return true;
+
+  // 整合包测评：公开指针在 pack_reviews，修订在 pack_review_revisions。
+  // 旧库还没跑 0022 时表不存在，按「没有公开修订」处理。
+  const hasPackReviews = db
+    .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = 'pack_reviews'")
+    .get() as { ok: number } | undefined;
+  if (!hasPackReviews) return false;
+  const reviewRow = db
+    .prepare(
+      `SELECT 1 AS ok
+         FROM pack_reviews pr
+         JOIN pack_review_revisions rev ON rev.id = pr.published_revision_id
+        WHERE pr.id = ? AND pr.published_revision_id IS NOT NULL AND rev.review_id = pr.id
+        LIMIT 1`,
+    )
+    .get(entityId) as { ok: number } | undefined;
+  return reviewRow !== undefined;
 }
 
 function resolve(db: SqliteDatabase, entityId: string): VisibilityResolution {

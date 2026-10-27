@@ -111,7 +111,8 @@ export default async function FavoritesPage({
                         <div className="list-meta">
                           <span>{f.count} 个插件</span>
                           <span>创建于 {formatDateTime(f.createdAt)}</span>
-                          <span style={{ marginLeft: 'auto' }}>
+                          <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 10, alignItems: 'center' }}>
+                            <Link href="/me/packs/new">创建整合包</Link>
                             <FolderActions
                               folderId={f.folderId}
                               name={f.name}

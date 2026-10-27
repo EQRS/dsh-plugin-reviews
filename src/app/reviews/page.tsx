@@ -14,6 +14,8 @@ import Link from 'next/link';
 import { getDb } from '@/server/platform/db';
 import { createSearchService, type SearchSource, type ReviewSearchRow } from '@/server/modules/search';
 import { createCatalogService, UNCATEGORIZED_CATEGORY } from '@/server/modules/catalog';
+import { createPackReviewsService } from '@/server/modules/pack-reviews';
+import { currentContext } from '@/app/api/_lib/context';
 import { PageJump } from '@/components/page-jump';
 import { isPageOutOfRange } from '@/packages/common/pagination';
 import type { VersionValue } from '@/packages/common/field-rules';
@@ -99,8 +101,68 @@ export default async function ReviewsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const conditions = readConditions(await searchParams);
+  const sp = await searchParams;
+  const tab = firstValue(sp.tab) === 'packs' ? 'packs' : 'plugins';
   const db = getDb();
+
+  if (tab === 'packs') {
+    const q = (firstValue(sp.q) ?? '').trim().slice(0, 100);
+    const ctx = await currentContext();
+    const packReviews = await createPackReviewsService({ db }).listPackReviews(ctx, q);
+    return (
+      <div>
+        <h1>评测</h1>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+          <Link href="/reviews" className="button">插件测评</Link>
+          <Link href="/reviews?tab=packs" className="button primary">整合包测评</Link>
+        </div>
+        <form action="/reviews" method="get" className="search" style={{ marginBottom: 12 }}>
+          <input type="hidden" name="tab" value="packs" />
+          <input
+            type="search"
+            name="q"
+            defaultValue={q}
+            placeholder="搜整合包测评标题"
+            aria-label="搜整合包测评标题"
+            maxLength={100}
+          />
+          <button type="submit" className="search-go">搜索</button>
+        </form>
+        <section className="panel">
+          <div className="section-head">
+            <h2>整合包测评（{packReviews.length}）</h2>
+          </div>
+          {packReviews.length === 0 ? (
+            <p className="empty" style={{ marginBottom: 0 }}>
+              {q ? `没有匹配「${q}」的整合包测评。` : '还没有整合包测评。可以去整合包详情页写第一篇。'}
+            </p>
+          ) : (
+            <ul className="item-list">
+              {packReviews.map((r) => (
+                <li key={r.reviewId} className="item">
+                  <div className="item-body">
+                    <h3>
+                      <Link href={`/reviews/${r.reviewId}`}>{r.title}</Link>
+                    </h3>
+                    <div className="list-meta">
+                      <Link href={`/packs/${r.packId}${r.releaseNumber ? `?v=${r.releaseNumber}` : ''}`}>
+                        {r.packTitle}
+                        {r.releaseNumber ? ` · 第 ${r.releaseNumber} 版` : ''}
+                      </Link>
+                      <span>{r.authorNickname ?? r.authorId}</span>
+                      <span>{formatDateTimeOr(r.createdAt, '时间未知')}</span>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+    );
+  }
+
+  const conditions = readConditions(sp);
 
   const search = createSearchService({ db });
   const result = await search.searchReviews({
@@ -157,6 +219,11 @@ export default async function ReviewsPage({
   return (
     <div>
       <h1>评测</h1>
+
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+        <Link href="/reviews" className="button primary">插件测评</Link>
+        <Link href="/reviews?tab=packs" className="button">整合包测评</Link>
+      </div>
 
       <div className="catalog-layout">
         <aside className="panel" aria-label="筛选">
