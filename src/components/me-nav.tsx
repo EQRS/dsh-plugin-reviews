@@ -11,7 +11,7 @@
 
 import Link from 'next/link';
 
-type MeSection = 'reviews' | 'favorites' | 'notifications' | 'settings';
+type MeSection = 'reviews' | 'packs' | 'favorites' | 'notifications' | 'settings';
 
 export function MeNav({ current }: { current: MeSection }) {
   return (
@@ -20,6 +20,13 @@ export function MeNav({ current }: { current: MeSection }) {
       <nav className="side-nav">
         <Link href="/me" className={current === 'reviews' ? 'active' : ''} aria-current={current === 'reviews' ? 'page' : undefined}>
           <span>评测</span>
+        </Link>
+        <Link
+          href="/me/packs"
+          className={current === 'packs' ? 'active' : ''}
+          aria-current={current === 'packs' ? 'page' : undefined}
+        >
+          <span>整合包</span>
         </Link>
         <Link
           href="/me/favorites"
