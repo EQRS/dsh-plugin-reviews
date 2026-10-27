@@ -170,6 +170,26 @@ function describeTarget(
           WHERE r.id = ?`,
       )
       .get(target.id) as { title: string } | undefined;
+
+    // 整合包测评：修订在 pack_review_revisions（旧库未跑 0022 时跳过）。
+    if (row === undefined) {
+      const hasPackReviews = db
+        .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = 'pack_reviews'")
+        .get() as { ok: number } | undefined;
+      if (hasPackReviews) {
+        const packRow = db
+          .prepare(
+            `SELECT rev.title AS title FROM pack_reviews pr
+               JOIN pack_review_revisions rev ON rev.id = pr.published_revision_id
+              WHERE pr.id = ?`,
+          )
+          .get(target.id) as { title: string } | undefined;
+        if (packRow) {
+          return { excerpt: packRow.title.slice(0, EXCERPT_MAX), href: `/reviews/${target.id}` };
+        }
+      }
+    }
+
     return {
       excerpt: (row?.title ?? '（评测）').slice(0, EXCERPT_MAX),
       href: `/reviews/${target.id}`,

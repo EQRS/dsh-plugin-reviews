@@ -9,6 +9,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getDb } from '@/server/platform/db';
 import { createPacksService } from '@/server/modules/packs';
+import { createPackReviewsService } from '@/server/modules/pack-reviews';
 import { renderMarkdownToSafeHtml } from '@/server/platform/markdown';
 import { formatVersionLabel } from '@/packages/common/status-text';
 import { formatDateTimeOr } from '@/packages/common/time';
@@ -49,6 +50,9 @@ export default async function PackDetailPage({
   }
 
   const selected = detail.selected;
+  const packReviews = (await createPackReviewsService({ db: getDb() }).listPackReviews(ctx)).filter(
+    (review) => review.packId === packId,
+  );
   const bodyHtml = selected ? renderMarkdownToSafeHtml(selected.bodyMarkdown) : '';
 
   return (
@@ -231,6 +235,42 @@ export default async function PackDetailPage({
               </pre>
             </section>
           ) : null}
+
+          <section className="panel" aria-label="整合包测评">
+            <div className="section-head">
+              <h2>测评（{packReviews.length}）</h2>
+              {ctx.userId !== null ? (
+                <Link
+                  href={`/packs/${packId}/review/new?v=${selected.releaseNumber}`}
+                  className="button"
+                >
+                  写测评
+                </Link>
+              ) : null}
+            </div>
+            {packReviews.length === 0 ? (
+              <p className="empty" style={{ marginBottom: 0 }}>
+                还没有测评。登录后可以写第一篇。
+              </p>
+            ) : (
+              <ul className="item-list">
+                {packReviews.map((review) => (
+                  <li key={review.reviewId} className="item">
+                    <div className="item-body">
+                      <h3>
+                        <Link href={`/reviews/${review.reviewId}`}>{review.title}</Link>
+                      </h3>
+                      <div className="list-meta">
+                        <span>{review.authorNickname ?? review.authorId}</span>
+                        <span>{formatDateTimeOr(review.createdAt, '时间未知')}</span>
+                        {review.releaseNumber ? <span>第 {review.releaseNumber} 版</span> : null}
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
 
           {selected.testStatus === 'tested' ? (
             <section className="panel" aria-label="作者实测">

@@ -110,7 +110,120 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ r
         WHERE r.id = ?`,
     )
     .get(reviewId) as Row | undefined;
-  if (!row) notFound();
+  if (!row) {
+    // 整合包测评：内容在 pack_reviews / pack_review_revisions，渲染简化版详情。
+    const packRow = db
+      .prepare(
+        `SELECT pr.id AS review_id, rel.pack_id, p.title AS pack_title, rel.release_number,
+                ce.author_id, u.nickname, rev.title, rev.body_markdown, rev.dsh_version,
+                rev.verdict, rev.evidence_refs, rev.assessment_level, rev.submitted_at AS created_at
+           FROM pack_reviews pr
+           JOIN plugin_pack_releases rel ON rel.id = pr.release_id
+           JOIN plugin_packs p ON p.id = rel.pack_id
+           JOIN content_entities ce ON ce.id = pr.id
+           JOIN users u ON u.id = ce.author_id
+           JOIN pack_review_revisions rev ON rev.id = pr.published_revision_id
+          WHERE pr.id = ?`,
+      )
+      .get(reviewId) as
+      | {
+          review_id: string;
+          pack_id: string;
+          pack_title: string;
+          release_number: number | null;
+          author_id: string;
+          nickname: string;
+          title: string;
+          body_markdown: string;
+          dsh_version: string;
+          verdict: string | null;
+          evidence_refs: string | null;
+          assessment_level: string | null;
+          created_at: number;
+        }
+      | undefined;
+    if (!packRow) notFound();
+
+    const packDshVersion = JSON.parse(packRow.dsh_version) as VersionValue;
+    const packVerdictKey = isVerdictKey(packRow.verdict) ? packRow.verdict : null;
+    const packAssessmentText = assessmentLabel(packRow.assessment_level);
+    let packEvidenceRefs: EvidenceRef[] = [];
+    if (packRow.evidence_refs) {
+      try {
+        packEvidenceRefs = parseEvidenceRefs(JSON.parse(packRow.evidence_refs), { required: false });
+      } catch {
+        packEvidenceRefs = [];
+      }
+    }
+    const { html: packBodyHtml } = renderArticleMarkdown(packRow.body_markdown);
+
+    return (
+      <div>
+        <div className="article-topbar">
+          <BackLink
+            href={`/packs/${packRow.pack_id}${packRow.release_number ? `?v=${packRow.release_number}` : ''}`}
+          >
+            返回整合包
+          </BackLink>
+          <div className="article-topbar-actions">
+            <ReportButton targetKind="review" targetId={reviewId} authenticated={ctx.userId !== null} />
+          </div>
+        </div>
+
+        <article className="article-shell" style={{ marginTop: 12 }}>
+          <div className="article-hero-card">
+            <ArticleHero seed={reviewId} />
+            <header className="article-head">
+              <h1 className="article-title">
+                <span className="tag article-source">整合包测评</span>
+                {packRow.title}
+              </h1>
+              <div className="article-meta">
+                <BackLink
+                  href={`/packs/${packRow.pack_id}${packRow.release_number ? `?v=${packRow.release_number}` : ''}`}
+                >
+                  {packRow.pack_title}
+                  {packRow.release_number ? ` · 第 ${packRow.release_number} 版` : ''}
+                </BackLink>
+                <span>{formatVersionLabel('DSH', packDshVersion)}</span>
+                <span>{packRow.nickname}</span>
+                <span className="tag" title="本篇测评档位">
+                  {packAssessmentText ?? '未标注档位'}
+                </span>
+                {packVerdictKey ? (
+                  <span className="tag verdict-badge" title="五状态判定">
+                    {verdictDef(packVerdictKey).label}
+                  </span>
+                ) : null}
+              </div>
+            </header>
+          </div>
+
+          {packEvidenceRefs.length > 0 ? (
+            <section className="panel" style={{ margin: '0 0 16px' }} aria-label="证据链">
+              <h2 style={{ fontSize: 15, margin: '0 0 8px' }}>证据链</h2>
+              <ol className="evidence-list" style={{ margin: 0, paddingLeft: 20, fontSize: 14, lineHeight: 1.7 }}>
+                {packEvidenceRefs.map((item) => (
+                  <li key={item.url}>
+                    <a href={item.url} target="_blank" rel="noreferrer noopener">
+                      点击跳转
+                    </a>
+                    {item.note ? <span className="muted">——{item.note}</span> : null}
+                  </li>
+                ))}
+              </ol>
+            </section>
+          ) : null}
+
+          <div className="article-frame">
+            <div className="review-body" dangerouslySetInnerHTML={{ __html: packBodyHtml }} />
+          </div>
+
+          <CommentSection contentId={reviewId} />
+        </article>
+      </div>
+    );
+  }
 
   const pluginVersion = JSON.parse(row.plugin_version) as VersionValue;
   const dshVersion = JSON.parse(row.dsh_version) as VersionValue;
