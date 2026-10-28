@@ -1183,6 +1183,78 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
       }, injectedDb ?? db);
     },
 
+    /** 整合包版本的有帮助状态（匿名只给总数）。 */
+    async helpfulStateForRelease(
+      releaseId: string,
+      userId: string | null,
+      injectedDb?: SqliteDatabase,
+    ): Promise<{ helpful: boolean; count: number }> {
+      return withRead((conn) => {
+        const count = (
+          conn
+            .prepare('SELECT COUNT(*) AS c FROM pack_release_helpful_votes WHERE release_id = ?')
+            .get(releaseId) as { c: number }
+        ).c;
+        const helpful =
+          userId === null
+            ? false
+            : conn
+                .prepare('SELECT 1 AS x FROM pack_release_helpful_votes WHERE user_id = ? AND release_id = ?')
+                .get(userId, releaseId) !== undefined;
+        return { helpful, count: Number(count) };
+      }, injectedDb ?? db);
+    },
+
+    /** 有帮助投票切换（登录用户；只对公开版本开放）。 */
+    async toggleHelpfulForRelease(
+      ctx: CallerContext,
+      releaseId: string,
+      injectedDb?: SqliteDatabase,
+    ): Promise<{ helpful: boolean; count: number }> {
+      assertCanWrite(ctx);
+      const userId = ctx.userId;
+      return withTransaction((tx) => {
+        const conn = tx.db;
+        const rel = conn
+          .prepare(
+            `SELECT rel.release_number, ce.withdrawn_at, ce.hidden_at
+               FROM plugin_pack_releases rel
+               JOIN content_entities ce ON ce.id = rel.id
+              WHERE rel.id = ?`,
+          )
+          .get(releaseId) as
+          | { release_number: number | null; withdrawn_at: number | null; hidden_at: number | null }
+          | undefined;
+        if (
+          !rel ||
+          rel.release_number === null ||
+          rel.withdrawn_at !== null ||
+          rel.hidden_at !== null
+        ) {
+          throw err.unavailable('整合包版本不存在或已不可访问。');
+        }
+
+        const current = conn
+          .prepare('SELECT 1 AS x FROM pack_release_helpful_votes WHERE user_id = ? AND release_id = ?')
+          .get(userId, releaseId);
+        if (current) {
+          conn
+            .prepare('DELETE FROM pack_release_helpful_votes WHERE user_id = ? AND release_id = ?')
+            .run(userId, releaseId);
+        } else {
+          conn
+            .prepare('INSERT INTO pack_release_helpful_votes (user_id, release_id, created_at) VALUES (?, ?, ?)')
+            .run(userId, releaseId, nowMs());
+        }
+        const count = (
+          conn
+            .prepare('SELECT COUNT(*) AS c FROM pack_release_helpful_votes WHERE release_id = ?')
+            .get(releaseId) as { c: number }
+        ).c;
+        return { helpful: !current, count: Number(count) };
+      }, injectedDb ?? db);
+    },
+
     /** 我收藏的整合包（详情页/个人中心）。 */
     async listFavoritePacks(ctx: CallerContext, injectedDb?: SqliteDatabase): Promise<PackSummaryView[]> {
       if (ctx.userId === null) throw err.unauthenticated();

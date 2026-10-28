@@ -15,6 +15,9 @@ import { formatVersionLabel } from '@/packages/common/status-text';
 import { formatDateTimeOr } from '@/packages/common/time';
 import { CopyButton } from '@/components/copy-button';
 import { PackFavoriteButton } from '@/components/pack-favorite-button';
+import { PackHelpfulButton } from '@/components/pack-helpful-button';
+import { ReportButton } from '@/components/report-button';
+import { CommentSection } from '@/components/comment-section';
 import { BackLink } from '@/components/back-link';
 import { currentContext } from '@/app/api/_lib/context';
 import { DomainError } from '@/packages/common/errors';
@@ -53,6 +56,10 @@ export default async function PackDetailPage({
   const packReviews = (await createPackReviewsService({ db: getDb() }).listPackReviews(ctx)).filter(
     (review) => review.packId === packId,
   );
+  const packService = createPacksService({ db: getDb() });
+  const helpful = selected
+    ? await packService.helpfulStateForRelease(selected.releaseId, ctx.userId)
+    : { helpful: false, count: 0 };
   const bodyHtml = selected ? renderMarkdownToSafeHtml(selected.bodyMarkdown) : '';
 
   return (
@@ -79,6 +86,21 @@ export default async function PackDetailPage({
             initialCount={detail.favoriteCount}
             authenticated={ctx.userId !== null}
           />
+          {selected ? (
+            <>
+              <PackHelpfulButton
+                releaseId={selected.releaseId}
+                initialCount={helpful.count}
+                initialHelpful={helpful.helpful}
+                authenticated={ctx.userId !== null}
+              />
+              <ReportButton
+                targetKind="pack_release"
+                targetId={selected.releaseId}
+                authenticated={ctx.userId !== null}
+              />
+            </>
+          ) : null}
         </div>
       </header>
 
@@ -287,6 +309,7 @@ export default async function PackDetailPage({
               </p>
             </section>
           ) : null}
+          {selected ? <CommentSection contentId={selected.releaseId} /> : null}
         </>
       )}
     </div>
