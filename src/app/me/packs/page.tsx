@@ -10,6 +10,7 @@ import { createPacksService } from '@/server/modules/packs';
 import { currentContext } from '../../api/_lib/context';
 import { MeNav } from '@/components/me-nav';
 import { formatDateTimeOr } from '@/packages/common/time';
+import { PackReleaseActions } from '@/components/pack-release-actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,8 +44,22 @@ export default async function MyPacksPage() {
                   <li key={pack.packId} className="item">
                     <div className="item-body">
                       <div className="item-head">
-                        <span className={pack.withdrawn || pack.hidden ? 'tag warn' : 'tag site'}>
-                          {pack.hidden ? '已被隐藏' : pack.withdrawn ? '已撤回' : `第 ${pack.releaseNumber} 版`}
+                        <span
+                          className={
+                            pack.reviewStatus === 'published' && !pack.withdrawn
+                              ? 'tag site'
+                              : 'tag warn'
+                          }
+                        >
+                          {pack.reviewStatus === 'draft'
+                            ? '未上传'
+                            : pack.reviewStatus === 'pending'
+                              ? '待审核'
+                              : pack.reviewStatus === 'rejected'
+                                ? '已拒绝'
+                                : pack.withdrawn
+                                  ? '已撤回'
+                                  : `第 ${pack.releaseNumber} 版`}
                         </span>
                         <div className="item-main">
                           <h3 className="item-title">
@@ -55,6 +70,15 @@ export default async function MyPacksPage() {
                             <span>{pack.pluginCount} 个插件</span>
                             <span>{pack.favoriteCount} 收藏</span>
                             <span>{formatDateTimeOr(pack.publishedAt, '时间未知')}</span>
+                            {pack.reviewNote ? <span className="muted">审核意见：{pack.reviewNote}</span> : null}
+                            <span style={{ marginLeft: 'auto' }}>
+                              <PackReleaseActions
+                                releaseId={pack.releaseId}
+                                packId={pack.packId}
+                                reviewStatus={pack.reviewStatus ?? 'draft'}
+                                withdrawn={pack.withdrawn ?? false}
+                              />
+                            </span>
                           </div>
                         </div>
                       </div>

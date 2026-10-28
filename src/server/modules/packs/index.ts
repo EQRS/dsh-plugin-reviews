@@ -60,7 +60,7 @@ export interface PackSummaryView {
   authorNickname: string;
   title: string;
   purpose: string;
-  releaseNumber: number;
+  releaseNumber: number | null;
   releaseId: string;
   pluginCount: number;
   favoriteCount: number;
@@ -68,6 +68,9 @@ export interface PackSummaryView {
   /** 仅「我的整合包」使用：最近版本当前是否仍公开。 */
   withdrawn?: boolean;
   hidden?: boolean;
+  /** 版本生命周期：draft（未上传）/ pending（待审核）/ published / rejected。 */
+  reviewStatus?: 'draft' | 'pending' | 'published' | 'rejected';
+  reviewNote?: string | null;
 }
 
 export interface PackReleaseSummary {
@@ -406,8 +409,8 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
           .prepare(
             `INSERT INTO plugin_pack_releases
                (id, pack_id, release_number, title, purpose, body_markdown, dsh_version,
-                config_template, test_status, test_task, test_result, submitted_at)
-             VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                config_template, test_status, test_task, test_result, submitted_at, review_status)
+             VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published')`,
           )
           .run(
             releaseId,
@@ -446,6 +449,312 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
       }, injectedDb ?? db);
     },
 
+    /**
+     * 创建整合包草稿（不分配发布序号、不公开）。
+     *
+     * 作者上传整合包文件后才进入待审核；审核通过才分配「第 N 版」并公开。
+     */
+    async createPackDraft(
+      ctx: CallerContext,
+      input: ReleaseInput,
+      injectedDb?: SqliteDatabase,
+    ): Promise<{ packId: string; releaseId: string }> {
+      assertCanWrite(ctx);
+      const authorId = ctx.userId;
+      return withTransaction((tx) => {
+        const conn = tx.db;
+        const parsed = parseReleaseInput(conn, input);
+        const now = nowMs();
+        const packId = newId(now);
+        const releaseId = newId(now);
+
+        conn
+          .prepare('INSERT INTO plugin_packs (id, author_id, last_release_number, created_at) VALUES (?, ?, 0, ?)')
+          .run(packId, authorId, now);
+        conn
+          .prepare(
+            `INSERT INTO content_entities
+               (id, content_type, author_id, review_id, pack_release_id, created_at,
+                first_published_at, public_updated_at, visibility_control_version)
+             VALUES (?, 'pack_release', ?, NULL, ?, ?, NULL, NULL, 0)`,
+          )
+          .run(releaseId, authorId, releaseId, now);
+        conn
+          .prepare(
+            `INSERT INTO plugin_pack_releases
+               (id, pack_id, release_number, title, purpose, body_markdown, dsh_version,
+                config_template, test_status, test_task, test_result, submitted_at, review_status)
+             VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')`,
+          )
+          .run(
+            releaseId,
+            packId,
+            parsed.title,
+            parsed.purpose,
+            parsed.bodyMarkdown,
+            JSON.stringify(parsed.dshVersion),
+            parsed.configTemplate,
+            parsed.testStatus,
+            parsed.testTask,
+            parsed.testResult,
+            now,
+          );
+        const insertItem = conn.prepare(
+          `INSERT INTO plugin_pack_release_items
+             (id, release_id, plugin_id, position, purpose, display_snapshot, plugin_version,
+              install_target, source_url)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        );
+        for (const item of parsed.items) {
+          insertItem.run(
+            newId(now),
+            releaseId,
+            item.pluginId,
+            item.position,
+            item.purpose,
+            item.displaySnapshot,
+            JSON.stringify(item.pluginVersion),
+            item.installTarget === null ? null : JSON.stringify(item.installTarget),
+            item.sourceUrl,
+          );
+        }
+        return { packId, releaseId };
+      }, injectedDb ?? db);
+    },
+
+    /** 作者上传整合包文件：进入待审核（不分配发布序号，不公开）。 */
+    async uploadReleaseFile(
+      ctx: CallerContext,
+      releaseId: string,
+      file: { fileName: string; byteSize: number; storedPath: string },
+      injectedDb?: SqliteDatabase,
+    ): Promise<{ reviewStatus: 'pending' }> {
+      assertCanWrite(ctx);
+      const userId = ctx.userId;
+      return withTransaction((tx) => {
+        const conn = tx.db;
+        const rel = conn
+          .prepare(
+            `SELECT rel.id, rel.pack_id, rel.review_status, p.author_id
+               FROM plugin_pack_releases rel
+               JOIN plugin_packs p ON p.id = rel.pack_id
+              WHERE rel.id = ?`,
+          )
+          .get(releaseId) as
+          | { id: string; pack_id: string; review_status: string; author_id: string }
+          | undefined;
+        if (!rel) throw err.unavailable('整合包版本不存在。');
+        if (rel.author_id !== userId) throw err.forbidden('只有作者可以上传整合包。');
+        if (rel.review_status === 'published') {
+          throw err.conflict('这个版本已经发布，不能重新上传；请发布新版本。', { releaseId });
+        }
+        if (rel.review_status === 'pending') {
+          throw err.conflict('这个版本已在审核中，请等待审核结果。', { releaseId });
+        }
+
+        const now = nowMs();
+        conn
+          .prepare(
+            `INSERT INTO plugin_pack_release_files
+               (id, release_id, file_name, byte_size, stored_path, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+          )
+          .run(newId(now), releaseId, file.fileName, file.byteSize, file.storedPath, now);
+        conn
+          .prepare(
+            `UPDATE plugin_pack_releases
+                SET review_status = 'pending', review_note = NULL, submitted_at = ?
+              WHERE id = ?`,
+          )
+          .run(now, releaseId);
+        return { reviewStatus: 'pending' as const };
+      }, injectedDb ?? db);
+    },
+
+    /** 管理员审核通过：分配发布序号并公开（同一事务，§58）。 */
+    async approveRelease(
+      ctx: CallerContext,
+      releaseId: string,
+      injectedDb?: SqliteDatabase,
+    ): Promise<{ releaseNumber: number }> {
+      if (!isAdmin(ctx)) throw err.forbidden('只有管理员可以审核整合包。');
+      return withTransaction((tx) => {
+        const conn = tx.db;
+        const rel = conn
+          .prepare('SELECT id, pack_id, review_status FROM plugin_pack_releases WHERE id = ?')
+          .get(releaseId) as { id: string; pack_id: string; review_status: string } | undefined;
+        if (!rel) throw err.unavailable('整合包版本不存在。');
+        if (rel.review_status !== 'pending') {
+          throw err.conflict('只有待审核版本可以通过审核。', { releaseId });
+        }
+        const pack = conn
+          .prepare('SELECT last_release_number FROM plugin_packs WHERE id = ?')
+          .get(rel.pack_id) as { last_release_number: number } | undefined;
+        if (!pack) throw err.unavailable('整合包不存在。');
+
+        const releaseNumber = Number(pack.last_release_number) + 1;
+        const now = nowMs();
+        conn
+          .prepare(
+            `UPDATE plugin_pack_releases
+                SET release_number = ?, review_status = 'published', review_note = NULL
+              WHERE id = ?`,
+          )
+          .run(releaseNumber, releaseId);
+        conn
+          .prepare(
+            `UPDATE content_entities
+                SET first_published_at = COALESCE(first_published_at, ?), public_updated_at = ?
+              WHERE id = ?`,
+          )
+          .run(now, now, releaseId);
+        conn.prepare('UPDATE plugin_packs SET last_release_number = ? WHERE id = ?').run(releaseNumber, rel.pack_id);
+        return { releaseNumber };
+      }, injectedDb ?? db);
+    },
+
+    /** 管理员审核拒绝：记录原因，作者可修改后重新上传。 */
+    async rejectRelease(
+      ctx: CallerContext,
+      releaseId: string,
+      note: string | null,
+      injectedDb?: SqliteDatabase,
+    ): Promise<{ ok: true }> {
+      if (!isAdmin(ctx)) throw err.forbidden('只有管理员可以审核整合包。');
+      return withTransaction((tx) => {
+        const conn = tx.db;
+        const rel = conn
+          .prepare('SELECT id, review_status FROM plugin_pack_releases WHERE id = ?')
+          .get(releaseId) as { id: string; review_status: string } | undefined;
+        if (!rel) throw err.unavailable('整合包版本不存在。');
+        if (rel.review_status !== 'pending') {
+          throw err.conflict('只有待审核版本可以拒绝。', { releaseId });
+        }
+        conn
+          .prepare(`UPDATE plugin_pack_releases SET review_status = 'rejected', review_note = ? WHERE id = ?`)
+          .run((note ?? '').trim() || null, releaseId);
+        return { ok: true as const };
+      }, injectedDb ?? db);
+    },
+
+    /** 作者编辑草稿/被拒版本（已发布版本不可改，需发新版）。 */
+    async updateDraftRelease(
+      ctx: CallerContext,
+      releaseId: string,
+      input: ReleaseInput,
+      injectedDb?: SqliteDatabase,
+    ): Promise<{ releaseId: string }> {
+      assertCanWrite(ctx);
+      const userId = ctx.userId;
+      return withTransaction((tx) => {
+        const conn = tx.db;
+        const rel = conn
+          .prepare(
+            `SELECT rel.id, rel.pack_id, rel.review_status, p.author_id
+               FROM plugin_pack_releases rel
+               JOIN plugin_packs p ON p.id = rel.pack_id
+              WHERE rel.id = ?`,
+          )
+          .get(releaseId) as
+          | { id: string; pack_id: string; review_status: string; author_id: string }
+          | undefined;
+        if (!rel) throw err.unavailable('整合包版本不存在。');
+        if (rel.author_id !== userId) throw err.forbidden('只有作者可以编辑整合包。');
+        if (rel.review_status === 'published') {
+          throw err.conflict('已发布版本不可原地修改；请发布新版本。', { releaseId });
+        }
+        if (rel.review_status === 'pending') {
+          throw err.conflict('版本正在审核中，不能编辑。', { releaseId });
+        }
+
+        const parsed = parseReleaseInput(conn, input);
+        const now = nowMs();
+        conn
+          .prepare(
+            `UPDATE plugin_pack_releases
+                SET title = ?, purpose = ?, body_markdown = ?, dsh_version = ?,
+                    config_template = ?, test_status = ?, test_task = ?, test_result = ?,
+                    submitted_at = ?
+              WHERE id = ?`,
+          )
+          .run(
+            parsed.title,
+            parsed.purpose,
+            parsed.bodyMarkdown,
+            JSON.stringify(parsed.dshVersion),
+            parsed.configTemplate,
+            parsed.testStatus,
+            parsed.testTask,
+            parsed.testResult,
+            now,
+            releaseId,
+          );
+        conn.prepare('DELETE FROM plugin_pack_release_items WHERE release_id = ?').run(releaseId);
+        const insertItem = conn.prepare(
+          `INSERT INTO plugin_pack_release_items
+             (id, release_id, plugin_id, position, purpose, display_snapshot, plugin_version,
+              install_target, source_url)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        );
+        for (const item of parsed.items) {
+          insertItem.run(
+            newId(now),
+            releaseId,
+            item.pluginId,
+            item.position,
+            item.purpose,
+            item.displaySnapshot,
+            JSON.stringify(item.pluginVersion),
+            item.installTarget === null ? null : JSON.stringify(item.installTarget),
+            item.sourceUrl,
+          );
+        }
+        return { releaseId };
+      }, injectedDb ?? db);
+    },
+
+    /** 作者删除未发布版本（草稿/待审/被拒）；已发布版本只能撤回。 */
+    async deleteDraftRelease(
+      ctx: CallerContext,
+      releaseId: string,
+      injectedDb?: SqliteDatabase,
+    ): Promise<{ deleted: true }> {
+      assertCanWrite(ctx);
+      const userId = ctx.userId;
+      return withTransaction((tx) => {
+        const conn = tx.db;
+        const rel = conn
+          .prepare(
+            `SELECT rel.id, rel.pack_id, rel.review_status, rel.release_number, p.author_id
+               FROM plugin_pack_releases rel
+               JOIN plugin_packs p ON p.id = rel.pack_id
+              WHERE rel.id = ?`,
+          )
+          .get(releaseId) as
+          | {
+              id: string;
+              pack_id: string;
+              review_status: string;
+              release_number: number | null;
+              author_id: string;
+            }
+          | undefined;
+        if (!rel) throw err.unavailable('整合包版本不存在。');
+        if (rel.author_id !== userId) throw err.forbidden('只有作者可以删除整合包。');
+        if (rel.review_status === 'published' || rel.release_number !== null) {
+          throw err.conflict('已发布版本只能撤回，不能删除。', { releaseId });
+        }
+        // 先删版本（引用公共内容），再删公共内容行；items/files 随版本级联。
+        conn.prepare('DELETE FROM plugin_pack_releases WHERE id = ?').run(releaseId);
+        conn.prepare('DELETE FROM content_entities WHERE id = ?').run(releaseId);
+        const rest = conn.prepare('SELECT COUNT(*) AS c FROM plugin_pack_releases WHERE pack_id = ?').get(rel.pack_id) as { c: number };
+        if (Number(rest.c) === 0) {
+          conn.prepare('DELETE FROM plugin_packs WHERE id = ?').run(rel.pack_id);
+        }
+        return { deleted: true as const };
+      }, injectedDb ?? db);
+    },
+
     /** 作者发布新版本：序号原子 +1，内容整份冻结；旧版本保持原样（§35.2/§58）。 */
     async addRelease(
       ctx: CallerContext,
@@ -480,8 +789,8 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
           .prepare(
             `INSERT INTO plugin_pack_releases
                (id, pack_id, release_number, title, purpose, body_markdown, dsh_version,
-                config_template, test_status, test_task, test_result, submitted_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                config_template, test_status, test_task, test_result, submitted_at, review_status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published')`,
           )
           .run(
             releaseId,
@@ -576,7 +885,8 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
                SELECT rel.*, ROW_NUMBER() OVER (PARTITION BY rel.pack_id ORDER BY rel.release_number DESC) AS rn
                  FROM plugin_pack_releases rel
                  JOIN content_entities ce ON ce.id = rel.id
-                WHERE rel.release_number IS NOT NULL AND ce.withdrawn_at IS NULL AND ce.hidden_at IS NULL
+                WHERE rel.release_number IS NOT NULL AND rel.review_status = 'published'
+                   AND ce.withdrawn_at IS NULL AND ce.hidden_at IS NULL
              )
              SELECT COUNT(*) AS c FROM plugin_packs p JOIN latest l ON l.pack_id = p.id AND l.rn = 1 ${where}`,
           )
@@ -588,7 +898,8 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
                SELECT rel.*, ROW_NUMBER() OVER (PARTITION BY rel.pack_id ORDER BY rel.release_number DESC) AS rn
                  FROM plugin_pack_releases rel
                  JOIN content_entities ce ON ce.id = rel.id
-                WHERE rel.release_number IS NOT NULL AND ce.withdrawn_at IS NULL AND ce.hidden_at IS NULL
+                WHERE rel.release_number IS NOT NULL AND rel.review_status = 'published'
+                   AND ce.withdrawn_at IS NULL AND ce.hidden_at IS NULL
              )
              SELECT p.id AS pack_id, p.author_id, u.nickname, l.id AS release_id, l.release_number,
                     l.title, l.purpose, l.submitted_at,
@@ -640,12 +951,13 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
         const rows = conn
           .prepare(
             `WITH latest AS (
-               SELECT rel.*, ROW_NUMBER() OVER (PARTITION BY rel.pack_id ORDER BY rel.release_number DESC) AS rn
+               SELECT rel.*, ROW_NUMBER() OVER (
+                 PARTITION BY rel.pack_id ORDER BY rel.submitted_at DESC, rel.id DESC
+               ) AS rn
                  FROM plugin_pack_releases rel
-                WHERE rel.release_number IS NOT NULL
              )
              SELECT p.id AS pack_id, p.author_id, u.nickname, l.id AS release_id, l.release_number,
-                    l.title, l.purpose, l.submitted_at,
+                    l.review_status, l.review_note, l.title, l.purpose, l.submitted_at,
                     (SELECT COUNT(*) FROM plugin_pack_release_items i WHERE i.release_id = l.id) AS item_count,
                     (SELECT COUNT(*) FROM plugin_pack_favorites f WHERE f.pack_id = p.id) AS favorite_count,
                     ce.withdrawn_at, ce.hidden_at
@@ -661,7 +973,9 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
           author_id: string;
           nickname: string;
           release_id: string;
-          release_number: number;
+          release_number: number | null;
+          review_status: 'draft' | 'pending' | 'published' | 'rejected';
+          review_note: string | null;
           title: string;
           purpose: string;
           submitted_at: number;
@@ -675,11 +989,13 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
           authorNickname: r.nickname,
           title: r.title,
           purpose: r.purpose,
-          releaseNumber: Number(r.release_number),
+          releaseNumber: r.release_number === null ? null : Number(r.release_number),
           releaseId: r.release_id,
           pluginCount: Number(r.item_count),
           favoriteCount: Number(r.favorite_count),
           publishedAt: r.submitted_at,
+          reviewStatus: r.review_status,
+          reviewNote: r.review_note,
           // 作者要看得到"这个版本当前是否还公开"
           withdrawn: r.withdrawn_at !== null,
           hidden: r.hidden_at !== null,
@@ -710,7 +1026,7 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
           .prepare(
             `SELECT rel.id, rel.release_number, rel.title, rel.submitted_at, ce.withdrawn_at, ce.hidden_at
                FROM plugin_pack_releases rel JOIN content_entities ce ON ce.id = rel.id
-              WHERE rel.pack_id = ? AND rel.release_number IS NOT NULL
+              WHERE rel.pack_id = ? AND rel.release_number IS NOT NULL AND rel.review_status = 'published'
               ORDER BY rel.release_number DESC`,
           )
           .all(packId) as Array<{
@@ -850,7 +1166,7 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
           .prepare(
             `SELECT COUNT(*) AS c FROM plugin_pack_releases rel
                JOIN content_entities ce ON ce.id = rel.id
-              WHERE rel.pack_id = ? AND rel.release_number IS NOT NULL
+              WHERE rel.pack_id = ? AND rel.release_number IS NOT NULL AND rel.review_status = 'published'
                 AND ce.withdrawn_at IS NULL AND ce.hidden_at IS NULL`,
           )
           .get(packId) as { c: number }).c;
@@ -881,7 +1197,8 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
                SELECT rel.*, ROW_NUMBER() OVER (PARTITION BY rel.pack_id ORDER BY rel.release_number DESC) AS rn
                  FROM plugin_pack_releases rel
                  JOIN content_entities ce ON ce.id = rel.id
-                WHERE rel.release_number IS NOT NULL AND ce.withdrawn_at IS NULL AND ce.hidden_at IS NULL
+                WHERE rel.release_number IS NOT NULL AND rel.review_status = 'published'
+                   AND ce.withdrawn_at IS NULL AND ce.hidden_at IS NULL
              )
              SELECT p.id AS pack_id, u.nickname, l.id AS release_id, l.release_number, l.title, l.purpose,
                     l.submitted_at,
