@@ -522,11 +522,15 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
       }, injectedDb ?? db);
     },
 
-    /** 作者上传整合包文件：进入待审核（不分配发布序号，不公开）。 */
-    async uploadReleaseFile(
+    /**
+     * 作者提交审核：不依赖上传文件。
+     *
+     * 整合包不打包分发，安装资料由条目的 install_target（npm / GitHub）生成命令；
+     * 提交审核只是把草稿版本推进到待审核。
+     */
+    async submitReleaseForReview(
       ctx: CallerContext,
       releaseId: string,
-      file: { fileName: string; byteSize: number; storedPath: string },
       injectedDb?: SqliteDatabase,
     ): Promise<{ reviewStatus: 'pending' }> {
       assertCanWrite(ctx);
@@ -535,31 +539,24 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
         const conn = tx.db;
         const rel = conn
           .prepare(
-            `SELECT rel.id, rel.pack_id, rel.review_status, p.author_id
+            `SELECT rel.id, rel.review_status, p.author_id
                FROM plugin_pack_releases rel
                JOIN plugin_packs p ON p.id = rel.pack_id
               WHERE rel.id = ?`,
           )
           .get(releaseId) as
-          | { id: string; pack_id: string; review_status: string; author_id: string }
+          | { id: string; review_status: string; author_id: string }
           | undefined;
         if (!rel) throw err.unavailable('整合包版本不存在。');
-        if (rel.author_id !== userId) throw err.forbidden('只有作者可以上传整合包。');
+        if (rel.author_id !== userId) throw err.forbidden('只有作者可以提交审核。');
         if (rel.review_status === 'published') {
-          throw err.conflict('这个版本已经发布，不能重新上传；请发布新版本。', { releaseId });
+          throw err.conflict('这个版本已经发布，不能重复提交；修改请发布新版本。', { releaseId });
         }
         if (rel.review_status === 'pending') {
           throw err.conflict('这个版本已在审核中，请等待审核结果。', { releaseId });
         }
 
         const now = nowMs();
-        conn
-          .prepare(
-            `INSERT INTO plugin_pack_release_files
-               (id, release_id, file_name, byte_size, stored_path, created_at)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-          )
-          .run(newId(now), releaseId, file.fileName, file.byteSize, file.storedPath, now);
         conn
           .prepare(
             `UPDATE plugin_pack_releases

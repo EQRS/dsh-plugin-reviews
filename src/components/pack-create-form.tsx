@@ -102,7 +102,7 @@ export function PackCreateForm({ folders }: { folders: FolderOption[] }) {
         };
       });
 
-      const result = await apiFetch<{ packId: string; releaseId: string }>('/api/packs', {
+      await apiFetch<{ packId: string; releaseId: string }>('/api/packs', {
         method: 'POST',
         json: {
           title,

@@ -2,13 +2,13 @@
 
 /**
  * 我的整合包版本操作：
- *  - 未上传/被拒：编辑、上传（提交审核）、删除草稿；
+ *  - 未提交/被拒：编辑、提交审核、删除草稿；
  *  - 待审核：只读；
  *  - 已发布：撤回；
  *  - 已撤回：只读。
  */
 
-import { useState, type FormEvent } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ApiError, ErrorNotice } from './api-client';
@@ -27,7 +27,6 @@ export function PackReleaseActions({
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
-  const [file, setFile] = useState<File | null>(null);
 
   const request = async (url: string, init: RequestInit): Promise<void> => {
     setBusy(true);
@@ -46,12 +45,9 @@ export function PackReleaseActions({
     }
   };
 
-  const upload = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!file) return;
-    const body = new FormData();
-    body.set('file', file);
-    void request(`/api/pack-releases/${encodeURIComponent(releaseId)}/file`, { method: 'POST', body });
+  const submit = () => {
+    if (!window.confirm('提交审核？提交后等待管理员处理。')) return;
+    void request(`/api/pack-releases/${encodeURIComponent(releaseId)}/submit`, { method: 'POST' });
   };
 
   const remove = () => {
@@ -72,17 +68,9 @@ export function PackReleaseActions({
       {reviewStatus === 'draft' || reviewStatus === 'rejected' ? (
         <>
           <Link href={`/me/packs/releases/${releaseId}/edit`}>编辑</Link>
-          <form onSubmit={upload} style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-            <input
-              type="file"
-              accept=".zip,.json,.md,.txt,.yaml,.yml"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              aria-label="选择整合包文件"
-            />
-            <button type="submit" className="button" disabled={busy || !file}>
-              {busy ? '上传中…' : '上传并提交审核'}
-            </button>
-          </form>
+          <button type="button" className="button" disabled={busy} onClick={submit}>
+            {busy ? '处理中…' : '提交审核'}
+          </button>
           <button type="button" className="link-btn" disabled={busy} onClick={remove} style={{ color: 'var(--md-sys-color-error, #b3261e)' }}>
             删除草稿
           </button>

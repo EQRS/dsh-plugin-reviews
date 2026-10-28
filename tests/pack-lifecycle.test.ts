@@ -62,13 +62,8 @@ describe('整合包生命周期', () => {
     expect((await service.listPublicPacks({}, db)).items).toHaveLength(0);
     expect((await service.getPack(caller(db, author), draft.packId, {}, db)).selected).toBeNull();
 
-    const uploaded = await service.uploadReleaseFile(
-      caller(db, author),
-      draft.releaseId,
-      { fileName: 'pack.zip', byteSize: 100, storedPath: '/tmp/pack.zip' },
-      db,
-    );
-    expect(uploaded.reviewStatus).toBe('pending');
+    const submitted = await service.submitReleaseForReview(caller(db, author), draft.releaseId, db);
+    expect(submitted.reviewStatus).toBe('pending');
 
     // 待审核仍不公开
     expect((await service.listPublicPacks({}, db)).items).toHaveLength(0);
@@ -79,7 +74,7 @@ describe('整合包生命周期', () => {
     expect((await service.getPack(caller(db, author), draft.packId, {}, db)).selected?.releaseNumber).toBe(1);
   });
 
-  it('拒绝后可编辑并重新上传；已发布不可编辑', async () => {
+  it('拒绝后可编辑并重新提交；已发布不可编辑', async () => {
     ctx = createTestDb();
     const db = ctx.db;
     const author = insertUser(db);
@@ -87,12 +82,7 @@ describe('整合包生命周期', () => {
     const draft = await makeDraft(db, author);
     const service = createPacksService({ db });
 
-    await service.uploadReleaseFile(
-      caller(db, author),
-      draft.releaseId,
-      { fileName: 'pack.zip', byteSize: 100, storedPath: '/tmp/pack.zip' },
-      db,
-    );
+    await service.submitReleaseForReview(caller(db, author), draft.releaseId, db);
     await service.rejectRelease(caller(db, admin), draft.releaseId, '缺少说明', db);
 
     // 被拒后可编辑
@@ -104,13 +94,8 @@ describe('整合包生命周期', () => {
     expect(updated.title).toBe('新标题');
     expect(updated.review_status).toBe('rejected');
 
-    // 重新上传 → 待审 → 通过
-    await service.uploadReleaseFile(
-      caller(db, author),
-      draft.releaseId,
-      { fileName: 'pack2.zip', byteSize: 120, storedPath: '/tmp/pack2.zip' },
-      db,
-    );
+    // 重新提交 → 待审 → 通过
+    await service.submitReleaseForReview(caller(db, author), draft.releaseId, db);
     await service.approveRelease(caller(db, admin), draft.releaseId, db);
 
     // 已发布不可编辑
@@ -135,12 +120,7 @@ describe('整合包生命周期', () => {
     expect(db.prepare('SELECT COUNT(*) AS c FROM plugin_pack_releases WHERE id = ?').get(draft.releaseId)).toEqual({ c: 0 });
 
     const second = await makeDraft(db, author);
-    await service.uploadReleaseFile(
-      caller(db, author),
-      second.releaseId,
-      { fileName: 'p.zip', byteSize: 1, storedPath: '/tmp/p.zip' },
-      db,
-    );
+    await service.submitReleaseForReview(caller(db, author), second.releaseId, db);
     await service.approveRelease(caller(db, admin), second.releaseId, db);
 
     try {
@@ -164,7 +144,7 @@ describe('整合包生命周期', () => {
     const service = createPacksService({ db });
 
     for (const promise of [
-      service.uploadReleaseFile(caller(db, other), draft.releaseId, { fileName: 'x.zip', byteSize: 1, storedPath: '/tmp/x.zip' }, db),
+      service.submitReleaseForReview(caller(db, other), draft.releaseId, db),
       service.updateDraftRelease(caller(db, other), draft.releaseId, input(draft.pluginId), db),
       service.deleteDraftRelease(caller(db, other), draft.releaseId, db),
     ]) {
@@ -177,12 +157,7 @@ describe('整合包生命周期', () => {
       }
     }
 
-    await service.uploadReleaseFile(
-      caller(db, author),
-      draft.releaseId,
-      { fileName: 'x.zip', byteSize: 1, storedPath: '/tmp/x.zip' },
-      db,
-    );
+    await service.submitReleaseForReview(caller(db, author), draft.releaseId, db);
     try {
       await service.approveRelease(caller(db, author), draft.releaseId, db);
       throw new Error('应当被拒绝');

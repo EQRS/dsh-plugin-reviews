@@ -52,14 +52,14 @@ export default async function MyPacksPage() {
                           }
                         >
                           {pack.reviewStatus === 'draft'
-                            ? '未上传'
+                            ? '未提交'
                             : pack.reviewStatus === 'pending'
                               ? '待审核'
                               : pack.reviewStatus === 'rejected'
                                 ? '已拒绝'
                                 : pack.withdrawn
                                   ? '已撤回'
-                                  : `第 ${pack.releaseNumber} 版`}
+                                  : '已发布'}
                         </span>
                         <div className="item-main">
                           <h3 className="item-title">
