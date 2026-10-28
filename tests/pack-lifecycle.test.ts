@@ -5,6 +5,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestDb, insertPlugin, insertRepository, insertUser, type TestDb } from './support/db';
 import { createPacksService } from '../src/server/modules/packs';
+import { createNotificationsService } from '../src/server/modules/notifications';
 import type { CallerContext } from '@/server/platform/context';
 import type { VersionValue } from '@/packages/common/field-rules';
 import { ErrorCodes, isDomainError } from '../src/packages/common/errors';
@@ -73,6 +74,16 @@ describe('整合包发布流程', () => {
     expect(published.reviewStatus).toBe('published');
     expect(published.releaseNumber).toBe(1);
     expect((await service.listPublicPacks({}, db)).items).toHaveLength(1);
+
+    // 提交时记录安装核验（结构核验）
+    const checks = db
+      .prepare(
+        `SELECT COUNT(*) AS c FROM plugin_install_checks ic
+           JOIN plugin_pack_release_items i ON i.id = ic.release_item_id
+          WHERE i.release_id = ?`,
+      )
+      .get(draft.releaseId) as { c: number };
+    expect(checks.c).toBeGreaterThan(0);
   });
 
   it('带外链转人工；管理员通过后发布；已发布不可编辑', async () => {
@@ -91,6 +102,11 @@ describe('整合包发布流程', () => {
 
     const approved = await service.approveRelease(caller(db, admin), draft.releaseId, db);
     expect(approved.releaseNumber).toBe(1);
+
+    // 审核结果通知：作者收到 moderation_result，且链接指向整合包版本
+    const inbox = await createNotificationsService({ db }).list(author, { limit: 20 });
+    const notice = inbox.items.find((item) => item.kind === 'moderation_result');
+    expect(notice?.href).toBe(`/packs/${draft.packId}?v=1`);
 
     try {
       await service.updateDraftRelease(caller(db, author), draft.releaseId, input(draft.pluginId), db);

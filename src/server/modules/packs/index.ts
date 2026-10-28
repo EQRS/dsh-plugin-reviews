@@ -17,6 +17,8 @@ import { newId } from '@/server/platform/id';
 import { nowMs } from '@/server/platform/time';
 import { err } from '@/packages/common/errors';
 import { assertCanWrite, isAdmin, type CallerContext } from '@/server/platform/context';
+import { deliverModerationResultNotification } from '@/server/modules/notifications';
+import { createHash } from 'node:crypto';
 import type { VersionValue } from '@/packages/common/field-rules';
 import { buildPage, type PageRequest, type PageResult } from '@/packages/common/result';
 import {
@@ -73,6 +75,8 @@ export interface PackSummaryView {
   reviewNote?: string | null;
   /** 自动检查结果：pass / needs_info / manual。 */
   autoCheckResult?: 'pass' | 'needs_info' | 'manual' | null;
+  /** 仅「我收藏的」：当前是否有可公开版本（全部撤回时为 false）。 */
+  hasPublicRelease?: boolean;
 }
 
 export interface PackReleaseSummary {
@@ -364,6 +368,45 @@ function runPackAutoCheck(
   return { outcome: 'pass' };
 }
 
+/** 提交时记录安装资料核验：结构完整 = structural_ok；缺目标 = missing。 */
+function recordInstallChecks(conn: SqliteDatabase, releaseId: string, now: number): void {
+  const items = conn
+    .prepare('SELECT id, install_target FROM plugin_pack_release_items WHERE release_id = ?')
+    .all(releaseId) as Array<{ id: string; install_target: string | null }>;
+  for (const item of items) {
+    const seq =
+      Number(
+        (
+          conn
+            .prepare(
+              'SELECT COALESCE(MAX(check_sequence), 0) AS m FROM plugin_install_checks WHERE release_item_id = ?',
+            )
+            .get(item.id) as { m: number }
+        ).m,
+      ) + 1;
+    const fingerprint = createHash('sha256')
+      .update(item.install_target ?? 'null')
+      .digest('hex');
+    const result = item.install_target === null ? 'missing' : 'structural_ok';
+    conn
+      .prepare(
+        `INSERT INTO plugin_install_checks
+           (id, release_item_id, target_fingerprint, check_sequence, result, reason, requested_at, completed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        newId(now),
+        item.id,
+        fingerprint,
+        seq,
+        result,
+        result === 'missing' ? '没有结构化安装目标，无法生成命令。' : '仅完成结构校验；网络核验待接入。',
+        now,
+        now,
+      );
+  }
+}
+
 /** 发布版本：分配序号 + 公开（自动通过与管理員审核共用）。 */
 function publishReleaseInTx(conn: SqliteDatabase, releaseId: string): { releaseNumber: number } {
   const rel = conn
@@ -640,6 +683,7 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
 
         const check = runPackAutoCheck(conn, releaseId);
         const now = nowMs();
+        recordInstallChecks(conn, releaseId, now);
         if (check.outcome === 'pass') {
           const published = publishReleaseInTx(conn, releaseId);
           return {
@@ -691,7 +735,27 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
         if (rel.review_status !== 'pending') {
           throw err.conflict('只有待审核版本可以通过审核。', { releaseId });
         }
-        return publishReleaseInTx(conn, releaseId);
+        const actorId = ctx.userId;
+        if (!actorId) throw err.forbidden('只有管理员可以审核整合包。');
+        const published = publishReleaseInTx(conn, releaseId);
+        const author = conn
+          .prepare(
+            `SELECT p.author_id FROM plugin_packs p
+               JOIN plugin_pack_releases rel ON rel.pack_id = p.id
+              WHERE rel.id = ?`,
+          )
+          .get(releaseId) as { author_id: string } | undefined;
+        if (author) {
+          deliverModerationResultNotification(conn, {
+            recipientId: author.author_id,
+            actorId,
+            contentEntityId: releaseId,
+            detail: `你的整合包版本已通过审核并发布（第 ${published.releaseNumber} 版）。`,
+            deduplicationKey: `pack_approved:${releaseId}`,
+            now: nowMs(),
+          });
+        }
+        return published;
       }, injectedDb ?? db);
     },
 
@@ -712,9 +776,28 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
         if (rel.review_status !== 'pending') {
           throw err.conflict('只有待审核版本可以拒绝。', { releaseId });
         }
+        const actorId = ctx.userId;
+        if (!actorId) throw err.forbidden('只有管理员可以审核整合包。');
         conn
           .prepare(`UPDATE plugin_pack_releases SET review_status = 'rejected', review_note = ? WHERE id = ?`)
           .run((note ?? '').trim() || null, releaseId);
+        const author = conn
+          .prepare(
+            `SELECT p.author_id FROM plugin_packs p
+               JOIN plugin_pack_releases rel ON rel.pack_id = p.id
+              WHERE rel.id = ?`,
+          )
+          .get(releaseId) as { author_id: string } | undefined;
+        if (author) {
+          deliverModerationResultNotification(conn, {
+            recipientId: author.author_id,
+            actorId,
+            contentEntityId: releaseId,
+            detail: `你的整合包版本未通过审核：${(note ?? '').trim() || '请补充资料后重新提交。'}`,
+            deduplicationKey: `pack_rejected:${releaseId}:${nowMs()}`,
+            now: nowMs(),
+          });
+        }
         return { ok: true as const };
       }, injectedDb ?? db);
     },
@@ -1342,53 +1425,82 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
       }, injectedDb ?? db);
     },
 
-    /** 我收藏的整合包（详情页/个人中心）。 */
-    async listFavoritePacks(ctx: CallerContext, injectedDb?: SqliteDatabase): Promise<PackSummaryView[]> {
+    /**
+     * 我收藏的整合包（分页；收藏绑定包本身，全部版本撤回时保留并显示状态）。
+     */
+    async listFavoritePacks(
+      ctx: CallerContext,
+      req: Partial<PageRequest> = {},
+      injectedDb?: SqliteDatabase,
+    ): Promise<PageResult<PackSummaryView>> {
       if (ctx.userId === null) throw err.unauthenticated();
       const userId = ctx.userId;
+      const pageRaw = req.page;
+      const page = typeof pageRaw === 'number' && Number.isInteger(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+      const sizeRaw = req.page_size;
+      const pageSize = typeof sizeRaw === 'number' ? Math.min(Math.max(sizeRaw, 1), 50) : 20;
       return withRead((conn) => {
+        const total = (
+          conn
+            .prepare('SELECT COUNT(*) AS c FROM plugin_pack_favorites WHERE user_id = ?')
+            .get(userId) as { c: number }
+        ).c;
         const rows = conn
           .prepare(
             `WITH latest AS (
-               SELECT rel.*, ROW_NUMBER() OVER (PARTITION BY rel.pack_id ORDER BY rel.release_number DESC) AS rn
+               SELECT rel.*, ROW_NUMBER() OVER (
+                 PARTITION BY rel.pack_id ORDER BY rel.release_number DESC, rel.submitted_at DESC
+               ) AS rn
                  FROM plugin_pack_releases rel
-                 JOIN content_entities ce ON ce.id = rel.id
-                WHERE rel.release_number IS NOT NULL AND rel.review_status = 'published'
-                   AND ce.withdrawn_at IS NULL AND ce.hidden_at IS NULL
              )
-             SELECT p.id AS pack_id, u.nickname, l.id AS release_id, l.release_number, l.title, l.purpose,
-                    l.submitted_at,
+             SELECT p.id AS pack_id, u.nickname, l.id AS release_id, l.release_number, l.review_status,
+                    l.title, l.purpose, l.submitted_at,
                     (SELECT COUNT(*) FROM plugin_pack_release_items i WHERE i.release_id = l.id) AS item_count,
-                    (SELECT COUNT(*) FROM plugin_pack_favorites f2 WHERE f2.pack_id = p.id) AS favorite_count
+                    (SELECT COUNT(*) FROM plugin_pack_favorites f2 WHERE f2.pack_id = p.id) AS favorite_count,
+                    ce.withdrawn_at, ce.hidden_at
                FROM plugin_pack_favorites f
                JOIN plugin_packs p ON p.id = f.pack_id
-               JOIN latest l ON l.pack_id = p.id AND l.rn = 1
+               LEFT JOIN latest l ON l.pack_id = p.id AND l.rn = 1
+               LEFT JOIN content_entities ce ON ce.id = l.id
                JOIN users u ON u.id = p.author_id
               WHERE f.user_id = ?
-              ORDER BY f.created_at DESC, p.id ASC`,
+              ORDER BY f.created_at DESC, p.id ASC
+              LIMIT ? OFFSET ?`,
           )
-          .all(userId) as Array<{
+          .all(userId, pageSize, (page - 1) * pageSize) as Array<{
           pack_id: string;
           nickname: string;
-          release_id: string;
-          release_number: number;
-          title: string;
-          purpose: string;
-          submitted_at: number;
+          release_id: string | null;
+          release_number: number | null;
+          review_status: string | null;
+          title: string | null;
+          purpose: string | null;
+          submitted_at: number | null;
           item_count: number;
           favorite_count: number;
+          withdrawn_at: number | null;
+          hidden_at: number | null;
         }>;
-        return rows.map((r) => ({
+
+        const items = rows.map((r) => ({
           packId: r.pack_id,
           authorNickname: r.nickname,
-          title: r.title,
-          purpose: r.purpose,
-          releaseNumber: Number(r.release_number),
-          releaseId: r.release_id,
+          title: r.title ?? '（整合包暂无可公开版本）',
+          purpose: r.purpose ?? '',
+          releaseNumber: r.release_number === null ? null : Number(r.release_number),
+          releaseId: r.release_id ?? '',
           pluginCount: Number(r.item_count),
           favoriteCount: Number(r.favorite_count),
-          publishedAt: r.submitted_at,
+          publishedAt: r.submitted_at ?? 0,
+          withdrawn: r.withdrawn_at !== null,
+          hidden: r.hidden_at !== null,
+          hasPublicRelease:
+            r.release_number !== null &&
+            r.review_status === 'published' &&
+            r.withdrawn_at === null &&
+            r.hidden_at === null,
         }));
+        return buildPage(items, total, { page, page_size: pageSize });
       }, injectedDb ?? db);
     },
   };

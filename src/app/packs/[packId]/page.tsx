@@ -60,6 +60,24 @@ export default async function PackDetailPage({
   const helpful = selected
     ? await packService.helpfulStateForRelease(selected.releaseId, ctx.userId)
     : { helpful: false, count: 0 };
+  const installChecks = new Map<number, { result: string; completedAt: number | null }>();
+  if (selected) {
+    const checkRows = getDb()
+      .prepare(
+        `SELECT i.position, ic.result, ic.completed_at
+           FROM plugin_install_checks ic
+           JOIN plugin_pack_release_items i ON i.id = ic.release_item_id
+          WHERE i.release_id = ?
+            AND ic.check_sequence = (
+              SELECT MAX(x.check_sequence) FROM plugin_install_checks x
+               WHERE x.release_item_id = ic.release_item_id
+            )`,
+      )
+      .all(selected.releaseId) as Array<{ position: number; result: string; completed_at: number | null }>;
+    for (const row of checkRows) {
+      installChecks.set(row.position, { result: row.result, completedAt: row.completed_at });
+    }
+  }
   const bodyHtml = selected ? renderMarkdownToSafeHtml(selected.bodyMarkdown) : '';
 
   return (
@@ -197,6 +215,15 @@ export default async function PackDetailPage({
                     <span className="muted">{formatVersionLabel('插件', item.pluginVersion)}</span>
                     {item.purpose ? <span className="muted">—— {item.purpose}</span> : null}
                   </div>
+
+                  {installChecks.has(item.position) ? (
+                    <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
+                      安装核验：
+                      {installChecks.get(item.position)?.result === 'structural_ok'
+                        ? '结构完整（网络核验待接入）'
+                        : '缺少安装目标（待核实）'}
+                    </div>
+                  ) : null}
 
                   {item.command !== null ? (
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
