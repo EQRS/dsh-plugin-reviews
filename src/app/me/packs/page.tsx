@@ -56,7 +56,9 @@ export default async function MyPacksPage() {
                             : pack.reviewStatus === 'pending'
                               ? '待审核'
                               : pack.reviewStatus === 'rejected'
-                                ? '已拒绝'
+                                ? pack.autoCheckResult === 'needs_info'
+                                  ? '需补充'
+                                  : '已拒绝'
                                 : pack.withdrawn
                                   ? '已撤回'
                                   : '已发布'}

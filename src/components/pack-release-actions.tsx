@@ -46,7 +46,13 @@ export function PackReleaseActions({
   };
 
   const submit = () => {
-    if (!window.confirm('提交审核？提交后等待管理员处理。')) return;
+    if (
+      !window.confirm(
+        '提交审核？通过自动检查会直接发布；资料不足会提示补充；有疑问会转人工。',
+      )
+    ) {
+      return;
+    }
     void request(`/api/pack-releases/${encodeURIComponent(releaseId)}/submit`, { method: 'POST' });
   };
 

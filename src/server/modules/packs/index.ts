@@ -68,9 +68,11 @@ export interface PackSummaryView {
   /** 仅「我的整合包」使用：最近版本当前是否仍公开。 */
   withdrawn?: boolean;
   hidden?: boolean;
-  /** 版本生命周期：draft（未上传）/ pending（待审核）/ published / rejected。 */
+  /** 版本生命周期：draft（未提交）/ pending（转人工）/ published / rejected（含需补充）。 */
   reviewStatus?: 'draft' | 'pending' | 'published' | 'rejected';
   reviewNote?: string | null;
+  /** 自动检查结果：pass / needs_info / manual。 */
+  autoCheckResult?: 'pass' | 'needs_info' | 'manual' | null;
 }
 
 export interface PackReleaseSummary {
@@ -318,6 +320,82 @@ function isPublicRelease(row: ReleaseRow): boolean {
   return row.release_number !== null && row.withdrawn_at === null && row.hidden_at === null;
 }
 
+/**
+ * 整合包提交时的自动检查（统一流程：草稿 → 提交 → 自动检查 → 发布/提示补充/转人工）。
+ *
+ * 规则保持保守：确定缺资料才提示补充，有外部链接等可疑内容转人工，其余自动发布。
+ */
+function runPackAutoCheck(
+  conn: SqliteDatabase,
+  releaseId: string,
+): { outcome: 'pass' | 'needs_info' | 'manual'; note?: string } {
+  const rel = conn
+    .prepare(
+      'SELECT title, purpose, body_markdown, config_template FROM plugin_pack_releases WHERE id = ?',
+    )
+    .get(releaseId) as
+    | { title: string; purpose: string; body_markdown: string; config_template: string | null }
+    | undefined;
+  if (!rel) return { outcome: 'needs_info', note: '版本快照不存在，请重新保存。' };
+
+  const itemCount = (
+    conn
+      .prepare('SELECT COUNT(*) AS c FROM plugin_pack_release_items WHERE release_id = ?')
+      .get(releaseId) as { c: number }
+  ).c;
+  if (Number(itemCount) === 0) {
+    return { outcome: 'needs_info', note: '插件清单为空，请至少加入一个插件。' };
+  }
+  if (rel.purpose.trim().length < 5) {
+    return { outcome: 'needs_info', note: '用途说明太短，请补充清楚。' };
+  }
+  if (rel.body_markdown.trim().length < 20) {
+    return { outcome: 'needs_info', note: '组合使用说明太短（至少 20 字），请补充。' };
+  }
+  if (
+    rel.config_template &&
+    /(api[_-]?key|password|secret|token)\s*[:=]\s*[^\s<{]/.test(rel.config_template)
+  ) {
+    return { outcome: 'needs_info', note: '配置模板可能含明文密钥，请改用占位符。' };
+  }
+  if (/(https?:\/\/|www\.)/i.test(rel.body_markdown) || /(https?:\/\/|www\.)/i.test(rel.purpose)) {
+    return { outcome: 'manual', note: '说明中带有外部链接，转人工复核。' };
+  }
+  return { outcome: 'pass' };
+}
+
+/** 发布版本：分配序号 + 公开（自动通过与管理員审核共用）。 */
+function publishReleaseInTx(conn: SqliteDatabase, releaseId: string): { releaseNumber: number } {
+  const rel = conn
+    .prepare('SELECT id, pack_id FROM plugin_pack_releases WHERE id = ?')
+    .get(releaseId) as { id: string; pack_id: string } | undefined;
+  if (!rel) throw err.unavailable('整合包版本不存在。');
+  const pack = conn
+    .prepare('SELECT last_release_number FROM plugin_packs WHERE id = ?')
+    .get(rel.pack_id) as { last_release_number: number } | undefined;
+  if (!pack) throw err.unavailable('整合包不存在。');
+
+  const releaseNumber = Number(pack.last_release_number) + 1;
+  const now = nowMs();
+  conn
+    .prepare(
+      `UPDATE plugin_pack_releases
+          SET release_number = ?, review_status = 'published', review_note = NULL,
+              auto_check_result = 'pass'
+        WHERE id = ?`,
+    )
+    .run(releaseNumber, releaseId);
+  conn
+    .prepare(
+      `UPDATE content_entities
+          SET first_published_at = COALESCE(first_published_at, ?), public_updated_at = ?
+        WHERE id = ?`,
+    )
+    .run(now, now, releaseId);
+  conn.prepare('UPDATE plugin_packs SET last_release_number = ? WHERE id = ?').run(releaseNumber, rel.pack_id);
+  return { releaseNumber };
+}
+
 export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
   const db = deps.db ?? getDb();
 
@@ -523,16 +601,20 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
     },
 
     /**
-     * 作者提交审核：不依赖上传文件。
+     * 统一发布流程：保存草稿 → 提交 → 自动检查 → 发布 / 提示补充 / 转人工。
      *
-     * 整合包不打包分发，安装资料由条目的 install_target（npm / GitHub）生成命令；
-     * 提交审核只是把草稿版本推进到待审核。
+     * 整合包不打包分发，安装资料由条目的 install_target（npm / GitHub）生成命令。
      */
     async submitReleaseForReview(
       ctx: CallerContext,
       releaseId: string,
       injectedDb?: SqliteDatabase,
-    ): Promise<{ reviewStatus: 'pending' }> {
+    ): Promise<{
+      outcome: 'pass' | 'needs_info' | 'manual';
+      reviewStatus: 'published' | 'rejected' | 'pending';
+      releaseNumber?: number;
+      note?: string;
+    }> {
       assertCanWrite(ctx);
       const userId = ctx.userId;
       return withTransaction((tx) => {
@@ -556,15 +638,40 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
           throw err.conflict('这个版本已在审核中，请等待审核结果。', { releaseId });
         }
 
+        const check = runPackAutoCheck(conn, releaseId);
         const now = nowMs();
+        if (check.outcome === 'pass') {
+          const published = publishReleaseInTx(conn, releaseId);
+          return {
+            outcome: 'pass' as const,
+            reviewStatus: 'published' as const,
+            releaseNumber: published.releaseNumber,
+          };
+        }
+        if (check.outcome === 'needs_info') {
+          conn
+            .prepare(
+              `UPDATE plugin_pack_releases
+                  SET review_status = 'rejected', review_note = ?, auto_check_result = 'needs_info',
+                      submitted_at = ?
+                WHERE id = ?`,
+            )
+            .run(check.note ?? '请补充资料。', now, releaseId);
+          return {
+            outcome: 'needs_info' as const,
+            reviewStatus: 'rejected' as const,
+            note: check.note,
+          };
+        }
         conn
           .prepare(
             `UPDATE plugin_pack_releases
-                SET review_status = 'pending', review_note = NULL, submitted_at = ?
+                SET review_status = 'pending', review_note = ?, auto_check_result = 'manual',
+                    submitted_at = ?
               WHERE id = ?`,
           )
-          .run(now, releaseId);
-        return { reviewStatus: 'pending' as const };
+          .run(check.note ?? null, now, releaseId);
+        return { outcome: 'manual' as const, reviewStatus: 'pending' as const, note: check.note };
       }, injectedDb ?? db);
     },
 
@@ -584,29 +691,7 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
         if (rel.review_status !== 'pending') {
           throw err.conflict('只有待审核版本可以通过审核。', { releaseId });
         }
-        const pack = conn
-          .prepare('SELECT last_release_number FROM plugin_packs WHERE id = ?')
-          .get(rel.pack_id) as { last_release_number: number } | undefined;
-        if (!pack) throw err.unavailable('整合包不存在。');
-
-        const releaseNumber = Number(pack.last_release_number) + 1;
-        const now = nowMs();
-        conn
-          .prepare(
-            `UPDATE plugin_pack_releases
-                SET release_number = ?, review_status = 'published', review_note = NULL
-              WHERE id = ?`,
-          )
-          .run(releaseNumber, releaseId);
-        conn
-          .prepare(
-            `UPDATE content_entities
-                SET first_published_at = COALESCE(first_published_at, ?), public_updated_at = ?
-              WHERE id = ?`,
-          )
-          .run(now, now, releaseId);
-        conn.prepare('UPDATE plugin_packs SET last_release_number = ? WHERE id = ?').run(releaseNumber, rel.pack_id);
-        return { releaseNumber };
+        return publishReleaseInTx(conn, releaseId);
       }, injectedDb ?? db);
     },
 
@@ -954,7 +1039,7 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
                  FROM plugin_pack_releases rel
              )
              SELECT p.id AS pack_id, p.author_id, u.nickname, l.id AS release_id, l.release_number,
-                    l.review_status, l.review_note, l.title, l.purpose, l.submitted_at,
+                    l.review_status, l.review_note, l.auto_check_result, l.title, l.purpose, l.submitted_at,
                     (SELECT COUNT(*) FROM plugin_pack_release_items i WHERE i.release_id = l.id) AS item_count,
                     (SELECT COUNT(*) FROM plugin_pack_favorites f WHERE f.pack_id = p.id) AS favorite_count,
                     ce.withdrawn_at, ce.hidden_at
@@ -973,6 +1058,7 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
           release_number: number | null;
           review_status: 'draft' | 'pending' | 'published' | 'rejected';
           review_note: string | null;
+          auto_check_result: 'pass' | 'needs_info' | 'manual' | null;
           title: string;
           purpose: string;
           submitted_at: number;
@@ -993,6 +1079,7 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
           publishedAt: r.submitted_at,
           reviewStatus: r.review_status,
           reviewNote: r.review_note,
+          autoCheckResult: r.auto_check_result,
           // 作者要看得到"这个版本当前是否还公开"
           withdrawn: r.withdrawn_at !== null,
           hidden: r.hidden_at !== null,
