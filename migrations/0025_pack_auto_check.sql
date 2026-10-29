@@ -5,4 +5,4 @@
 
 ALTER TABLE plugin_pack_releases
   ADD COLUMN auto_check_result TEXT
-  CHECK (auto_check_result IS NULL OR auto_check_result IN ('pass', 'needs_info', 'manual'));
+  CHECK (auto_check_result IS NULL OR auto_check_result IN ('pass', 'needs_info', 'manual', 'verifying'));

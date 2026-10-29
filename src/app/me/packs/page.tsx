@@ -29,7 +29,9 @@ function statusLabel(pack: {
   hidden?: boolean;
 }): string {
   if (pack.reviewStatus === 'draft') return '未提交';
-  if (pack.reviewStatus === 'pending') return '待审核';
+  if (pack.reviewStatus === 'pending') {
+    return pack.autoCheckResult === 'verifying' ? '核验中' : '待审核';
+  }
   if (pack.reviewStatus === 'rejected') {
     return pack.autoCheckResult === 'needs_info' ? '需补充' : '已拒绝';
   }

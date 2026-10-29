@@ -18,6 +18,7 @@ import { nowMs } from '@/server/platform/time';
 import { err } from '@/packages/common/errors';
 import { assertCanWrite, isAdmin, type CallerContext } from '@/server/platform/context';
 import { deliverModerationResultNotification } from '@/server/modules/notifications';
+import { verifyInstallTarget } from './verify';
 import { createHash } from 'node:crypto';
 import type { VersionValue } from '@/packages/common/field-rules';
 import { buildPage, type PageRequest, type PageResult } from '@/packages/common/result';
@@ -368,7 +369,7 @@ function runPackAutoCheck(
   return { outcome: 'pass' };
 }
 
-/** 提交时记录安装资料核验：结构完整 = structural_ok；缺目标 = missing。 */
+/** 提交时写入待核验记录（异步核验完成后再更新 state）。 */
 function recordInstallChecks(conn: SqliteDatabase, releaseId: string, now: number): void {
   const items = conn
     .prepare('SELECT id, install_target FROM plugin_pack_release_items WHERE release_id = ?')
@@ -387,23 +388,14 @@ function recordInstallChecks(conn: SqliteDatabase, releaseId: string, now: numbe
     const fingerprint = createHash('sha256')
       .update(item.install_target ?? 'null')
       .digest('hex');
-    const result = item.install_target === null ? 'missing' : 'structural_ok';
+    const kind = item.install_target === null ? 'none' : (JSON.parse(item.install_target) as { kind: string }).kind;
     conn
       .prepare(
         `INSERT INTO plugin_install_checks
-           (id, release_item_id, target_fingerprint, check_sequence, result, reason, requested_at, completed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, release_item_id, target_fingerprint, check_sequence, target_kind, state, detail, requested_at, completed_at)
+         VALUES (?, ?, ?, ?, ?, 'pending', NULL, ?, NULL)`,
       )
-      .run(
-        newId(now),
-        item.id,
-        fingerprint,
-        seq,
-        result,
-        result === 'missing' ? '没有结构化安装目标，无法生成命令。' : '仅完成结构校验；网络核验待接入。',
-        now,
-        now,
-      );
+      .run(newId(now), item.id, fingerprint, seq, kind === 'npm' ? 'npm' : kind === 'github' ? 'github' : 'none', now);
   }
 }
 
@@ -653,7 +645,7 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
       releaseId: string,
       injectedDb?: SqliteDatabase,
     ): Promise<{
-      outcome: 'pass' | 'needs_info' | 'manual';
+      outcome: 'pass' | 'needs_info' | 'manual' | 'verifying';
       reviewStatus: 'published' | 'rejected' | 'pending';
       releaseNumber?: number;
       note?: string;
@@ -685,6 +677,25 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
         const now = nowMs();
         recordInstallChecks(conn, releaseId, now);
         if (check.outcome === 'pass') {
+          // 有结构化安装目标 → 先待核验（异步核验完成后再发布/提示补充）
+          const targetCount = (
+            conn
+              .prepare(
+                'SELECT COUNT(*) AS c FROM plugin_pack_release_items WHERE release_id = ? AND install_target IS NOT NULL',
+              )
+              .get(releaseId) as { c: number }
+          ).c;
+          if (Number(targetCount) > 0) {
+            conn
+              .prepare(
+                `UPDATE plugin_pack_releases
+                    SET review_status = 'pending', review_note = NULL, auto_check_result = 'verifying',
+                        submitted_at = ?
+                  WHERE id = ?`,
+              )
+              .run(now, releaseId);
+            return { outcome: 'verifying' as const, reviewStatus: 'pending' as const };
+          }
           const published = publishReleaseInTx(conn, releaseId);
           return {
             outcome: 'pass' as const,
@@ -716,6 +727,106 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
           )
           .run(check.note ?? null, now, releaseId);
         return { outcome: 'manual' as const, reviewStatus: 'pending' as const, note: check.note };
+      }, injectedDb ?? db);
+    },
+
+    /**
+     * 异步核验待检条目：网络访问在事务外完成，写回与判定在一个事务里。
+     *
+     * 判定：任一关键目标 failed → 提示补充；仍有 pending（网络错误）→ 保持待审核（转人工）；
+     * 全部 ok/skipped → 发布。只处理「自动核验中」的版本，不碰人工审核中的版本。
+     */
+    async verifyPendingChecks(
+      releaseId: string,
+      injectedDb?: SqliteDatabase,
+      fetchJson?: Parameters<typeof verifyInstallTarget>[1],
+    ): Promise<{ outcome: 'pass' | 'needs_info' | 'manual' | 'ignored'; releaseNumber?: number }> {
+      const conn0 = injectedDb ?? db;
+      const rows = conn0
+        .prepare(
+          `SELECT ic.id, ic.release_item_id, i.install_target
+             FROM plugin_install_checks ic
+             JOIN plugin_pack_release_items i ON i.id = ic.release_item_id
+            WHERE i.release_id = ? AND ic.state = 'pending'
+              AND ic.check_sequence = (
+                SELECT MAX(x.check_sequence) FROM plugin_install_checks x
+                 WHERE x.release_item_id = ic.release_item_id
+              )`,
+        )
+        .all(releaseId) as Array<{ id: string; release_item_id: string; install_target: string | null }>;
+
+      const results: Array<{ id: string; state: string; detail: string }> = [];
+      for (const row of rows) {
+        if (row.install_target === null) {
+          results.push({ id: row.id, state: 'skipped', detail: '没有结构化安装目标，按待核实处理。' });
+          continue;
+        }
+        const target = JSON.parse(row.install_target) as Parameters<typeof verifyInstallTarget>[0];
+        const outcome = await verifyInstallTarget(target, fetchJson);
+        results.push({ id: row.id, state: outcome.state, detail: outcome.detail });
+      }
+
+      return withTransaction((tx) => {
+        const conn = tx.db;
+        const now = nowMs();
+        for (const r of results) {
+          conn
+            .prepare('UPDATE plugin_install_checks SET state = ?, detail = ?, completed_at = ? WHERE id = ?')
+            .run(r.state, r.detail, now, r.id);
+        }
+
+        const rel = conn
+          .prepare('SELECT review_status, auto_check_result FROM plugin_pack_releases WHERE id = ?')
+          .get(releaseId) as { review_status: string; auto_check_result: string | null } | undefined;
+        if (!rel || rel.review_status !== 'pending' || rel.auto_check_result !== 'verifying') {
+          return { outcome: 'ignored' as const };
+        }
+
+        const latestState = (state: string): number =>
+          Number(
+            (
+              conn
+                .prepare(
+                  `SELECT COUNT(*) AS c FROM plugin_install_checks ic
+                     JOIN plugin_pack_release_items i ON i.id = ic.release_item_id
+                    WHERE i.release_id = ? AND ic.state = ?
+                      AND ic.check_sequence = (
+                        SELECT MAX(x.check_sequence) FROM plugin_install_checks x
+                         WHERE x.release_item_id = ic.release_item_id
+                      )`,
+                )
+                .get(releaseId, state) as { c: number }
+            ).c,
+          );
+
+        const failed = latestState('failed');
+        const pendingLeft = latestState('pending');
+
+        if (failed > 0) {
+          const detail = conn
+            .prepare(
+              `SELECT ic.detail FROM plugin_install_checks ic
+                 JOIN plugin_pack_release_items i ON i.id = ic.release_item_id
+                WHERE i.release_id = ? AND ic.state = 'failed'
+                ORDER BY ic.check_sequence DESC LIMIT 1`,
+            )
+            .get(releaseId) as { detail: string | null } | undefined;
+          conn
+            .prepare(
+              `UPDATE plugin_pack_releases
+                  SET review_status = 'rejected', review_note = ?, auto_check_result = 'needs_info'
+                WHERE id = ?`,
+            )
+            .run(`安装资料核验未通过：${detail?.detail ?? '无法确认安装目标'}`, releaseId);
+          return { outcome: 'needs_info' as const };
+        }
+
+        if (pendingLeft > 0) {
+          return { outcome: 'manual' as const };
+        }
+
+        const published = publishReleaseInTx(conn, releaseId);
+        return { outcome: 'pass' as const, releaseNumber: published.releaseNumber };
       }, injectedDb ?? db);
     },
 

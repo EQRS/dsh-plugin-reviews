@@ -27,7 +27,10 @@ function caller(db: TestDb['db'], userId: string): CallerContext {
 const V: VersionValue = { kind: 'known', value: '1.0.0' };
 const LONG_BODY = '先安装记忆插件，再安装检索插件，最后按说明顺序完成配置。';
 
-function input(pluginId: string, overrides: { title?: string; body?: string } = {}) {
+function input(
+  pluginId: string,
+  overrides: { title?: string; body?: string; installTarget?: unknown } = {},
+) {
   return {
     title: overrides.title ?? '组合包',
     purpose: '科研资料整理与检索的固定组合',
@@ -37,7 +40,7 @@ function input(pluginId: string, overrides: { title?: string; body?: string } = 
     testStatus: 'untested' as const,
     testTask: null,
     testResult: null,
-    items: [{ pluginId, pluginVersion: V, installTarget: null }],
+    items: [{ pluginId, pluginVersion: V, installTarget: overrides.installTarget ?? null }],
   };
 }
 
@@ -115,6 +118,50 @@ describe('整合包发布流程', () => {
       expect(isDomainError(e)).toBe(true);
       if (isDomainError(e)) expect(e.code).toBe(ErrorCodes.VERSION_CONFLICT);
     }
+  });
+
+  it('安装核验：npm 版本存在则发布；不存在则提示补充', async () => {
+    ctx = createTestDb();
+    const db = ctx.db;
+    const author = insertUser(db);
+    const repo = insertRepository(db);
+    const plugin = insertPlugin(db, repo, '.');
+    const service = createPacksService({ db });
+    const draft = await service.createPackDraft(
+      caller(db, author),
+      input(plugin, {
+        installTarget: { kind: 'npm', packageName: 'dsh-memory', version: '1.0.0' },
+      }),
+      db,
+    );
+
+    const submitted = await service.submitReleaseForReview(caller(db, author), draft.releaseId, db);
+    expect(submitted.outcome).toBe('verifying');
+
+    const fakeFetch = async (url: string) =>
+      url.includes('registry.npmjs.org')
+        ? { ok: true, status: 200, body: { versions: { '1.0.0': {} } } }
+        : { ok: true, status: 200, body: null };
+
+    expect((await service.verifyPendingChecks(draft.releaseId, db, fakeFetch)).outcome).toBe('pass');
+    expect((await service.listPublicPacks({}, db)).items).toHaveLength(1);
+
+    // 第二包：版本不存在 → 提示补充
+    const plugin2 = insertPlugin(db, insertRepository(db), '.');
+    const second = await service.createPackDraft(
+      caller(db, author),
+      input(plugin2, {
+        installTarget: { kind: 'npm', packageName: 'dsh-memory', version: '9.9.9' },
+      }),
+      db,
+    );
+    await service.submitReleaseForReview(caller(db, author), second.releaseId, db);
+    expect((await service.verifyPendingChecks(second.releaseId, db, fakeFetch)).outcome).toBe('needs_info');
+    const row = db
+      .prepare('SELECT review_status, review_note FROM plugin_pack_releases WHERE id = ?')
+      .get(second.releaseId) as { review_status: string; review_note: string | null };
+    expect(row.review_status).toBe('rejected');
+    expect(row.review_note).toContain('核验未通过');
   });
 
   it('删除草稿；已发布只能撤回', async () => {

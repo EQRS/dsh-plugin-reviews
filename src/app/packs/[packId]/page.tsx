@@ -60,11 +60,11 @@ export default async function PackDetailPage({
   const helpful = selected
     ? await packService.helpfulStateForRelease(selected.releaseId, ctx.userId)
     : { helpful: false, count: 0 };
-  const installChecks = new Map<number, { result: string; completedAt: number | null }>();
+  const installChecks = new Map<number, { state: string; detail: string | null }>();
   if (selected) {
     const checkRows = getDb()
       .prepare(
-        `SELECT i.position, ic.result, ic.completed_at
+        `SELECT i.position, ic.state, ic.detail
            FROM plugin_install_checks ic
            JOIN plugin_pack_release_items i ON i.id = ic.release_item_id
           WHERE i.release_id = ?
@@ -73,9 +73,9 @@ export default async function PackDetailPage({
                WHERE x.release_item_id = ic.release_item_id
             )`,
       )
-      .all(selected.releaseId) as Array<{ position: number; result: string; completed_at: number | null }>;
+      .all(selected.releaseId) as Array<{ position: number; state: string; detail: string | null }>;
     for (const row of checkRows) {
-      installChecks.set(row.position, { result: row.result, completedAt: row.completed_at });
+      installChecks.set(row.position, { state: row.state, detail: row.detail });
     }
   }
   const bodyHtml = selected ? renderMarkdownToSafeHtml(selected.bodyMarkdown) : '';
@@ -219,9 +219,13 @@ export default async function PackDetailPage({
                   {installChecks.has(item.position) ? (
                     <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
                       安装核验：
-                      {installChecks.get(item.position)?.result === 'structural_ok'
-                        ? '结构完整（网络核验待接入）'
-                        : '缺少安装目标（待核实）'}
+                      {(() => {
+                        const check = installChecks.get(item.position);
+                        if (check?.state === 'ok') return '已核验通过';
+                        if (check?.state === 'failed') return `核验未通过（${check.detail ?? '目标不存在'}）`;
+                        if (check?.state === 'pending') return '核验中';
+                        return '待核实（缺少安装目标）';
+                      })()}
                     </div>
                   ) : null}
 

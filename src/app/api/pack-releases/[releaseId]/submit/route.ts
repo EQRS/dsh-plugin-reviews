@@ -15,6 +15,12 @@ export async function POST(
     const ctx = await currentContext();
     const service = createPacksService({ db: getDb() });
     const result = await service.submitReleaseForReview(ctx, releaseId);
+    if (result.outcome === 'verifying') {
+      // 异步核验：不阻塞响应；失败保持「待审核」，由人工接手。
+      void service.verifyPendingChecks(releaseId).catch((error: unknown) => {
+        console.error('[pack-install-check] 核验失败', error);
+      });
+    }
     return okJson(result, requestId);
   } catch (e) {
     return errorResponse(e, requestId);
