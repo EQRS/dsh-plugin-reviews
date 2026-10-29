@@ -249,6 +249,20 @@ export default async function AdminPage({
         执行——<strong>worker 没在跑，内容就不会公开</strong>。
       </p>
 
+      {/* 操作记录入口：审计表一直"只写不读"，给它一个查询页面。 */}
+      <section className="panel" style={{ marginTop: 24 }}>
+        <div className="section-head">
+          <h2>操作记录</h2>
+        </div>
+        <p className="muted" style={{ marginTop: 0 }}>
+          收录、审核决定、可见性调整、用户管理等动作的审计留痕（只读，不可改）。要查「谁在什么时候
+          因为什么改了这个对象」就来这里。
+        </p>
+        <p style={{ marginBottom: 0 }}>
+          <Link href="/admin/operations">前往操作记录 →</Link>
+        </p>
+      </section>
+
       {/* 复核申请：先于审核入口出现——已经等着的作者比新提交更该先被看到。 */}
       <section className="panel" style={{ marginTop: 24 }}>
         <div className="section-head">
