@@ -36,14 +36,14 @@ export default async function AdminPacksPage() {
     submitted_at: number;
     nickname: string;
     item_count: number;
-    file_name: string | null;
+    target_count: number;
   }>;
 
   return (
     <div>
       <h1>整合包审核</h1>
       <p className="muted" style={{ marginTop: 0 }}>
-        待审核版本（{rows.length}）：通过后分配「第 N 版」并公开；拒绝后作者可修改并重新上传。
+        待审核版本（{rows.length}）：通过后分配「第 N 版」并公开；拒绝后作者可修改后重新提交。
       </p>
       <section className="panel">
         {rows.length === 0 ? (
@@ -59,7 +59,11 @@ export default async function AdminPacksPage() {
                   <div className="list-meta">
                     <span>作者 {row.nickname}</span>
                     <span>{row.item_count} 个插件</span>
-                    <span>{row.file_name ? `文件：${row.file_name}` : '未上传文件'}</span>
+                    <span>
+                      {Number(row.target_count) > 0
+                        ? `${row.target_count} 项可自动核验安装`
+                        : '无结构化安装目标（需人工核对）'}
+                    </span>
                     <span>{formatDateTimeOr(row.submitted_at, '时间未知')}</span>
                   </div>
                   <p className="muted" style={{ margin: '4px 0' }}>{row.purpose}</p>

@@ -8,6 +8,7 @@ import { createPacksService } from '../src/server/modules/packs';
 import { createNotificationsService } from '../src/server/modules/notifications';
 import type { CallerContext } from '@/server/platform/context';
 import type { VersionValue } from '@/packages/common/field-rules';
+import type { InstallTarget } from '@/packages/common/pack-install';
 import { ErrorCodes, isDomainError } from '../src/packages/common/errors';
 
 let ctx: TestDb | null = null;
@@ -29,7 +30,7 @@ const LONG_BODY = '先安装记忆插件，再安装检索插件，最后按说�
 
 function input(
   pluginId: string,
-  overrides: { title?: string; body?: string; installTarget?: unknown } = {},
+  overrides: { title?: string; body?: string; installTarget?: InstallTarget | null } = {},
 ) {
   return {
     title: overrides.title ?? '组合包',
@@ -162,6 +163,58 @@ describe('整合包发布流程', () => {
       .get(second.releaseId) as { review_status: string; review_note: string | null };
     expect(row.review_status).toBe('rejected');
     expect(row.review_note).toContain('核验未通过');
+  });
+
+  it('自动分支用系统账号通知作者：需补充 / 核验通过 / 核验未通过', async () => {
+    ctx = createTestDb();
+    const db = ctx.db;
+    const author = insertUser(db);
+    const service = createPacksService({ db });
+    const inbox = () => createNotificationsService({ db }).list(author, { limit: 20 });
+
+    // 1) 说明太短 → needs_info，作者收到系统通知
+    const shortDraft = await makeDraft(db, author, { body: '太短' });
+    await service.submitReleaseForReview(caller(db, author), shortDraft.releaseId, db);
+    const needsInfoNotice = (await inbox()).items.find((item) => item.excerpt?.includes('未通过自动检查'));
+    expect(needsInfoNotice).toBeTruthy();
+    expect(needsInfoNotice?.actorNickname).toBe('系统');
+    expect(needsInfoNotice?.href).toBe(`/packs/${shortDraft.packId}`);
+
+    // 2) 核验通过 → 系统通知「已发布」
+    const repo = insertRepository(db);
+    const okPlugin = insertPlugin(db, repo, '.');
+    const okDraft = await service.createPackDraft(
+      caller(db, author),
+      input(okPlugin, { installTarget: { kind: 'npm', packageName: 'dsh-memory', version: '1.0.0' } }),
+      db,
+    );
+    await service.submitReleaseForReview(caller(db, author), okDraft.releaseId, db);
+    const fakeFetch = async (url: string) =>
+      url.includes('registry.npmjs.org')
+        ? { ok: true, status: 200, body: { versions: { '1.0.0': {} } } }
+        : { ok: true, status: 200, body: null };
+    expect((await service.verifyPendingChecks(okDraft.releaseId, db, fakeFetch)).outcome).toBe('pass');
+    const publishedNotice = (await inbox()).items.find((item) => item.excerpt?.includes('核验通过，已发布'));
+    expect(publishedNotice).toBeTruthy();
+    expect(publishedNotice?.actorNickname).toBe('系统');
+
+    // 3) 核验未通过 → 系统通知「未通过安装资料核验」
+    const badDraft = await service.createPackDraft(
+      caller(db, author),
+      input(insertPlugin(db, insertRepository(db), '.'), {
+        installTarget: { kind: 'npm', packageName: 'dsh-memory', version: '9.9.9' },
+      }),
+      db,
+    );
+    await service.submitReleaseForReview(caller(db, author), badDraft.releaseId, db);
+    expect((await service.verifyPendingChecks(badDraft.releaseId, db, fakeFetch)).outcome).toBe('needs_info');
+    const failedNotice = (await inbox()).items.find((item) => item.excerpt?.includes('未通过安装资料核验'));
+    expect(failedNotice).toBeTruthy();
+
+    // 全部来自系统账号（不是作者自己）
+    for (const item of await inbox().then((r) => r.items)) {
+      expect(item.actorNickname).toBe('系统');
+    }
   });
 
   it('删除草稿；已发布只能撤回', async () => {

@@ -13,6 +13,7 @@ import { createPacksService } from '@/server/modules/packs';
 import { currentContext } from '../../api/_lib/context';
 import { MeNav } from '@/components/me-nav';
 import { PackReleaseActions } from '@/components/pack-release-actions';
+import { PackAppealForm } from '@/components/pack-appeal-form';
 import { formatDateTimeOr } from '@/packages/common/time';
 
 export const dynamic = 'force-dynamic';
@@ -115,6 +116,15 @@ export default async function MyPacksPage({
                               <span>{formatDateTimeOr(pack.publishedAt, '时间未知')}</span>
                               {pack.reviewNote ? (
                                 <span className="muted">审核意见：{pack.reviewNote}</span>
+                              ) : null}
+                              {/*
+                                被退回的版本给「申请复核」入口：自动检查/核验/人工审核都可能误判，
+                                作者需要一条正式通道，而不是只能默默改稿重交（重交会丢掉争议记录）。
+                              */}
+                              {pack.reviewStatus === 'rejected' ? (
+                                <span>
+                                  <PackAppealForm releaseId={pack.releaseId} />
+                                </span>
                               ) : null}
                               <span style={{ marginLeft: 'auto' }}>
                                 <PackReleaseActions

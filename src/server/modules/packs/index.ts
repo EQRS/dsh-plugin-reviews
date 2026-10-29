@@ -31,6 +31,57 @@ import {
   type InstallTarget,
 } from '@/packages/common/pack-install';
 
+/**
+ * 系统账号（固定 id，按需创建；见 ensureSystemUser）。
+ *
+ * 自动流程（自动检查通过 / 需补充 / 安装资料核验结果）没有真人触发者，但处理结果通知必须有
+ * 一个 actor，且数据库 CHECK 要求 `recipient_id <> actor_id`。用这条固定用户当触发者，
+ * 语义上就是「系统告诉作者结果」。它永远登录不了（没有外部身份）。
+ */
+export const SYSTEM_USER_ID = '00000000-0000-7000-8000-000000000000';
+
+/** 确保系统账号存在（幂等，只在真正要发系统通知时调用）。 */
+function ensureSystemUser(conn: SqliteDatabase): void {
+  // 不写进迁移：系统账号是**运行时行为**的产物，写进迁移会让所有「用户总数 / 第一条用户」
+  // 的口径凭空多一行（登录、用户管理等既有行为与测试都会被它带偏）。
+  conn
+    .prepare(
+      `INSERT INTO users (id, nickname, avatar_url, role, account_status, created_at, updated_at)
+       VALUES (?, '系统', NULL, 'user', 'active', 0, 0)
+       ON CONFLICT (id) DO NOTHING`,
+    )
+    .run(SYSTEM_USER_ID);
+}
+
+/**
+ * 给整合包作者发一条「系统」处理结果通知（自动分支用）。
+ *
+ * 去重键由调用方给（内含提交时间或申诉 id）：同一版本反复提交 → 每次结果各一条通知；
+ * 同一次提交重复跑核验 → 不会刷屏。
+ */
+function notifyPackAuthorBySystem(
+  conn: SqliteDatabase,
+  input: { releaseId: string; detail: string; deduplicationKey: string },
+): void {
+  const author = conn
+    .prepare(
+      `SELECT p.author_id FROM plugin_packs p
+         JOIN plugin_pack_releases rel ON rel.pack_id = p.id
+        WHERE rel.id = ?`,
+    )
+    .get(input.releaseId) as { author_id: string } | undefined;
+  if (!author) return;
+  ensureSystemUser(conn);
+  deliverModerationResultNotification(conn, {
+    recipientId: author.author_id,
+    actorId: SYSTEM_USER_ID,
+    contentEntityId: input.releaseId,
+    detail: input.detail,
+    deduplicationKey: input.deduplicationKey,
+    now: nowMs(),
+  });
+}
+
 const TITLE_MAX = 80;
 const PURPOSE_MAX = 2000;
 const BODY_MAX = 200_000;
@@ -694,6 +745,12 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
                   WHERE id = ?`,
               )
               .run(now, releaseId);
+            notifyPackAuthorBySystem(conn, {
+              releaseId,
+              detail:
+                '你的整合包版本已提交，自动检查通过，正在核验安装资料（npm / GitHub），完成后会再次通知你。',
+              deduplicationKey: `pack_verifying:${releaseId}:${now}`,
+            });
             return { outcome: 'verifying' as const, reviewStatus: 'pending' as const };
           }
           const published = publishReleaseInTx(conn, releaseId);
@@ -712,6 +769,11 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
                 WHERE id = ?`,
             )
             .run(check.note ?? '请补充资料。', now, releaseId);
+          notifyPackAuthorBySystem(conn, {
+            releaseId,
+            detail: `你的整合包版本未通过自动检查：${check.note ?? '请补充资料。'}`,
+            deduplicationKey: `pack_auto_needs_info:${releaseId}:${now}`,
+          });
           return {
             outcome: 'needs_info' as const,
             reviewStatus: 'rejected' as const,
@@ -726,6 +788,11 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
               WHERE id = ?`,
           )
           .run(check.note ?? null, now, releaseId);
+        notifyPackAuthorBySystem(conn, {
+          releaseId,
+          detail: `你的整合包版本已提交，需要人工审核（${check.note ?? '含外部链接或需人工确认'}），请耐心等待。`,
+          deduplicationKey: `pack_auto_manual:${releaseId}:${now}`,
+        });
         return { outcome: 'manual' as const, reviewStatus: 'pending' as const, note: check.note };
       }, injectedDb ?? db);
     },
@@ -818,14 +885,29 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
                 WHERE id = ?`,
             )
             .run(`安装资料核验未通过：${detail?.detail ?? '无法确认安装目标'}`, releaseId);
+          notifyPackAuthorBySystem(conn, {
+            releaseId,
+            detail: `你的整合包版本未通过安装资料核验：${detail?.detail ?? '无法确认安装目标'}。请修正安装目标后重新提交。`,
+            deduplicationKey: `pack_verify_failed:${releaseId}:${now}`,
+          });
           return { outcome: 'needs_info' as const };
         }
 
         if (pendingLeft > 0) {
+          notifyPackAuthorBySystem(conn, {
+            releaseId,
+            detail: '你的整合包版本部分安装资料未能自动核验（网络异常），已转为人工审核，请耐心等待。',
+            deduplicationKey: `pack_verify_manual:${releaseId}:${now}`,
+          });
           return { outcome: 'manual' as const };
         }
 
         const published = publishReleaseInTx(conn, releaseId);
+        notifyPackAuthorBySystem(conn, {
+          releaseId,
+          detail: `你的整合包版本安装资料核验通过，已发布（第 ${published.releaseNumber} 版）。`,
+          deduplicationKey: `pack_verified_published:${releaseId}`,
+        });
         return { outcome: 'pass' as const, releaseNumber: published.releaseNumber };
       }, injectedDb ?? db);
     },
@@ -1612,6 +1694,272 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
             r.hidden_at === null,
         }));
         return buildPage(items, total, { page, page_size: pageSize });
+      }, injectedDb ?? db);
+    },
+
+    /**
+     * 作者提交复核申请（申诉）。
+     *
+     * 只允许对「不是已发布」且「提交过」的版本申诉（rejected / 转人工 pending）。
+     * 同一版本同时只能有一条待处理申诉（数据库部分唯一索引兜底），重复提交返回冲突。
+     */
+    async submitAppeal(
+      ctx: CallerContext,
+      releaseId: string,
+      message: string,
+      injectedDb?: SqliteDatabase,
+    ): Promise<{ appealId: string }> {
+      assertCanWrite(ctx);
+      const userId = ctx.userId;
+      const text = message.trim();
+      if (text.length < 5) throw err.input('请写清楚为什么认为这次判定有误（至少 5 个字）。');
+      if (text.length > 2000) throw err.input('申诉说明最多 2000 字。');
+
+      return withTransaction((tx) => {
+        const conn = tx.db;
+        const rel = conn
+          .prepare(
+            `SELECT rel.id, rel.review_status, rel.auto_check_result, rel.review_note, p.author_id
+               FROM plugin_pack_releases rel
+               JOIN plugin_packs p ON p.id = rel.pack_id
+              WHERE rel.id = ?`,
+          )
+          .get(releaseId) as
+          | {
+              id: string;
+              review_status: string;
+              auto_check_result: string | null;
+              review_note: string | null;
+              author_id: string;
+            }
+          | undefined;
+        if (!rel) throw err.unavailable('整合包版本不存在。');
+        if (rel.author_id !== userId) throw err.forbidden('只有作者可以申请复核。');
+        if (rel.review_status === 'published') {
+          throw err.conflict('已发布的版本没有可申诉的判定；如有问题请修改后发布新版本。', { releaseId });
+        }
+        if (rel.review_status === 'draft') {
+          throw err.conflict('这个版本还没提交过，不需要申诉。', { releaseId });
+        }
+
+        const existing = conn
+          .prepare("SELECT id FROM plugin_pack_appeals WHERE release_id = ? AND state = 'pending'")
+          .get(releaseId) as { id: string } | undefined;
+        if (existing) {
+          throw err.conflict('这个版本已有一条待处理的复核申请，请等待管理员处理。', {
+            releaseId,
+            appealId: existing.id,
+          });
+        }
+
+        const now = nowMs();
+        const appealId = newId(now);
+        conn
+          .prepare(
+            `INSERT INTO plugin_pack_appeals
+               (id, release_id, author_id, message, snapshot_auto_check, snapshot_note, state, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`,
+          )
+          .run(appealId, releaseId, userId, text, rel.auto_check_result, rel.review_note, now);
+        return { appealId };
+      }, injectedDb ?? db);
+    },
+
+    /** 作者查看自己某版本的复核申请历史（最新在前）。 */
+    async listAppealsForRelease(
+      ctx: CallerContext,
+      releaseId: string,
+      injectedDb?: SqliteDatabase,
+    ): Promise<
+      Array<{
+        appealId: string;
+        message: string;
+        state: 'pending' | 'upheld' | 'overturned';
+        resolutionNote: string | null;
+        createdAt: number;
+        resolvedAt: number | null;
+      }>
+    > {
+      const conn = injectedDb ?? db;
+      const rel = conn
+        .prepare(
+          `SELECT p.author_id FROM plugin_pack_releases rel
+             JOIN plugin_packs p ON p.id = rel.pack_id
+            WHERE rel.id = ?`,
+        )
+        .get(releaseId) as { author_id: string } | undefined;
+      if (!rel) throw err.unavailable('整合包版本不存在。');
+      if (rel.author_id !== ctx.userId && !isAdmin(ctx)) {
+        throw err.forbidden('只能查看自己版本的复核记录。');
+      }
+      const rows = conn
+        .prepare(
+          `SELECT id, message, state, resolution_note, created_at, resolved_at
+             FROM plugin_pack_appeals
+            WHERE release_id = ?
+            ORDER BY created_at DESC, id DESC`,
+        )
+        .all(releaseId) as Array<{
+        id: string;
+        message: string;
+        state: 'pending' | 'upheld' | 'overturned';
+        resolution_note: string | null;
+        created_at: number;
+        resolved_at: number | null;
+      }>;
+      return rows.map((r) => ({
+        appealId: r.id,
+        message: r.message,
+        state: r.state,
+        resolutionNote: r.resolution_note,
+        createdAt: r.created_at,
+        resolvedAt: r.resolved_at,
+      }));
+    },
+
+    /** 管理员：待处理的复核申请队列（含申诉时的判定快照）。 */
+    async listPendingAppeals(injectedDb?: SqliteDatabase): Promise<
+      Array<{
+        appealId: string;
+        releaseId: string;
+        packId: string;
+        title: string;
+        authorNickname: string;
+        message: string;
+        snapshotAutoCheck: string | null;
+        snapshotNote: string | null;
+        createdAt: number;
+      }>
+    > {
+      const conn = injectedDb ?? db;
+      const rows = conn
+        .prepare(
+          `SELECT a.id, a.release_id, rel.pack_id, rel.title, u.nickname, a.message,
+                  a.snapshot_auto_check, a.snapshot_note, a.created_at
+             FROM plugin_pack_appeals a
+             JOIN plugin_pack_releases rel ON rel.id = a.release_id
+             JOIN plugin_packs p ON p.id = rel.pack_id
+             JOIN users u ON u.id = a.author_id
+            WHERE a.state = 'pending'
+            ORDER BY a.created_at ASC, a.id ASC`,
+        )
+        .all() as Array<{
+        id: string;
+        release_id: string;
+        pack_id: string;
+        title: string;
+        nickname: string;
+        message: string;
+        snapshot_auto_check: string | null;
+        snapshot_note: string | null;
+        created_at: number;
+      }>;
+      return rows.map((r) => ({
+        appealId: r.id,
+        releaseId: r.release_id,
+        packId: r.pack_id,
+        title: r.title,
+        authorNickname: r.nickname,
+        message: r.message,
+        snapshotAutoCheck: r.snapshot_auto_check,
+        snapshotNote: r.snapshot_note,
+        createdAt: r.created_at,
+      }));
+    },
+
+    /**
+     * 管理员处理复核申请。
+     *
+     * - decision='overturn' → 改判：发布该版本（分配序号），申诉记 overturned；
+     * - decision='uphold'  → 维持原判：版本保持被退回，申诉记 upheld，结果连理由一起通知作者。
+     *
+     * 两种结果都发一条处理结果通知（去重键带 appealId：一次申诉只通知一次）。
+     */
+    async resolveAppeal(
+      ctx: CallerContext,
+      appealId: string,
+      decision: 'overturn' | 'uphold',
+      note: string | null,
+      injectedDb?: SqliteDatabase,
+    ): Promise<{ state: 'upheld' | 'overturned'; releaseNumber?: number }> {
+      if (!isAdmin(ctx)) throw err.forbidden('只有管理员可以处理复核申请。');
+      const adminId = ctx.userId;
+      if (!adminId) throw err.forbidden('只有管理员可以处理复核申请。');
+      const trimmed = (note ?? '').trim();
+      if (decision === 'uphold' && trimmed.length === 0) {
+        throw err.input('维持原判需要写明理由，作者才知道问题出在哪。');
+      }
+
+      return withTransaction((tx) => {
+        const conn = tx.db;
+        const appeal = conn
+          .prepare(
+            `SELECT a.id, a.release_id, a.author_id, a.state, rel.review_status
+               FROM plugin_pack_appeals a
+               JOIN plugin_pack_releases rel ON rel.id = a.release_id
+              WHERE a.id = ?`,
+          )
+          .get(appealId) as
+          | {
+              id: string;
+              release_id: string;
+              author_id: string;
+              state: string;
+              review_status: string;
+            }
+          | undefined;
+        if (!appeal) throw err.unavailable('复核申请不存在。');
+        if (appeal.state !== 'pending') throw err.conflict('这条复核申请已处理过了。', { appealId });
+
+        const now = nowMs();
+
+        if (decision === 'overturn') {
+          if (appeal.review_status !== 'rejected' && appeal.review_status !== 'pending') {
+            throw err.conflict('这个版本的当前状态无法改判发布。', { releaseId: appeal.release_id });
+          }
+          // 改判即发布：先回到可发布态并清掉退回原因，再走统一发布路径
+          conn
+            .prepare(
+              `UPDATE plugin_pack_releases
+                  SET review_status = 'draft', review_note = NULL
+                WHERE id = ? AND review_status IN ('rejected','pending')`,
+            )
+            .run(appeal.release_id);
+          const published = publishReleaseInTx(conn, appeal.release_id);
+          conn
+            .prepare(
+              `UPDATE plugin_pack_appeals
+                  SET state = 'overturned', resolution_note = ?, resolved_by = ?, resolved_at = ?
+                WHERE id = ?`,
+            )
+            .run(trimmed || null, adminId, now, appealId);
+          deliverModerationResultNotification(conn, {
+            recipientId: appeal.author_id,
+            actorId: adminId,
+            contentEntityId: appeal.release_id,
+            detail: `复核结果：改判成立，版本已发布（第 ${published.releaseNumber} 版）。${trimmed ? `说明：${trimmed}` : ''}`,
+            deduplicationKey: `pack_appeal_overturned:${appealId}`,
+            now,
+          });
+          return { state: 'overturned' as const, releaseNumber: published.releaseNumber };
+        }
+
+        conn
+          .prepare(
+            `UPDATE plugin_pack_appeals
+                SET state = 'upheld', resolution_note = ?, resolved_by = ?, resolved_at = ?
+              WHERE id = ?`,
+          )
+          .run(trimmed, adminId, now, appealId);
+        deliverModerationResultNotification(conn, {
+          recipientId: appeal.author_id,
+          actorId: adminId,
+          contentEntityId: appeal.release_id,
+          detail: `复核结果：维持原判。${trimmed}`,
+          deduplicationKey: `pack_appeal_upheld:${appealId}`,
+          now,
+        });
+        return { state: 'upheld' as const };
       }, injectedDb ?? db);
     },
   };
