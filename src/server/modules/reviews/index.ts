@@ -78,6 +78,11 @@ export interface DraftView {
   reviewId: string;
   ownerId: string;
   pluginId: string | null;
+  /**
+   * 插件展示名（清单名优先，缺则仓库全名 + 子路径）；未绑定为 null。
+   * 编辑器要给人看"这篇评测对应哪个插件"，只给 UUID 等于没给。
+   */
+  pluginLabel: string | null;
   payload: DraftPayload;
   payloadSchemaVersion: number;
   saveVersion: number;
@@ -217,12 +222,13 @@ function readDraftRow(db: SqliteDatabase, draftId: string): DraftRow {
   return row;
 }
 
-function toDraftView(row: DraftRow, pluginId: string | null): DraftView {
+function toDraftView(row: DraftRow, pluginId: string | null, pluginLabel: string | null = null): DraftView {
   return {
     draftId: row.id,
     reviewId: row.review_id ?? '',
     ownerId: row.owner_id,
     pluginId,
+    pluginLabel,
     payload: parseJson<DraftPayload>(row.payload),
     payloadSchemaVersion: row.payload_schema_version,
     saveVersion: row.save_version,
@@ -241,6 +247,22 @@ function readReviewPluginId(db: SqliteDatabase, reviewId: string | null): string
     | { plugin_id: string | null }
     | undefined;
   return row?.plugin_id ?? null;
+}
+
+/** 插件展示名：与插件目录同一口径（清单名优先，缺则仓库全名 + 子路径）。 */
+export function pluginDisplayLabel(db: SqliteDatabase, pluginId: string): string | null {
+  const row = db
+    .prepare(
+      `SELECT p.display_name, p.plugin_path, r.full_name
+         FROM plugins p
+         JOIN repositories r ON r.id = p.repository_id
+        WHERE p.id = ?`,
+    )
+    .get(pluginId) as { display_name: string | null; plugin_path: string; full_name: string } | undefined;
+  if (!row) return null;
+  const base = row.display_name ?? row.full_name;
+  const subPath = row.plugin_path && row.plugin_path !== '.' ? ` / ${row.plugin_path}` : '';
+  return `${base}${subPath}`;
 }
 
 function parseJson<T>(text: string): T {
@@ -488,7 +510,60 @@ export const reviewsService = {
       const row = readDraftRow(conn, id);
       if (row.draft_type !== 'review') throw err.unavailable('草稿不存在或已不可访问。');
       if (row.owner_id !== userId) throw err.forbidden('只能访问自己的草稿。');
-      return toDraftView(row, readReviewPluginId(conn, row.review_id));
+      const pluginId = readReviewPluginId(conn, row.review_id);
+      return toDraftView(row, pluginId, pluginId === null ? null : pluginDisplayLabel(conn, pluginId));
+    }, db);
+  },
+
+  /**
+   * 给草稿指定 / 更换「对应的插件」。
+   *
+   * 为什么要有这个动作：插件关联的**权威位置在 `reviews.plugin_id`**（草稿不缓存，避免两个真相）。
+   * 此前只能在**创建草稿时**给一次，于是批量导入出来的草稿永远绑不上插件——作者只能把正文
+   * 复制粘贴到"从插件页新建"的草稿里重来一遍。这里补上"改绑"这条路径。
+   *
+   * 只动 `reviews.plugin_id`，**不动 payload**：payload 被 `draft_save_receipts` 的摘要
+   * 引用着（重放判定要逐字节比对），在保存流程之外改它会让历史回执失效。
+   * 编辑器下次保存时会把 payload.pluginId 一起写对（PUT 的 body.pluginId 来自本方法的结果）。
+   */
+  async setDraftPlugin(
+    ctx: CallerContext,
+    input: { draftId: string; pluginId: string },
+    db?: SqliteDatabase,
+  ): Promise<{ draftId: string; pluginId: string; pluginLabel: string | null }> {
+    const userId = requireActiveUser(ctx);
+    const draftId = parseDraftId(input.draftId);
+    if (!isUuidV7(input.pluginId)) {
+      throw err.input('插件标识格式不正确。', [{ path: 'plugin_id', message: '必须是规范 UUIDv7' }]);
+    }
+
+    return withTransaction((tx) => {
+      const conn = tx.db;
+      const row = readDraftRow(conn, draftId);
+      if (row.draft_type !== 'review') throw err.unavailable('草稿不存在或已不可访问。');
+      if (row.owner_id !== userId) throw err.forbidden('只能修改自己的草稿。');
+      if (!row.review_id) throw err.unavailable('草稿没有关联的评测文章。');
+
+      const plugin = conn.prepare('SELECT id FROM plugins WHERE id = ?').get(input.pluginId) as
+        | { id: string }
+        | undefined;
+      if (!plugin) throw err.input('所选插件不存在。', [{ path: 'plugin_id', message: '未知插件' }]);
+
+      // 草稿一旦提交就软删除（保留提交/修订历史）。改绑一份已提交的草稿等于在改历史对应的文章，
+      // 明确拒绝，而不是悄悄改掉。
+      const state = conn.prepare('SELECT deleted_at FROM content_drafts WHERE id = ?').get(draftId) as
+        | { deleted_at: number | null }
+        | undefined;
+      if (!state || state.deleted_at !== null) {
+        throw err.unavailable('这份草稿已提交或已删除，不能再更换插件。');
+      }
+
+      conn.prepare('UPDATE reviews SET plugin_id = ? WHERE id = ?').run(input.pluginId, row.review_id);
+      return {
+        draftId,
+        pluginId: input.pluginId,
+        pluginLabel: pluginDisplayLabel(conn, input.pluginId),
+      };
     }, db);
   },
 

@@ -900,7 +900,11 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
         // ---- 真正隐藏目标 ----
         let authorId: string | null = null;
         if (input.action === 'hide') {
-          if (report.target_kind === 'review') {
+          // review 与 pack_release 共用这一支：两者的被隐藏对象都是 content_entities 行。
+          // **pack_release 的 content_entity 就是版本本身**（plugin_pack_releases.id = content_entities.id，
+          // content_type = 'pack_release'），所以隐藏版本 = 隐藏这条 content_entities 行，
+          // 作者也直接从 content_entities.author_id 取，不需要再绕去 plugin_packs。
+          if (report.target_kind === 'review' || report.target_kind === 'pack_release') {
             authorId = (
               conn.prepare('SELECT author_id FROM content_entities WHERE id = ?').get(report.content_entity_id) as
                 | { author_id: string }
