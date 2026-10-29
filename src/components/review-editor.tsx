@@ -179,9 +179,12 @@ export function ReviewEditor({
    * 组件测试也会因此多出一条与业务无关的网络调用。
    */
   initialAutosaveSeconds = DEFAULT_AUTOSAVE_SECONDS,
+  /** 单个 .md 导入上限（字节）：来自后台 imports.max_markdown_bytes，默认 512KB。 */
+  maxMarkdownBytes = 512 * 1024,
 }: {
   draftId: string;
   initialAutosaveSeconds?: number;
+  maxMarkdownBytes?: number;
 }) {
   const [draft, setDraft] = useState<DraftView | null>(null);
   const [title, setTitle] = useState('');
@@ -610,12 +613,11 @@ export function ReviewEditor({
           400,
         );
       }
-      const maxBytes = 512 * 1024;
-      if (file.size > maxBytes) {
+      if (file.size > maxMarkdownBytes) {
         throw new ApiError(
           {
             code: 'input_invalid',
-            message: `Markdown 文件最大 512KB，当前 ${(file.size / 1024).toFixed(0)}KB。`,
+            message: `Markdown 文件最大 ${Math.floor(maxMarkdownBytes / 1024)}KB，当前 ${(file.size / 1024).toFixed(0)}KB。`,
           },
           400,
         );

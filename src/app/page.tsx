@@ -11,14 +11,14 @@
 import Link from 'next/link';
 import { HomeFeed } from '@/components/home-feed';
 import { getDb } from '@/server/platform/db';
+import { numberSetting } from '@/server/modules/settings';
 import { resolveVisibilityInTx } from '@/server/modules/content';
 import { createCatalogService } from '@/server/modules/catalog';
 import { formatDateTimeOr } from '@/packages/common/time';
 
 export const dynamic = 'force-dynamic';
 
-/** 首页每个栏目只展示 10 条。 */
-const HOME_LIMIT = 10;
+/** 栏目条数可后台调整（home.latest_review_count / home.recent_plugin_count）。 */
 
 interface Row {
   review_id: string;
@@ -65,9 +65,13 @@ function categoryHref(slug: string | null): string {
 }
 
 export default async function HomePage() {
-  const reviews = latestPublicReviews(HOME_LIMIT);
-  const catalog = createCatalogService({ db: getDb() });
-  const recentPlugins = await catalog.listPlugins({ page: 1, page_size: HOME_LIMIT });
+  const db = getDb();
+  const reviews = latestPublicReviews(numberSetting(db, 'home.latest_review_count', 6));
+  const catalog = createCatalogService({ db });
+  const recentPlugins = await catalog.listPlugins({
+    page: 1,
+    page_size: numberSetting(db, 'home.recent_plugin_count', 12),
+  });
   // 页面 chip 行用**分类**（中文、按不同仓库计数），不再直接暴露原始 topics
   const categories = await catalog.listCategories();
 

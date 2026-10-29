@@ -59,7 +59,6 @@ interface ImportOutcome {
 const ALLOWED_IMAGE_MIME: readonly string[] = ['image/png', 'image/jpeg', 'image/webp'];
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_IMAGES_PER_DRAFT = 20;
-const MAX_MARKDOWN_BYTES = 512 * 1024;
 
 const MARKDOWN_FILE_RE = /\.(md|markdown|txt)$/i;
 const IMAGE_FILE_RE = /\.(png|jpe?g|webp|gif|bmp|svg|avif|heic|heif)$/i;
@@ -124,7 +123,14 @@ async function uploadImage(draftId: string, file: File, mime: string): Promise<s
   throw new Error(`图片仍在处理中（${ready.processingState}）`);
 }
 
-export function BulkMarkdownImport({ pluginId = null }: { pluginId?: string | null }) {
+export function BulkMarkdownImport({
+  pluginId = null,
+  /** 单个 .md 上限（字节）：来自后台 imports.max_markdown_bytes，默认 512KB。 */
+  maxMarkdownBytes = 512 * 1024,
+}: {
+  pluginId?: string | null;
+  maxMarkdownBytes?: number;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [outcomes, setOutcomes] = useState<ImportOutcome[] | null>(null);
@@ -176,7 +182,9 @@ export function BulkMarkdownImport({ pluginId = null }: { pluginId?: string | nu
         let unmatched = 0;
         const skipped: string[] = [];
         try {
-          if (file.size > MAX_MARKDOWN_BYTES) throw new Error('文件超过 512KB');
+          if (file.size > maxMarkdownBytes) {
+        throw new Error(`文件超过 ${Math.floor(maxMarkdownBytes / 1024)}KB`);
+      }
           const text = await file.text();
           if (text.trim().length === 0) throw new Error('文件是空的');
 

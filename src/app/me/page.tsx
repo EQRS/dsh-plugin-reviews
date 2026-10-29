@@ -15,6 +15,7 @@ import { listDraftSummaries } from '@/server/modules/reviews';
 import { MeNav } from '@/components/me-nav';
 import { DraftList } from '@/components/draft-list';
 import { BulkMarkdownImport } from '@/components/bulk-markdown-import';
+import { numberSetting } from '@/server/modules/settings';
 import { submissionStateLabels } from '@/packages/common/status-text';
 import type { SubmissionState } from '@/packages/common/field-rules';
 import { formatDateTime } from '@/packages/common/time';
@@ -221,7 +222,11 @@ export default async function MePage({
             </div>
 
             {/* 批量导入：只在草稿页出现（提交过的评测不该被"导入"覆盖）。 */}
-            {tab === 'drafts' ? <BulkMarkdownImport /> : null}
+            {tab === 'drafts' ? (
+              <BulkMarkdownImport
+                maxMarkdownBytes={numberSetting(getDb(), 'imports.max_markdown_bytes', 512 * 1024)}
+              />
+            ) : null}
 
             {tab === 'drafts' ? (
               draftSummaries.length === 0 ? (

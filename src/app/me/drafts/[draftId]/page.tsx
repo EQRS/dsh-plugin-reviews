@@ -8,6 +8,7 @@
 import { currentContext } from '@/app/api/_lib/context';
 import { getDb } from '@/server/platform/db';
 import { readPreferences } from '@/server/modules/preferences';
+import { numberSetting } from '@/server/modules/settings';
 import { BackLink } from '@/components/back-link';
 import { ReviewEditor } from '@/components/review-editor';
 
@@ -29,5 +30,11 @@ export default async function DraftEditorPage({ params }: { params: Promise<{ dr
 
   // 自动保存间隔是每用户偏好（迁移 0030）：在服务端读好传进去，编辑器不再多发一次请求。
   const preferences = readPreferences(getDb(), ctx.userId);
-  return <ReviewEditor draftId={draftId} initialAutosaveSeconds={preferences.editorAutosaveSeconds} />;
+  return (
+    <ReviewEditor
+      draftId={draftId}
+      initialAutosaveSeconds={preferences.editorAutosaveSeconds}
+      maxMarkdownBytes={numberSetting(getDb(), 'imports.max_markdown_bytes', 512 * 1024)}
+    />
+  );
 }
