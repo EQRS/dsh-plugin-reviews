@@ -13,6 +13,7 @@ import { assertCanWrite, type CallerContext } from '@/server/platform/context';
 import { nowMs } from '@/server/platform/time';
 import { newId } from '@/server/platform/id';
 import { withRead, withTransaction } from '@/server/platform/tx';
+import { recordOperationInTx } from '@/server/modules/operations';
 import { digest } from '@/server/platform/digest';
 import type { SqliteDatabase } from '@/server/platform/db';
 import { err } from '@/packages/common/errors';
@@ -399,6 +400,24 @@ function deleteDraftInTx(
 
   conn.prepare('DELETE FROM draft_save_receipts WHERE draft_id = ?').run(id);
   conn.prepare('DELETE FROM draft_attachment_links WHERE draft_id = ?').run(id);
+
+  // 审计：草稿删除（含批量与"撤回并删草稿"）都经过这里，一处记录即覆盖所有入口。
+  // operationKey 用草稿 id：同一份草稿只会被删一次（软删除后不再命中）。
+  recordOperationInTx(
+    conn,
+    {
+      actionType: 'draft.delete',
+      operationKey: `draft_delete:${id}`,
+      actorKind: 'user',
+      actorUserId: userId,
+      targetType: 'draft',
+      targetId: id,
+      targetSnapshot: { review_id: row.review_id, submitted: submitted !== undefined },
+      changes: { mode: submitted ? 'soft' : 'hard' },
+      reason: '作者删除草稿',
+    },
+    nowMs(),
+  );
 
   if (submitted) {
     // 软删除：保留 content_submissions / review_revisions；唯一索引已改为只约束未删除草稿。

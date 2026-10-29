@@ -229,8 +229,25 @@ export const contentService = {
       }
 
       // 撤回即失去公开资格：不清除 published_revision_id（历史仍在），
-      // 公开与否完全由 resolveVisibility 计算 —— 不另存“公开状态”字段。
-      void requestKey;
+      // 公开与否完全由 resolveVisibility 计算 —— 不另存"公开状态"字段。
+      //
+      // 审计：撤回是作者对自己内容的处置，后台也该能回答"这篇是谁什么时候撤的、为什么"。
+      // 与管理员 hide/unhide 分属不同动作名，便于按动作筛选时区分"作者撤回"与"被隐藏"。
+      recordOperationInTx(
+        conn,
+        {
+          actionType: 'content.withdraw',
+          operationKey: requestKey,
+          actorKind: 'user',
+          actorUserId: userId,
+          targetType: 'content_entity',
+          targetId: reviewId,
+          targetSnapshot: { withdrawn_at: now, visibility_control_version: input.expectedControlVersion + 1 },
+          changes: { withdrawn: true, reason },
+          reason,
+        },
+        now,
+      );
       return { withdrawnAt: now };
     }, db);
   },
