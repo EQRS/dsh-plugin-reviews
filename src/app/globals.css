@@ -889,6 +889,16 @@ label.button {
   justify-content: center;
   margin-bottom: 0;
   cursor: pointer;
+  /* 文字居中：label 里的文本节点默认按行盒基线参与 flex 布局，
+     中文字体的 ascent/descent 与 latin 不同，视觉上会偏上一点点。
+     显式行高 + 子元素 span 归零行高，让文本盒正好垂直居中。 */
+  line-height: var(--control-height);
+}
+
+label.button > span {
+  display: inline-flex;
+  align-items: center;
+  line-height: var(--md-sys-typescale-label-large-line);
 }
 
 label.button > input[type='file'] {

@@ -299,8 +299,8 @@ export function BulkMarkdownImport({
   return (
     <div style={{ marginTop: 12 }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-        <label className="button" style={{ cursor: busy ? 'default' : 'pointer' }}>
-          {busy ? '导入中…' : '选择文件夹导入（含图片）'}
+        <label className="button file-button" style={{ cursor: busy ? 'default' : 'pointer' }}>
+          <span>{busy ? '导入中…' : '选择文件夹导入（含图片）'}</span>
           <input
             type="file"
             multiple
@@ -310,8 +310,8 @@ export function BulkMarkdownImport({
             onChange={onPick}
           />
         </label>
-        <label className="button" style={{ cursor: busy ? 'default' : 'pointer' }}>
-          批量导入 .md
+        <label className="button file-button" style={{ cursor: busy ? 'default' : 'pointer' }}>
+          <span>批量导入 .md</span>
           <input
             type="file"
             multiple
