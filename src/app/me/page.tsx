@@ -9,6 +9,7 @@
  */
 
 import Link from 'next/link';
+import { SearchGoButton } from '@/components/search-go-button';
 import { getDb } from '@/server/platform/db';
 import { currentContext } from '../api/_lib/context';
 import { listDraftSummaries } from '@/server/modules/reviews';
@@ -208,9 +209,7 @@ export default async function MePage({
               aria-label="按标题关键词搜索"
               maxLength={100}
             />
-            <button type="submit" className="search-go">
-              搜索
-            </button>
+            <SearchGoButton label="按标题关键词搜索" />
           </form>
 
           <section className="panel">

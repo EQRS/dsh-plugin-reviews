@@ -10,6 +10,7 @@
  */
 
 import Link from 'next/link';
+import { SearchGoButton } from '@/components/search-go-button';
 import { notFound } from 'next/navigation';
 import { getDb } from '@/server/platform/db';
 import { currentContext } from '@/app/api/_lib/context';
@@ -84,20 +85,18 @@ export default async function ChoosePluginPage({
           : '这篇草稿还没有对应的插件；提交审核前必须选一个。'}
       </p>
 
-      <form action={`/me/drafts/${draftId}/choose-plugin`} method="get" className="filters" style={{ marginTop: 12 }}>
+      <form action={`/me/drafts/${draftId}/choose-plugin`} method="get" className="search" style={{ marginTop: 12 }}>
         <input
           type="search"
           name="q"
           defaultValue={q}
           placeholder="插件名 / 仓库名 / 描述"
           aria-label="搜索插件"
-          style={{ minWidth: 240 }}
+          maxLength={100}
         />
-        <button type="submit" className="button">
-          搜索
-        </button>
+        <SearchGoButton label="搜索插件" />
         {q ? (
-          <Link href={`/me/drafts/${draftId}/choose-plugin`} className="button tonal">
+          <Link href={`/me/drafts/${draftId}/choose-plugin`} className="link-btn">
             清除
           </Link>
         ) : null}
