@@ -104,13 +104,22 @@ export function isExternalImageUrl(url: string): boolean {
 /**
  * 建图片索引。同一个相对路径重复出现时保留第一个；同名不同路径时 basename 键置 null。
  */
-export function buildImageIndex(entries: readonly ImageFileEntry[]): ImageIndex {
+export function buildImageIndex(
+  entries: readonly ImageFileEntry[],
+  /**
+   * `stripRoot` 默认 true：浏览器 `webkitRelativePath` 带一层选择目录名，要去掉。
+   * 服务端已经存的是**规范化后的相对路径**（首层已剥），必须传 false，否则会把
+   * `images/a.png` 再削成 `a.png`，与正文引用对不上。
+   */
+  options: { stripRoot?: boolean } = {},
+): ImageIndex {
   const byPath = new Map<string, string>();
   const byBasename = new Map<string, string | null>();
+  const stripRoot = options.stripRoot !== false;
 
   for (const entry of entries) {
     const raw = entry.path !== '' ? entry.path : (entry.name ?? '');
-    const stripped = stripCollectionRoot(raw);
+    const stripped = stripRoot ? stripCollectionRoot(raw) : normalizePath(raw);
     if (stripped === '') continue;
 
     const pathKey = stripped.toLowerCase();

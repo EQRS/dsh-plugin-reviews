@@ -19,7 +19,8 @@
 CREATE TABLE batch_jobs (
   id                TEXT    PRIMARY KEY,
   requested_by      TEXT    NOT NULL REFERENCES users(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
-  batch_type        TEXT    NOT NULL CHECK (batch_type IN ('plugin_import')),
+  -- plugin_import：管理员清单导入（条目只有 URL）；review_import：作者文件夹导入（条目是 .md）
+  batch_type        TEXT    NOT NULL CHECK (batch_type IN ('plugin_import', 'review_import')),
   -- 预演：逐条检查但不写插件；导入：检查通过即收录。
   mode              TEXT    NOT NULL CHECK (mode IN ('dry_run', 'apply')),
   request_key       TEXT    NOT NULL CHECK (trim(request_key) <> ''),
@@ -42,6 +43,8 @@ CREATE TABLE batch_job_items (
   processing_state  TEXT    NOT NULL DEFAULT 'pending' CHECK (processing_state IN ('pending', 'done', 'failed')),
   -- 命中的插件（apply 模式写入；dry_run 模式只在"已存在"时填既有插件）
   plugin_id         TEXT    REFERENCES plugins(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+  -- 作者侧导入的产物是草稿（管理员清单导入为空）
+  draft_id          TEXT    REFERENCES content_drafts(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
   issues            TEXT    NOT NULL CHECK (json_valid(issues)),
   state_version     INTEGER NOT NULL DEFAULT 0 CHECK (state_version >= 0),
   created_at        INTEGER NOT NULL CHECK (created_at >= 0),
