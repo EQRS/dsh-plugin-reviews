@@ -223,6 +223,41 @@ describe('作者文件夹导入', () => {
     expect(payload.body.map((s) => s.markdown).join('\n\n')).not.toContain('images/a.png');
   });
 
+  it('同一批多篇 Markdown 生成**各自独立**的草稿（不复用同一份）', async () => {
+    const { db, service } = setup();
+    const user = insertUser(db);
+    const first = Buffer.from('# 第一篇\n\n甲正文', 'utf8');
+    const second = Buffer.from('# 第二篇\n\n乙正文', 'utf8');
+
+    const created = await service.createBatch(caller(db, user), {
+      inputs: [
+        { path: 'set/a.md', kind: 'markdown', byteSize: first.byteLength, sha256: sha256(first) },
+        { path: 'set/b.md', kind: 'markdown', byteSize: second.byteLength, sha256: sha256(second) },
+      ],
+      requestKey: 'batch-multi',
+    });
+    const view = await service.getBatch(caller(db, user), created.batchId);
+    for (const input of view.inputs) {
+      const bytes = input.path === 'a.md' ? first : second;
+      const chunk = await service.uploadChunk(caller(db, user), { inputId: input.inputId, offset: 0, bytes });
+      await service.finishInput(caller(db, user), { inputId: input.inputId, attemptId: chunk.attemptId });
+    }
+
+    const result = await service.finalizeBatch(caller(db, user), created.batchId);
+    expect(result.created).toBe(2);
+
+    const after = await service.getBatch(caller(db, user), created.batchId);
+    const drafts = after.items.map((item) => item.draftId);
+    expect(drafts.filter((id) => id !== null)).toHaveLength(2);
+    expect(new Set(drafts).size).toBe(2);
+
+    const rows = db.prepare("SELECT payload FROM content_drafts WHERE draft_type = 'review'").all() as Array<{
+      payload: string;
+    }>;
+    const titles = rows.map((row) => (JSON.parse(row.payload) as { title: string }).title).sort();
+    expect(titles).toEqual(['第一篇', '第二篇']);
+  });
+
   it('别人的批次不能操作（403）', async () => {
     const { db, service } = setup();
     const owner = insertUser(db);

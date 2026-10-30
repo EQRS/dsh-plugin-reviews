@@ -447,7 +447,16 @@ export const reviewsService = {
    */
   async createOrGetDraft(
     ctx: CallerContext,
-    input: { pluginId: string | null; requestKey: string },
+    input: {
+      pluginId: string | null;
+      requestKey: string;
+      /**
+       * true = 每次都要一份**新的**草稿，不复用"同作者 + 同插件"的进行中草稿。
+       * 批量/文件夹导入必须用这个开关：否则同一批的多篇无插件草稿会全部落到同一份上，
+       * 后一篇覆盖前一篇正文（而且看起来"成功生成了 N 篇"，实际只有 1 篇）。
+       */
+      fresh?: boolean;
+    },
     db?: SqliteDatabase,
   ): Promise<{ draftId: string; reviewId: string; saveVersion: number }> {
     const userId = requireActiveUser(ctx);
@@ -465,8 +474,11 @@ export const reviewsService = {
         if (!plugin) throw err.input('所选插件不存在。', [{ path: 'plugin_id', message: '未知插件' }]);
       }
 
-      // 复用：同一作者、同一插件关联的已有草稿即为“进行中的那篇评测”。
-      const existing = db
+      // 复用：同一作者、同一插件关联的已有草稿即为"进行中的那篇评测"。
+      // fresh=true 时不复用（导入场景每篇必须是独立文章）。
+      const existing = input.fresh === true
+        ? undefined
+        : (db
         .prepare(
           `SELECT d.id AS draft_id, d.review_id AS review_id, d.save_version AS save_version
            FROM content_drafts d
@@ -475,7 +487,7 @@ export const reviewsService = {
            ORDER BY d.saved_at DESC, d.id DESC
            LIMIT 1`,
         )
-        .get(userId, pluginId) as { draft_id: string; review_id: string; save_version: number } | undefined;
+        .get(userId, pluginId) as { draft_id: string; review_id: string; save_version: number } | undefined);
 
       if (existing) {
         // 同一 (draftId, requestKey) 的重复请求不产生新草稿，直接返回当前版本。

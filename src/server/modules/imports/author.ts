@@ -607,7 +607,7 @@ export function createAuthorImportService(deps: { db?: SqliteDatabase; store?: F
             // 附件服务需要草稿先存在：先建草稿，再传图，再写正文。
             const draft = await reviewsService.createOrGetDraft(
               ctx,
-              { pluginId: null, requestKey: 'review_import:' + batchId + ':' + item.id },
+              { pluginId: null, requestKey: 'review_import:' + batchId + ':' + item.id, fresh: true },
               db,
             );
             const attachment = await media.createAttachment(ctx, {
@@ -633,7 +633,7 @@ export function createAuthorImportService(deps: { db?: SqliteDatabase; store?: F
         try {
           const draft = await reviewsService.createOrGetDraft(
             ctx,
-            { pluginId: null, requestKey: 'review_import:' + batchId + ':' + item.id },
+            { pluginId: null, requestKey: 'review_import:' + batchId + ':' + item.id, fresh: true },
             db,
           );
           const rewritten = applyImageReplacements(markdown, replacements);
