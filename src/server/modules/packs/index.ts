@@ -995,7 +995,7 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
           conn,
           {
             actionType: 'pack.release.reject',
-            operationKey: `pack_reject:${releaseId}:${nowMs()}`,
+            operationKey: `pack_reject:${releaseId}:${newId()}`,
             actorKind: 'admin',
             actorUserId: actorId,
             targetType: 'pack_release',

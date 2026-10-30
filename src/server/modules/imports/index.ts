@@ -504,7 +504,8 @@ export function createImportService(deps: { db?: SqliteDatabase; probe?: Catalog
           tx.db,
           {
             actionType: 'plugin.import.run',
-            operationKey: 'import_run:' + batchId + ':' + nowMs(),
+            // 时间戳做键在同一毫秒内会撞（连续两次运行会被判 keyReused），用 id 保证唯一。
+            operationKey: 'import_run:' + batchId + ':' + newId(),
             actorKind: 'admin',
             actorUserId: adminId,
             targetType: 'import_batch',

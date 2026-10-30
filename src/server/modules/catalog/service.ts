@@ -1107,7 +1107,9 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
           conn,
           {
             actionType: 'category.upsert',
-            operationKey: `category_upsert:${slug}:${now}`,
+            // 键必须**每次唯一**：用时间戳在同一毫秒内会撞（删除两次同名分类的用例就撞了），
+            // 撞了会按"同键不同摘要"判为 keyReused，把一次合法操作变成 500。
+            operationKey: `category_upsert:${slug}:${newId(now)}`,
             actorKind: 'admin',
             actorUserId: adminId,
             targetType: 'plugin_category',
@@ -1160,7 +1162,7 @@ export function createCatalogService(deps: CatalogServiceDeps = {}): CatalogServ
           conn,
           {
             actionType: 'category.delete',
-            operationKey: `category_delete:${normalized}:${now}`,
+            operationKey: `category_delete:${normalized}:${newId(now)}`,
             actorKind: 'admin',
             actorUserId: adminId,
             targetType: 'plugin_category',

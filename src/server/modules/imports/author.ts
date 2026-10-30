@@ -690,7 +690,7 @@ export function createAuthorImportService(deps: { db?: SqliteDatabase; store?: F
           tx.db,
           {
             actionType: 'author.import.finalize',
-            operationKey: 'author_import_finalize:' + batchId + ':' + nowMs(),
+            operationKey: 'author_import_finalize:' + batchId + ':' + newId(),
             actorKind: 'user',
             actorUserId: ctx.userId ?? '',
             targetType: 'import_batch',
