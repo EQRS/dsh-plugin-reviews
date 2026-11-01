@@ -112,11 +112,12 @@ export default async function ReviewsPage({
     const packReviews = await createPackReviewsService({ db }).listPackReviews(ctx, q);
     return (
       <div>
-        <h1>评测</h1>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-          <Link href="/reviews" className="button">插件测评</Link>
-          <Link href="/reviews?tab=packs" className="button primary">整合包测评</Link>
-        </div>
+        <h1 className="reviews-switch-title">
+          <Link href="/reviews" className="reviews-switch-link">
+            整合包评测
+            <span className="reviews-switch-arrow" aria-hidden="true">←</span>
+          </Link>
+        </h1>
         <form action="/reviews" method="get" className="search" style={{ marginBottom: 12 }}>
           <input type="hidden" name="tab" value="packs" />
           <input
@@ -219,12 +220,12 @@ export default async function ReviewsPage({
 
   return (
     <div>
-      <h1>评测</h1>
-
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-        <Link href="/reviews" className="button primary">插件测评</Link>
-        <Link href="/reviews?tab=packs" className="button">整合包测评</Link>
-      </div>
+      <h1 className="reviews-switch-title">
+        <Link href="/reviews?tab=packs" className="reviews-switch-link">
+          插件评测
+          <span className="reviews-switch-arrow" aria-hidden="true">→</span>
+        </Link>
+      </h1>
 
       <div className="catalog-layout">
         <aside className="panel" aria-label="筛选">

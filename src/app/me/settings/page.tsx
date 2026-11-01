@@ -18,7 +18,6 @@ import { currentContext } from '../../api/_lib/context';
 import { BackLink } from '@/components/back-link';
 import { ProfileForm } from '@/components/profile-form';
 import { MeNav } from '@/components/me-nav';
-import { ThemeToggle } from '@/components/theme-toggle';
 import { EditorAutosaveSetting } from '@/components/editor-autosave-setting';
 import { readPreferences } from '@/server/modules/preferences';
 import { formatDateTimeOr } from '@/packages/common/time';
@@ -49,12 +48,6 @@ export default async function MeSettingsPage() {
             <p className="muted" style={{ marginTop: 0 }}>
               需要先登录。请使用页面顶部的登录入口。
             </p>
-            <section className="panel" style={{ marginTop: 16 }}>
-              <div className="section-head">
-                <h2>外观</h2>
-              </div>
-              <ThemeToggle />
-            </section>
           </div>
         </div>
       </div>
@@ -119,7 +112,6 @@ export default async function MeSettingsPage() {
               <dd>{formatDateTimeOr(row?.last_login_at ?? null, '未知')}</dd>
             </dl>
           </section>
-
           <section className="panel" style={{ marginTop: 20 }}>
             <div className="section-head">
               <h2>编辑</h2>
@@ -127,12 +119,10 @@ export default async function MeSettingsPage() {
             <EditorAutosaveSetting initialSeconds={preferences.editorAutosaveSeconds} />
           </section>
 
-          <section className="panel" style={{ marginTop: 20 }}>
-            <div className="section-head">
-              <h2>外观</h2>
-            </div>
-            <ThemeToggle />
-          </section>
+          {/*
+            外观（深色模式）不在这页：#42 把它移进页头用户菜单（账户下拉 / 登录下拉 /
+            手机侧边抽屉共用同一行开关），这里再放一份就是两处入口、两套状态。
+          */}
         </div>
       </div>
     </div>
