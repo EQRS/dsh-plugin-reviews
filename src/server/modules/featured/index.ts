@@ -16,6 +16,7 @@ import { nowMs } from '@/server/platform/time';
 import { err } from '@/packages/common/errors';
 import { isAdmin, type CallerContext } from '@/server/platform/context';
 import { recordOperationInTx } from '@/server/modules/operations';
+import { deliverFeaturedPublishedNotification } from '@/server/modules/notifications';
 import { buildPage, type PageResult } from '@/packages/common/result';
 
 export const FEATURED_LIMITS = {
@@ -516,7 +517,7 @@ export function createFeaturedService(deps: { db?: SqliteDatabase } = {}) {
       ctx: CallerContext,
       issueNumber: number,
       input: { expectedVersion: number },
-    ): Promise<{ issueNumber: number; publishedAt: number }> {
+    ): Promise<{ issueNumber: number; publishedAt: number; notified: number }> {
       const adminId = assertAdmin(ctx, '只有管理员可以发布精选专栏。');
       return withTransaction((tx) => {
         const conn = tx.db;
@@ -567,7 +568,14 @@ export function createFeaturedService(deps: { db?: SqliteDatabase } = {}) {
           now,
         );
 
-        return { issueNumber, publishedAt: now };
+        // 发布即通知订阅者（同一事务：要么都成立，要么都不成立）
+        const notified = notifyFeaturedSubscribers(conn, {
+          issueNumber,
+          title: column.title,
+          theme: column.theme,
+        });
+
+        return { issueNumber, publishedAt: now, notified: notified.delivered };
       }, db);
     },
 
@@ -626,3 +634,116 @@ export function featuredCountsForPlugins(db: SqliteDatabase, pluginIds: string[]
   for (const row of rows) result.set(row.plugin_id, Number(row.c));
   return result;
 }
+
+/**
+ * 精选订阅（订阅栏目，不是单期）+ 发布时投递。
+ *
+ * 与「收藏」的区别：收藏是把具体内容收进自己的夹子；订阅是把**栏目的未来更新**通知给我。
+ * 所以每人一行、没有可订阅的"对象选择"——只有订阅/取消两种状态。
+ */
+
+/** 系统账号：订阅通知没有真人触发者（与整合包自动分支同一个固定 id）。 */
+const SYSTEM_ACTOR_ID = '00000000-0000-7000-8000-000000000000';
+
+function ensureSystemActor(db: SqliteDatabase): void {
+  // 与 packs 的 ensureSystemUser 同义：不写进迁移，避免污染「用户总数」等既有口径。
+  db.prepare(
+    `INSERT INTO users (id, nickname, avatar_url, role, account_status, created_at, updated_at)
+     VALUES (?, '系统', NULL, 'user', 'active', 0, 0)
+     ON CONFLICT (id) DO NOTHING`,
+  ).run(SYSTEM_ACTOR_ID);
+}
+
+export interface SubscriptionState {
+  subscribed: boolean;
+  /** 订阅人数（只给管理员看；普通读者只看自己的状态）。 */
+  subscriberCount?: number;
+}
+
+/**
+ * 通知所有订阅者：新一期发布。
+ *
+ * 在发布事务里调用 —— 发布与通知同生共死，不会出现「期发布了但没人收到」。
+ * 收件人里跳过系统账号自己（数据库 CHECK 也兜底 recipient <> actor）。
+ */
+export function notifyFeaturedSubscribers(
+  conn: SqliteDatabase,
+  input: { issueNumber: number; title: string; theme: string },
+): { delivered: number } {
+  const subscribers = conn.prepare('SELECT user_id FROM featured_subscriptions').all() as Array<{
+    user_id: string;
+  }>;
+  if (subscribers.length === 0) return { delivered: 0 };
+
+  ensureSystemActor(conn);
+  const now = nowMs();
+  const detail =
+    '精选更新：第 ' + input.issueNumber + ' 期「' + input.title + '」已发布。主题：' + input.theme;
+  const linkUrl = '/featured/' + input.issueNumber;
+
+  let delivered = 0;
+  for (const row of subscribers) {
+    const result = deliverFeaturedPublishedNotification(conn, {
+      recipientId: row.user_id,
+      actorId: SYSTEM_ACTOR_ID,
+      detail,
+      linkUrl,
+      deduplicationKey: 'featured:' + input.issueNumber + ':' + row.user_id,
+      now,
+    });
+    if (result.created) delivered += 1;
+  }
+  return { delivered };
+}
+
+export function createFeaturedSubscriptionService(deps: { db: SqliteDatabase }) {
+  const db = deps.db;
+
+  return {
+    async getState(ctx: CallerContext, options: { withCount?: boolean } = {}): Promise<SubscriptionState> {
+      if (ctx.userId === null) {
+        if (!options.withCount) return { subscribed: false };
+        const count = Number(
+          (db.prepare('SELECT COUNT(*) AS c FROM featured_subscriptions').get() as { c: number }).c,
+        );
+        return { subscribed: false, subscriberCount: count };
+      }
+      return withRead((conn) => {
+        const row = conn
+          .prepare('SELECT 1 AS ok FROM featured_subscriptions WHERE user_id = ?')
+          .get(ctx.userId) as { ok: number } | undefined;
+        if (!options.withCount) return { subscribed: row !== undefined };
+        const count = Number(
+          (conn.prepare('SELECT COUNT(*) AS c FROM featured_subscriptions').get() as { c: number }).c,
+        );
+        return { subscribed: row !== undefined, subscriberCount: count };
+      }, db);
+    },
+
+    /** 订阅（幂等：重复订阅不报错、也不重置订阅时间）。 */
+    async subscribe(ctx: CallerContext): Promise<{ subscribed: true }> {
+      if (ctx.userId === null) throw err.unauthenticated();
+      if (ctx.accountStatus !== 'active') throw err.disabled();
+      return withTransaction((tx) => {
+        tx.db
+          .prepare('INSERT INTO featured_subscriptions (user_id, created_at) VALUES (?, ?) ON CONFLICT (user_id) DO NOTHING')
+          .run(ctx.userId as string, nowMs());
+        return { subscribed: true as const };
+      }, db);
+    },
+
+    async unsubscribe(ctx: CallerContext): Promise<{ subscribed: false }> {
+      if (ctx.userId === null) throw err.unauthenticated();
+      return withTransaction((tx) => {
+        tx.db.prepare('DELETE FROM featured_subscriptions WHERE user_id = ?').run(ctx.userId as string);
+        return { subscribed: false as const };
+      }, db);
+    },
+
+    notifySubscribers(conn: SqliteDatabase, input: { issueNumber: number; title: string; theme: string }) {
+      return notifyFeaturedSubscribers(conn, input);
+    },
+  };
+}
+
+export type FeaturedSubscriptionService = ReturnType<typeof createFeaturedSubscriptionService>;

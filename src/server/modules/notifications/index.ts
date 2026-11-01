@@ -17,7 +17,11 @@ import type { SqliteDatabase } from '@/server/platform/db';
 import { newId } from '@/server/platform/id';
 import { err } from '@/packages/common/errors';
 
-export type NotificationKind = 'comment_on_content' | 'reply_to_comment' | 'moderation_result';
+export type NotificationKind =
+  | 'comment_on_content'
+  | 'reply_to_comment'
+  | 'moderation_result'
+  | 'featured_published';
 
 export interface NotificationView {
   id: string;
@@ -169,6 +173,53 @@ export function deliverModerationResultNotification(
   return { created: true, reason: null, recipientId: input.recipientId };
 }
 
+/**
+ * 投递一条「精选发布」通知（订阅了栏目的人各收一条）。
+ *
+ * 与处理结果的区别：精选不是某条内容的状态变化，而是一个栏目的新一期；
+ * 没有 content_entity_id，跳转地址由调用方给（存 link_url）。
+ * 去重键由调用方给（featured:{期号}:{收件人}）：同一期重复发布不会刷屏。
+ */
+export function deliverFeaturedPublishedNotification(
+  db: SqliteDatabase,
+  input: {
+    recipientId: string;
+    actorId: string;
+    detail: string;
+    linkUrl: string;
+    deduplicationKey: string;
+    now: number;
+  },
+): DeliverResult {
+  const detail = input.detail.trim();
+  if (detail.length === 0) {
+    throw err.internal('精选通知缺少说明文字，拒绝写入。');
+  }
+  if (input.recipientId === input.actorId) {
+    return { created: false, reason: 'self', recipientId: input.recipientId };
+  }
+
+  const inserted = db
+    .prepare(
+      `INSERT INTO notifications
+         (id, recipient_id, kind, actor_id, comment_id, content_entity_id, deduplication_key, detail, link_url, read_at, created_at)
+       VALUES (?, ?, 'featured_published', ?, NULL, NULL, ?, ?, ?, NULL, ?)
+       ON CONFLICT (deduplication_key) DO NOTHING`,
+    )
+    .run(
+      newId(input.now),
+      input.recipientId,
+      input.actorId,
+      input.deduplicationKey,
+      detail,
+      input.linkUrl,
+      input.now,
+    );
+
+  if (inserted.changes === 0) return { created: false, reason: 'duplicate', recipientId: input.recipientId };
+  return { created: true, reason: null, recipientId: input.recipientId };
+}
+
 export interface NotificationsService {
   list(
     userId: string,
@@ -201,7 +252,7 @@ export function createNotificationsService(deps: { db: SqliteDatabase }): Notifi
         .prepare(
           `SELECT n.id, n.kind, n.comment_id, n.content_entity_id, n.read_at, n.created_at,
                   u.nickname AS actor_nickname, u.avatar_url AS actor_avatar_url,
-                  ce.content_type, rev.body AS body, n.detail AS detail
+                  ce.content_type, rev.body AS body, n.detail AS detail, n.link_url
              FROM notifications n
              JOIN users u ON u.id = n.actor_id
              LEFT JOIN content_entities ce ON ce.id = n.content_entity_id
@@ -224,6 +275,7 @@ export function createNotificationsService(deps: { db: SqliteDatabase }): Notifi
         content_type: string | null;
         body: string | null;
         detail: string | null;
+        link_url: string | null;
       }>;
 
       const hrefFor = (entityId: string | null, contentType: string | null): string | null => {
@@ -245,7 +297,8 @@ export function createNotificationsService(deps: { db: SqliteDatabase }): Notifi
           kind: r.kind,
           commentId: r.comment_id,
           contentEntityId: r.content_entity_id,
-          href: hrefFor(r.content_entity_id, r.content_type),
+          // 栏目类通知（精选）没有 content_entity_id，跳转地址存在 link_url
+          href: r.link_url ?? hrefFor(r.content_entity_id, r.content_type),
           actorNickname: r.actor_nickname,
           actorAvatarUrl: r.actor_avatar_url,
           // 处理结果通知没有评论正文，正文位置放它自己的说明

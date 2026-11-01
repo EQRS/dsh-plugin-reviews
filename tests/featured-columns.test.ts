@@ -4,7 +4,13 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestDb, insertPlugin, insertRepository, insertUser, type TestDb } from './support/db';
-import { createFeaturedService, featuredCountsForPlugins } from '../src/server/modules/featured';
+import {
+  createFeaturedService,
+  createFeaturedSubscriptionService,
+  featuredCountsForPlugins,
+  notifyFeaturedSubscribers,
+} from '../src/server/modules/featured';
+import { createNotificationsService } from '../src/server/modules/notifications';
 import type { CallerContext } from '@/server/platform/context';
 import { ErrorCodes, isDomainError } from '../src/packages/common/errors';
 
@@ -332,6 +338,81 @@ describe('精选专栏：发布与可见性', () => {
     const detail = await service.getPublished(caller(db, admin), created.issueNumber);
     expect(detail.title).toBe('新标题');
     expect(detail.issueNumber).toBe(created.issueNumber);
+  });
+});
+
+describe('精选订阅（栏目）', () => {
+  it('订阅与取消：幂等，状态可读', async () => {
+    const { db, admin, service } = setup();
+    void service;
+    const subscriber = insertUser(db);
+    const subscriptions = createFeaturedSubscriptionService({ db });
+
+    expect((await subscriptions.getState(caller(db, subscriber))).subscribed).toBe(false);
+    await subscriptions.subscribe(caller(db, subscriber));
+    await subscriptions.subscribe(caller(db, subscriber)); // 幂等
+    expect((await subscriptions.getState(caller(db, subscriber))).subscribed).toBe(true);
+
+    const state = await subscriptions.getState(caller(db, admin), { withCount: true });
+    expect(state.subscriberCount).toBe(1);
+
+    await subscriptions.unsubscribe(caller(db, subscriber));
+    expect((await subscriptions.getState(caller(db, subscriber))).subscribed).toBe(false);
+  });
+
+  it('发布一期：订阅者收到 featured_published 通知，带站内跳转；未订阅者收不到', async () => {
+    const { db, admin, service } = setup();
+    const pluginId = insertPlugin(db, insertRepository(db), '.');
+    const subscriber = insertUser(db);
+    const outsider = insertUser(db);
+    await createFeaturedSubscriptionService({ db }).subscribe(caller(db, subscriber));
+
+    const created = await service.createDraft(caller(db, admin), {
+      title: '第一期精选',
+      theme: '命令行效率',
+      requestKey: 'k',
+    });
+    await service.saveDraft(caller(db, admin), created.issueNumber, {
+      title: '第一期精选',
+      theme: '命令行效率',
+      prefaceMd: '前言',
+      items: [item(pluginId)],
+      expectedVersion: 0,
+    });
+    const published = await service.publish(caller(db, admin), created.issueNumber, { expectedVersion: 1 });
+    expect(published.notified).toBe(1);
+
+    const inbox = await createNotificationsService({ db }).list(subscriber, { limit: 20 });
+    const notice = inbox.items.find((row) => row.kind === 'featured_published');
+    expect(notice).toBeTruthy();
+    expect(notice?.href).toBe('/featured/1');
+    expect(notice?.excerpt).toContain('第 1 期');
+
+    const outsiderInbox = await createNotificationsService({ db }).list(outsider, { limit: 20 });
+    expect(outsiderInbox.items).toHaveLength(0);
+  });
+
+  it('同一期重复投递不会刷屏（去重键生效）', async () => {
+    const { db, admin, service } = setup();
+    const pluginId = insertPlugin(db, insertRepository(db), '.');
+    const subscriber = insertUser(db);
+    await createFeaturedSubscriptionService({ db }).subscribe(caller(db, subscriber));
+    const created = await service.createDraft(caller(db, admin), { title: 'T', theme: 'M', requestKey: 'k' });
+    await service.saveDraft(caller(db, admin), created.issueNumber, {
+      title: 'T',
+      theme: 'M',
+      prefaceMd: '前言',
+      items: [item(pluginId)],
+      expectedVersion: 0,
+    });
+    await service.publish(caller(db, admin), created.issueNumber, { expectedVersion: 1 });
+
+    // 手动再投一次：交付 0（同一去重键）
+    const again = notifyFeaturedSubscribers(db, { issueNumber: 1, title: 'T', theme: 'M' });
+    expect(again.delivered).toBe(0);
+
+    const inbox = await createNotificationsService({ db }).list(subscriber, { limit: 20 });
+    expect(inbox.items.filter((row) => row.kind === 'featured_published')).toHaveLength(1);
   });
 });
 

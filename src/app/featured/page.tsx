@@ -10,6 +10,9 @@ import { createFeaturedService } from '@/server/modules/featured';
 import { isPageOutOfRange } from '@/packages/common/pagination';
 import { PageJump } from '@/components/page-jump';
 import { formatDateTimeOr } from '@/packages/common/time';
+import { createFeaturedSubscriptionService } from '@/server/modules/featured';
+import { FeaturedSubscribeButton } from '@/components/featured-subscribe-button';
+import { currentContext } from '@/app/api/_lib/context';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +27,10 @@ export default async function FeaturedListPage({
   const rawPage = Number.parseInt(sp.page ?? '1', 10);
   const page = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1;
 
-  const service = createFeaturedService({ db: getDb() });
+  const db = getDb();
+  const ctx = await currentContext();
+  const service = createFeaturedService({ db });
+  const subscription = await createFeaturedSubscriptionService({ db }).getState(ctx, { withCount: true });
   const result = await service.listPublished({ page, pageSize: PAGE_SIZE });
   const outOfRange = isPageOutOfRange(page, result.total_pages);
 
@@ -34,6 +40,14 @@ export default async function FeaturedListPage({
         <h1 style={{ margin: 0 }}>精选</h1>
         <span className="muted">编辑按主题挑选的插件专栏，每期一组</span>
       </div>
+
+      <p style={{ marginTop: 8 }}>
+        <FeaturedSubscribeButton
+          initialSubscribed={subscription.subscribed}
+          authenticated={ctx.userId !== null}
+          subscriberCount={subscription.subscriberCount}
+        />
+      </p>
 
       {outOfRange ? (
         <p className="empty">
