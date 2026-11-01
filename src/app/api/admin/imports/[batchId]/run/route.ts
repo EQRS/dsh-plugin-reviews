@@ -9,6 +9,7 @@
 
 import { getDb } from '@/server/platform/db';
 import { createImportService } from '@/server/modules/imports';
+import { assertCanAdmin } from '@/server/platform/context';
 import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../../../../_lib/context';
 
 export const runtime = 'nodejs';
@@ -21,6 +22,8 @@ export async function POST(
   try {
     const { batchId } = await params;
     const ctx = await currentContext();
+    // 先认人再读 body：匿名 + 非法 body 应当是 401/403，不是 400。
+    assertCanAdmin(ctx);
     const body = (await readJson(request)) as { itemId?: unknown };
 
     const service = createImportService({ db: getDb() });

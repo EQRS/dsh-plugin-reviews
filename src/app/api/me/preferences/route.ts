@@ -11,6 +11,7 @@
 import { getDb } from '@/server/platform/db';
 import { err } from '@/packages/common/errors';
 import { getUserPreferences, writePreferences } from '@/server/modules/preferences';
+import { assertCanWrite } from '@/server/platform/context';
 import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../../_lib/context';
 
 export const runtime = 'nodejs';
@@ -29,6 +30,8 @@ export async function PATCH(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
     const ctx = await currentContext();
+    // 先认人再读 body：匿名 + 非法 body 应当是 401，不是 400。
+    assertCanWrite(ctx);
     const body = (await readJson(request)) as { editorAutosaveSeconds?: unknown };
 
     if (body.editorAutosaveSeconds === undefined) {

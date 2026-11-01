@@ -25,6 +25,13 @@ vi.mock('next/headers', () => ({
 
 import { POST as batchFavorites } from '../src/app/api/me/favorites/batch/route';
 import { POST as resolveAppeal } from '../src/app/api/admin/pack-appeals/[appealId]/route';
+import { POST as importPlugins } from '../src/app/api/admin/imports/route';
+import { POST as runImportBatch } from '../src/app/api/admin/imports/[batchId]/run/route';
+import { POST as createAuthorBatch } from '../src/app/api/imports/author/route';
+import { POST as uploadChunk } from '../src/app/api/imports/author/[batchId]/chunk/route';
+import { POST as finishInput } from '../src/app/api/imports/author/[batchId]/finish/route';
+import { POST as bindDraftPlugin } from '../src/app/api/drafts/plugin/route';
+import { PATCH as updatePreferences } from '../src/app/api/me/preferences/route';
 import { closeDb, type SqliteDatabase } from '../src/server/platform/db';
 import { createIdentityService } from '../src/server/modules/identity';
 import { createTestDb, insertUser, type TestDb } from './support/db';
@@ -64,6 +71,10 @@ function postJson(body: unknown): Request {
 
 function appealParams(): { params: Promise<{ appealId: string }> } {
   return { params: Promise.resolve({ appealId: 'x' }) };
+}
+
+function batchParams(): { params: Promise<{ batchId: string }> } {
+  return { params: Promise.resolve({ batchId: 'b1' }) };
 }
 
 interface ErrorBody {
@@ -125,5 +136,78 @@ describe('管理员处理申诉：先鉴权后读 body', () => {
     const body = (await res.json()) as ErrorBody;
     expect(res.status).toBe(400);
     expect(body.error.code).toBe('input_invalid');
+  });
+});
+
+describe('#40 新增接口：先鉴权后读 body', () => {
+  it('管理员插件导入：匿名 + 非法 body → 401（不是 400）', async () => {
+    // assertCanAdmin 先调 assertCanWrite：匿名是「没登录」（401），
+    // 只有已登录的非管理员才落到「没权限」（403）。
+    const res = await importPlugins(postJson({ manifest: 1 }));
+    const body = (await res.json()) as ErrorBody;
+    expect(res.status).toBe(401);
+    expect(body.error.code).toBe('unauthenticated');
+  });
+
+  it('管理员插件导入：普通用户 + 非法 body → 403；管理员 + 非法 body → 400', async () => {
+    await signIn(insertUser(db, { role: 'user' }));
+    expect((await importPlugins(postJson({ manifest: 1 }))).status).toBe(403);
+
+    await signIn(insertUser(db, { role: 'admin' }));
+    const res = await importPlugins(postJson({ manifest: 1 }));
+    const body = (await res.json()) as ErrorBody;
+    expect(res.status).toBe(400);
+    expect(body.error.code).toBe('input_invalid');
+  });
+
+  it('作者文件夹导入批次：匿名 + 非法 body → 401（不是 400）', async () => {
+    const res = await createAuthorBatch(postJson({ inputs: 'x' }));
+    const body = (await res.json()) as ErrorBody;
+    expect(res.status).toBe(401);
+    expect(body.error.code).toBe('unauthenticated');
+  });
+
+  it('作者文件夹导入批次：已登录 + 非法 body → 仍然 400', async () => {
+    await signIn(insertUser(db));
+    const res = await createAuthorBatch(postJson({ inputs: 'x' }));
+    const body = (await res.json()) as ErrorBody;
+    expect(res.status).toBe(400);
+    expect(body.error.code).toBe('input_invalid');
+  });
+
+  it('草稿改绑插件：匿名 + 非法 body → 401；已登录 → 400', async () => {
+    expect((await bindDraftPlugin(postJson({}))).status).toBe(401);
+    await signIn(insertUser(db));
+    const res = await bindDraftPlugin(postJson({}));
+    const body = (await res.json()) as ErrorBody;
+    expect(res.status).toBe(400);
+    expect(body.error.code).toBe('input_invalid');
+  });
+
+  it('个人偏好：匿名 + 非法 body → 401；已登录 → 400', async () => {
+    expect((await updatePreferences(postJson({ editorAutosaveSeconds: 'x' }))).status).toBe(401);
+    await signIn(insertUser(db));
+    const res = await updatePreferences(postJson({ editorAutosaveSeconds: 'x' }));
+    const body = (await res.json()) as ErrorBody;
+    expect(res.status).toBe(400);
+    expect(body.error.code).toBe('input_invalid');
+  });
+
+  it('上传分片 / 结束上传：匿名 + 非法 body → 401', async () => {
+    expect((await uploadChunk(postJson({}), batchParams())).status).toBe(401);
+    expect((await finishInput(postJson({}), batchParams())).status).toBe(401);
+  });
+
+  it('管理员批量导入执行：匿名 + 非法 body → 401；普通用户 → 403', async () => {
+    const anon = await runImportBatch(postJson({}), batchParams());
+    const anonBody = (await anon.json()) as ErrorBody;
+    expect(anon.status).toBe(401);
+    expect(anonBody.error.code).toBe('unauthenticated');
+
+    await signIn(insertUser(db, { role: 'user' }));
+    const res = await runImportBatch(postJson({}), batchParams());
+    const body = (await res.json()) as ErrorBody;
+    expect(res.status).toBe(403);
+    expect(body.error.code).toBe('forbidden');
   });
 });
