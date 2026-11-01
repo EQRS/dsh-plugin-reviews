@@ -249,6 +249,19 @@ export default async function AdminPage({
         执行——<strong>worker 没在跑，内容就不会公开</strong>。
       </p>
 
+      {/* 精选专栏：站方推荐内容的编辑入口。 */}
+      <section className="panel" style={{ marginTop: 24 }}>
+        <div className="section-head">
+          <h2>精选专栏</h2>
+        </div>
+        <p className="muted" style={{ marginTop: 0 }}>
+          以「期」为单位的编辑专栏：主题 + 前言 + 一组插件（简述 / 推荐理由 / 百分制评分 / 测试集链接）。
+        </p>
+        <p style={{ marginBottom: 0 }}>
+          <Link href="/admin/featured">前往精选专栏管理 →</Link>
+        </p>
+      </section>
+
       {/* 插件清单导入：批量收录入口（与「发现」互补：那个是搜出来的，这个是给定清单）。 */}
       <section className="panel" style={{ marginTop: 24 }}>
         <div className="section-head">

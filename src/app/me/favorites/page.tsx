@@ -9,7 +9,7 @@
 import Link from 'next/link';
 import { SearchGoButton } from '@/components/search-go-button';
 import { redirect } from 'next/navigation';
-import { isAuthenticated } from '@/server/platform/context';
+import { isAdmin, isAuthenticated } from '@/server/platform/context';
 import { currentContext } from '../../api/_lib/context';
 import { getDb } from '@/server/platform/db';
 import { createInteractionsService } from '@/server/modules/interactions';
@@ -32,6 +32,8 @@ export default async function FavoritesPage({
   const ctx = await currentContext();
   if (!isAuthenticated(ctx)) redirect('/onboarding?returnTo=/me/favorites');
 
+  const isAdminView = isAdmin(ctx);
+
   const sp = await searchParams;
   const q = (firstValue(sp.q) ?? '').trim().slice(0, 100);
   const service = createInteractionsService({ db: getDb() });
@@ -44,6 +46,17 @@ export default async function FavoritesPage({
       <div className="me-layout">
         <MeNav current="favorites" />
         <div>
+          {/*
+            精选专栏入口：仅管理员可见。
+            收藏夹在这里的角色是「选品来源」——点进去先建一期草稿，再在编辑页从收藏夹挑插件。
+          */}
+          {isAdminView ? (
+            <p style={{ marginTop: 0 }}>
+              <Link href="/admin/featured?new=1" className="button primary">
+                创建精选专栏
+              </Link>
+            </p>
+          ) : null}
           <form action="/me/favorites" method="get" className="search" style={{ marginBottom: 12 }}>
             <input
               type="search"

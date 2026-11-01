@@ -101,6 +101,7 @@ export function SessionNav() {
   const inPacks = pathname === '/packs' || pathname.startsWith('/packs/');
   const inReviews = pathname === '/reviews' || pathname.startsWith('/reviews/');
   const inSpec = pathname === '/spec' || pathname.startsWith('/spec/');
+  const inFeatured = pathname === '/featured' || pathname.startsWith('/featured/');
 
   return (
     <div>
@@ -118,6 +119,9 @@ export function SessionNav() {
           </Link>
           <Link href="/packs" className={inPacks ? 'active' : ''} aria-current={inPacks ? 'page' : undefined}>
             整合包
+          </Link>
+          <Link href="/featured" className={inFeatured ? 'active' : ''} aria-current={inFeatured ? 'page' : undefined}>
+            精选
           </Link>
           <Link href="/spec" className={inSpec ? 'active' : ''} aria-current={inSpec ? 'page' : undefined}>
             规范
