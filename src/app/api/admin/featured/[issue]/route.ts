@@ -10,6 +10,7 @@ import { getDb } from '@/server/platform/db';
 import { createFeaturedService } from '@/server/modules/featured';
 import type { FeaturedItemInput } from '@/server/modules/featured';
 import { err } from '@/packages/common/errors';
+import { assertCanAdmin } from '@/server/platform/context';
 import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../../../_lib/context';
 
 export const runtime = 'nodejs';
@@ -31,6 +32,8 @@ export async function GET(
   try {
     const issueNumber = await readIssue(params);
     const ctx = await currentContext();
+    // 鉴权先于读 body：匿名/越权请求不该先拿到「参数错误」(400)
+    assertCanAdmin(ctx);
     const service = createFeaturedService({ db: getDb() });
     return okJson(await service.getForEdit(ctx, issueNumber), requestId);
   } catch (e) {
@@ -46,6 +49,8 @@ export async function PATCH(
   try {
     const issueNumber = await readIssue(params);
     const ctx = await currentContext();
+    // 鉴权先于读 body：匿名/越权请求不该先拿到「参数错误」(400)
+    assertCanAdmin(ctx);
     const body = (await readJson(request)) as {
       title?: unknown;
       theme?: unknown;
@@ -84,6 +89,8 @@ export async function DELETE(
   try {
     const issueNumber = await readIssue(params);
     const ctx = await currentContext();
+    // 鉴权先于读 body：匿名/越权请求不该先拿到「参数错误」(400)
+    assertCanAdmin(ctx);
     const service = createFeaturedService({ db: getDb() });
     return okJson(await service.deleteDraft(ctx, issueNumber), requestId);
   } catch (e) {

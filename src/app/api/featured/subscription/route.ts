@@ -8,6 +8,7 @@
 
 import { getDb } from '@/server/platform/db';
 import { createFeaturedSubscriptionService } from '@/server/modules/featured';
+import { assertCanWrite } from '@/server/platform/context';
 import { currentContext, okJson, errorResponse, requestMeta } from '../../_lib/context';
 
 export const runtime = 'nodejs';
@@ -27,6 +28,7 @@ export async function POST(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
     const ctx = await currentContext();
+    assertCanWrite(ctx);
     const service = createFeaturedSubscriptionService({ db: getDb() });
     return okJson(await service.subscribe(ctx), requestId);
   } catch (e) {
@@ -38,6 +40,7 @@ export async function DELETE(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
     const ctx = await currentContext();
+    assertCanWrite(ctx);
     const service = createFeaturedSubscriptionService({ db: getDb() });
     return okJson(await service.unsubscribe(ctx), requestId);
   } catch (e) {

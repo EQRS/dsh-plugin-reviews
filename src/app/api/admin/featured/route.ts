@@ -8,6 +8,7 @@
 import { getDb } from '@/server/platform/db';
 import { createFeaturedService } from '@/server/modules/featured';
 import { err } from '@/packages/common/errors';
+import { assertCanAdmin } from '@/server/platform/context';
 import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../../_lib/context';
 
 export const runtime = 'nodejs';
@@ -16,6 +17,8 @@ export async function GET(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
     const ctx = await currentContext();
+    // 鉴权先于读 body：匿名/越权请求不该先拿到「参数错误」(400)
+    assertCanAdmin(ctx);
     const service = createFeaturedService({ db: getDb() });
     return okJson({ items: await service.listForAdmin(ctx) }, requestId);
   } catch (e) {
@@ -27,6 +30,8 @@ export async function POST(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
     const ctx = await currentContext();
+    // 鉴权先于读 body：匿名/越权请求不该先拿到「参数错误」(400)
+    assertCanAdmin(ctx);
     const body = (await readJson(request)) as {
       title?: unknown;
       theme?: unknown;

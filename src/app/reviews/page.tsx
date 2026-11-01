@@ -112,11 +112,12 @@ export default async function ReviewsPage({
     const packReviews = await createPackReviewsService({ db }).listPackReviews(ctx, q);
     return (
       <div>
-        <h1>评测</h1>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-          <Link href="/reviews" className="button">插件测评</Link>
-          <Link href="/reviews?tab=packs" className="button primary">整合包测评</Link>
-        </div>
+        <h1 className="reviews-switch-title">
+          <Link href="/reviews" className="reviews-switch-link">
+            整合包评测
+            <span className="reviews-switch-arrow" aria-hidden="true">←</span>
+          </Link>
+        </h1>
         <form action="/reviews" method="get" className="search" style={{ marginBottom: 12 }}>
           <input type="hidden" name="tab" value="packs" />
           <input
@@ -143,7 +144,7 @@ export default async function ReviewsPage({
                 <li key={r.reviewId} className="item">
                   <div className="item-body">
                     <h3>
-                      <Link href={`/reviews/${r.reviewId}`}>{r.title}</Link>
+                      <Link href={`/reviews/${r.reviewId}`} prefetch={false}>{r.title}</Link>
                     </h3>
                     <div className="list-meta">
                       <Link href={`/packs/${r.packId}${r.releaseNumber ? `?v=${r.releaseNumber}` : ''}`}>
@@ -219,12 +220,12 @@ export default async function ReviewsPage({
 
   return (
     <div>
-      <h1>评测</h1>
-
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-        <Link href="/reviews" className="button primary">插件测评</Link>
-        <Link href="/reviews?tab=packs" className="button">整合包测评</Link>
-      </div>
+      <h1 className="reviews-switch-title">
+        <Link href="/reviews?tab=packs" className="reviews-switch-link">
+          插件评测
+          <span className="reviews-switch-arrow" aria-hidden="true">→</span>
+        </Link>
+      </h1>
 
       <div className="catalog-layout">
         <aside className="panel" aria-label="筛选">
@@ -233,15 +234,16 @@ export default async function ReviewsPage({
 
           <p className="side-title">来源</p>
           <nav className="side-nav">
-            <Link href={listHref(conditions, { source: 'all' })} className={conditions.source === 'all' ? 'active' : ''}>
+            <Link href={listHref(conditions, { source: 'all' })} className={conditions.source === 'all' ? 'active' : ''} prefetch={false}>
               <span>全部</span>
             </Link>
-            <Link href={listHref(conditions, { source: 'site' })} className={conditions.source === 'site' ? 'active' : ''}>
+            <Link href={listHref(conditions, { source: 'site' })} className={conditions.source === 'site' ? 'active' : ''} prefetch={false}>
               <span>站点评测</span>
             </Link>
             <Link
               href={listHref(conditions, { source: 'community' })}
               className={conditions.source === 'community' ? 'active' : ''}
+              prefetch={false}
             >
               <span>社区评测</span>
             </Link>
@@ -254,7 +256,7 @@ export default async function ReviewsPage({
                 用途分类
               </p>
               <nav className="side-nav">
-                <Link href={listHref(conditions, { cat: '' })} className={conditions.cat === '' ? 'active' : ''}>
+                <Link href={listHref(conditions, { cat: '' })} className={conditions.cat === '' ? 'active' : ''} prefetch={false}>
                   <span>全部</span>
                 </Link>
                 {categories.map((c) => (
@@ -262,6 +264,7 @@ export default async function ReviewsPage({
                     key={c.slug}
                     href={listHref(conditions, { cat: c.slug })}
                     className={conditions.cat === c.slug ? 'active' : ''}
+                    prefetch={false}
                     title={c.slug === UNCATEGORIZED_CATEGORY ? '没有命中任何分类的插件' : `覆盖 ${c.repositoryCount} 个仓库`}
                   >
                     <span className="truncate">{c.label}</span>
@@ -322,18 +325,20 @@ export default async function ReviewsPage({
                             </span>
                             <div className="item-main">
                               <h3 className="item-title">
-                                <Link href={`/reviews/${r.review_id}`}>{r.title}</Link>
+                                <Link href={`/reviews/${r.review_id}`} prefetch={false}>{r.title}</Link>
                               </h3>
                               {/*
                                 封面缩略图：只有作者设置了封面才显示。没有封面就什么都不放——
                                 列表里堆一串通用占位图，比没有图更吵。
                               */}
                               {r.cover_url ? (
-                                <Link href={`/reviews/${r.review_id}`} style={{ display: 'block', margin: '6px 0' }}>
+                                <Link href={`/reviews/${r.review_id}`} style={{ display: 'block', margin: '6px 0' }} prefetch={false}>
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img
                                     src={r.cover_url}
                                     alt={`${r.title} 的封面`}
+                                    loading="lazy"
+                                    decoding="async"
                                     style={{
                                       width: '100%',
                                       maxWidth: 320,
@@ -349,7 +354,7 @@ export default async function ReviewsPage({
                                 {label === null ? (
                                   <span>插件信息不可用</span>
                                 ) : (
-                                  <Link href={`/plugins/${r.plugin_id}`} className="truncate">
+                                  <Link href={`/plugins/${r.plugin_id}`} className="truncate" prefetch={false}>
                                     {label}
                                   </Link>
                                 )}

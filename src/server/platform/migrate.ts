@@ -158,6 +158,36 @@ export const REQUIRED_TABLES = [
   'plugin_favorites',
   'reports',
   'report_handling_records',
+  // 0014：评测全文检索（FTS5 虚表；sqlite_master 里同样是 table 类型）
+  'review_search',
+  // 0015：资料纠错（请求 / 处理记录 / 生效的字段覆盖）
+  'plugin_correction_requests',
+  'plugin_correction_handling_records',
+  'plugin_field_overrides',
+  // 0020：整合包（身份 / 版本快照 / 条目 / 附件 / 收藏）
+  'plugin_packs',
+  'plugin_pack_releases',
+  'plugin_pack_release_items',
+  'plugin_pack_release_files',
+  'plugin_pack_favorites',
+  // 0022：整合包测评（挂在版本上）
+  'pack_reviews',
+  'pack_review_revisions',
+  // 0024：整合包版本的「有帮助」投票
+  'pack_release_helpful_votes',
+  // 0026：安装资料核验记录（架构 §36.2）
+  'plugin_install_checks',
+  // 0028：整合包版本的复核申诉
+  'plugin_pack_appeals',
+  // 0030：每用户偏好（缺键即默认值，改默认值不用写迁移）
+  'user_preferences',
+  // 0031：批次任务（管理员插件清单导入 / 作者文件夹导入共用）
+  'batch_jobs',
+  'batch_job_items',
+  // 0032：作者侧文件夹导入的输入与上传事实（分片续传按「输入 + offset」记账）
+  'batch_input_files',
+  'batch_input_upload_attempts',
+  'batch_item_input_links',
 ] as const;
 
 export function selfCheck(db: SqliteDatabase): SelfCheckResult {

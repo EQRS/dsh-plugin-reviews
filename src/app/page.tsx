@@ -14,7 +14,6 @@ import { HomeFeed } from '@/components/home-feed';
 import { getDb } from '@/server/platform/db';
 import { numberSetting } from '@/server/modules/settings';
 import { createFeaturedService } from '@/server/modules/featured';
-import { resolveVisibilityInTx } from '@/server/modules/content';
 import { createCatalogService } from '@/server/modules/catalog';
 import { formatDateTimeOr } from '@/packages/common/time';
 
@@ -35,7 +34,9 @@ interface Row {
 
 function latestPublicReviews(limit: number): Row[] {
   const db = getDb();
-  const rows = db
+  // 公开资格直接下推到 SQL（published_revision_id 非空 + 未撤回 + 未隐藏），
+  // 只取前 10 条；不要先读全表再逐行 resolveVisibility（35 条时是 70+ 次查询）。
+  return db
     .prepare(
       `SELECT r.id AS review_id, rev.title, r.plugin_id, ce.public_updated_at, r.source_kind,
               p.display_name AS plugin_display_name, p.plugin_path, repo.full_name AS repo_full_name
@@ -44,12 +45,14 @@ function latestPublicReviews(limit: number): Row[] {
          JOIN review_revisions rev ON rev.id = r.published_revision_id
          LEFT JOIN plugins p ON p.id = r.plugin_id
          LEFT JOIN repositories repo ON repo.id = p.repository_id
-        ORDER BY ce.public_updated_at DESC, r.id ASC`,
+        WHERE r.published_revision_id IS NOT NULL
+          AND rev.review_id = r.id
+          AND ce.withdrawn_at IS NULL
+          AND ce.hidden_at IS NULL
+        ORDER BY ce.public_updated_at DESC, r.id ASC
+        LIMIT ?`,
     )
-    .all() as Row[];
-  // 公开资格逐行核验，不另存公开状态字段。
-  const visible = rows.filter((row) => resolveVisibilityInTx(db, row.review_id).publiclyVisible);
-  return visible.slice(0, limit);
+    .all(limit) as Row[];
 }
 
 /** 评测对应的插件展示名：清单名优先（缺则仓库全名），子目录形态带上子路径；插件被删也不会崩（LEFT JOIN）。 */
@@ -76,8 +79,9 @@ export default async function HomePage() {
   });
   // 页面 chip 行用**分类**（中文、按不同仓库计数），不再直接暴露原始 topics
   const categories = await catalog.listCategories();
-  // 首页露出最近一期精选（没有就不渲染整块）
-  const featuredLatest = (await createFeaturedService({ db }).listPublished({ page: 1, pageSize: 1 })).items[0] ?? null;
+  // 首页露出最近一期精选（没有已发布期就不渲染整块）
+  const featuredLatest =
+    (await createFeaturedService({ db }).listPublished({ page: 1, pageSize: 1 })).items[0] ?? null;
 
   return (
     <div className="home-page">
@@ -100,11 +104,11 @@ export default async function HomePage() {
         {categories.length > 0 ? (
           <div className="filters" role="navigation" aria-label="按用途分类浏览" style={{ marginBottom: 0 }}>
             {/* 「用途分类」标签按主人要求去掉：这一排本来就是分类 chip，标题是多余的 */}
-            <Link href={categoryHref(null)} className="active">
+            <Link href={categoryHref(null)} className="active" prefetch={false}>
               全部
             </Link>
             {categories.slice(0, 10).map((c) => (
-              <Link key={c.slug} href={categoryHref(c.slug)}>
+              <Link key={c.slug} href={categoryHref(c.slug)} prefetch={false}>
                 {c.label} <span className="count">{c.repositoryCount}</span>
               </Link>
             ))}
@@ -112,6 +116,29 @@ export default async function HomePage() {
           </div>
         ) : null}
       </section>
+
+      {/* 最近一期精选：站方专栏入口（没发布过就不渲染）。
+          放在双栏之外：HomeFeed 是两列网格，塞第三个子元素会破坏版式。 */}
+      {featuredLatest ? (
+        <section className="panel" style={{ marginTop: 24 }} aria-label="精选">
+          <div className="section-head">
+            <h2>精选</h2>
+            <Link href="/featured" className="muted" style={{ fontSize: 13 }}>
+              查看全部 →
+            </Link>
+          </div>
+          <Link href={'/featured/' + featuredLatest.issueNumber} prefetch={false}>
+            <div className="list-meta" style={{ marginBottom: 4 }}>
+              <span className="tag site">第 {featuredLatest.issueNumber} 期</span>
+              <span>{featuredLatest.itemCount} 个插件</span>
+            </div>
+            <strong>{featuredLatest.title}</strong>
+            <p className="muted" style={{ margin: '4px 0 0' }}>
+              {featuredLatest.theme}
+            </p>
+          </Link>
+        </section>
+      ) : null}
 
       {/* 双栏内容：整页一直向下滚，接近底部时自动加载下一批（桌面/手机一致）。 */}
       <HomeFeed>
@@ -137,13 +164,13 @@ export default async function HomePage() {
                       </span>
                       <div className="item-main">
                         <h3 className="item-title">
-                          <Link href={`/reviews/${r.review_id}`}>{r.title}</Link>
+                          <Link href={`/reviews/${r.review_id}`} prefetch={false}>{r.title}</Link>
                         </h3>
                         <div className="list-meta">
                           {pluginLabel(r) === null ? (
                             <span>插件信息不可用</span>
                           ) : (
-                            <Link href={`/plugins/${r.plugin_id}`} className="truncate">
+                            <Link href={`/plugins/${r.plugin_id}`} className="truncate" prefetch={false}>
                               {pluginLabel(r)}
                             </Link>
                           )}
@@ -163,29 +190,7 @@ export default async function HomePage() {
           </div>
         </section>
 
-        {/* 最近一期精选：站方专栏的入口（没有发布过就不渲染） */}
-      {featuredLatest ? (
-        <section className="panel" style={{ marginTop: 24 }} aria-label="精选">
-          <div className="section-head">
-            <h2>精选</h2>
-            <Link href="/featured" className="muted" style={{ fontSize: 13 }}>
-              查看全部 →
-            </Link>
-          </div>
-          <Link href={'/featured/' + featuredLatest.issueNumber} style={{ display: 'block' }}>
-            <div className="list-meta" style={{ marginBottom: 4 }}>
-              <span className="tag site">第 {featuredLatest.issueNumber} 期</span>
-              <span>{featuredLatest.itemCount} 个插件</span>
-            </div>
-            <strong>{featuredLatest.title}</strong>
-            <p className="muted" style={{ margin: '4px 0 0' }}>
-              {featuredLatest.theme}
-            </p>
-          </Link>
-        </section>
-      ) : null}
-
-      {/* 辅栏：近期更新插件 */}
+        {/* 辅栏：近期更新插件 */}
         <aside className="panel" aria-labelledby="home-plugins">
           <div className="section-head">
             {/* 栏目头只留标题（「全部插件」按主人要求去掉） */}
@@ -202,7 +207,7 @@ export default async function HomePage() {
                   const initial = (p.displayName ?? p.repositoryFullName).slice(0, 1).toUpperCase();
                   return (
                     <li key={p.pluginId} className="item home-plugin-item">
-                      <Link href={`/plugins/${p.pluginId}`} className="home-plugin-card">
+                      <Link href={`/plugins/${p.pluginId}`} className="home-plugin-card" prefetch={false}>
                         <span className="icon">
                           {p.ownerAvatarUrl ? (
                             // eslint-disable-next-line @next/next/no-img-element

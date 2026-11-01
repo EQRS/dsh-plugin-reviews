@@ -3,6 +3,7 @@
 import { getDb } from '@/server/platform/db';
 import { createFeaturedService } from '@/server/modules/featured';
 import { err } from '@/packages/common/errors';
+import { assertCanAdmin } from '@/server/platform/context';
 import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../../../../_lib/context';
 
 export const runtime = 'nodejs';
@@ -19,6 +20,8 @@ export async function POST(
       throw err.input('期号不合法。', [{ path: 'issue', message: '正整数' }]);
     }
     const ctx = await currentContext();
+    // 鉴权先于读 body：匿名/越权请求不该先拿到「参数错误」(400)
+    assertCanAdmin(ctx);
     const body = (await readJson(request)) as { expectedVersion?: unknown };
     if (typeof body.expectedVersion !== 'number') {
       throw err.input('缺少预期版本。', [{ path: 'expectedVersion', message: '必填' }]);

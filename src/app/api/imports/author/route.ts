@@ -7,6 +7,7 @@
 import { getDb } from '@/server/platform/db';
 import { createAuthorImportService } from '@/server/modules/imports/author';
 import { err } from '@/packages/common/errors';
+import { assertCanWrite } from '@/server/platform/context';
 import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../../_lib/context';
 
 export const runtime = 'nodejs';
@@ -15,6 +16,8 @@ export async function POST(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
     const ctx = await currentContext();
+    // 先认人再读 body：匿名 + 非法 body 应当是 401，不是 400。
+    assertCanWrite(ctx);
     const body = (await readJson(request)) as { inputs?: unknown; requestKey?: unknown };
     if (!Array.isArray(body.inputs)) {
       throw err.input('缺少文件清单。', [{ path: 'inputs', message: '必填' }]);

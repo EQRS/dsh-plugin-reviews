@@ -10,6 +10,7 @@
 import { getDb } from '@/server/platform/db';
 import { reviewsService } from '@/server/modules/reviews';
 import { err } from '@/packages/common/errors';
+import { assertCanWrite } from '@/server/platform/context';
 import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../../_lib/context';
 
 export const runtime = 'nodejs';
@@ -18,6 +19,8 @@ export async function POST(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
     const ctx = await currentContext();
+    // 先认人再读 body：匿名 + 非法 body 应当是 401，不是 400。
+    assertCanWrite(ctx);
     const body = (await readJson(request)) as { draftId?: unknown; pluginId?: unknown };
     if (typeof body.draftId !== 'string' || body.draftId.trim() === '') {
       throw err.input('缺少草稿标识。', [{ path: 'draftId', message: '必填' }]);
