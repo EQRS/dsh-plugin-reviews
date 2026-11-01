@@ -179,6 +179,15 @@ export const REQUIRED_TABLES = [
   'plugin_install_checks',
   // 0028：整合包版本的复核申诉
   'plugin_pack_appeals',
+  // 0030：每用户偏好（缺键即默认值，改默认值不用写迁移）
+  'user_preferences',
+  // 0031：批次任务（管理员插件清单导入 / 作者文件夹导入共用）
+  'batch_jobs',
+  'batch_job_items',
+  // 0032：作者侧文件夹导入的输入与上传事实（分片续传按「输入 + offset」记账）
+  'batch_input_files',
+  'batch_input_upload_attempts',
+  'batch_item_input_links',
 ] as const;
 
 export function selfCheck(db: SqliteDatabase): SelfCheckResult {
