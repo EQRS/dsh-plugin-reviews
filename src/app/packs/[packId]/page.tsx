@@ -360,6 +360,13 @@ export default async function PackDetailPage({
           {selected ? <CommentSection contentId={selected.releaseId} /> : null}
         </>
       )}
+
+      {/* 这一页的反馈入口：只带路径，不带查询串——版本号这类选择已经写进正文更清楚 */}
+      <p className="muted" style={{ marginTop: 24, fontSize: 13 }}>
+        <Link href={'/feedback?from=' + encodeURIComponent('/packs/' + packId)}>
+          这一页有问题？反馈给站方
+        </Link>
+      </p>
     </div>
   );
 }
