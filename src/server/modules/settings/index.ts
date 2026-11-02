@@ -88,6 +88,33 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     unit: '次/时/用户',
   },
   {
+    key: 'rate_limits.feedback_per_hour',
+    label: '问题反馈提交上限',
+    description: '每个用户每小时最多提交多少次问题反馈（收件箱型入口，默认值与举报同量级）。',
+    kind: 'integer',
+    defaultValue: 10,
+    min: 1,
+    max: 200,
+    unit: '次/时/用户',
+  },
+  {
+    key: 'feedback.max_attachments',
+    label: '反馈截图张数上限',
+    description: '每条问题反馈最多能挂几张截图。只收 jpeg/png/webp，像素与格式闸复用媒体模块。',
+    kind: 'integer',
+    defaultValue: 3,
+    min: 0,
+    max: 9,
+    unit: '张/条',
+  },
+  {
+    key: 'feedback.enabled',
+    label: '问题反馈开关',
+    description: '关闭后隐藏入口、接口返回 404；已存在的票仍可由管理员处理（回滚用）。',
+    kind: 'boolean',
+    defaultValue: true,
+  },
+  {
     key: 'discovery.max_plugins_per_run',
     label: '自动发现每轮收录上限',
     description:
@@ -273,6 +300,20 @@ export function numberSetting(db: SqliteDatabase, key: string, fallback: number)
   const min = def?.min ?? Number.NEGATIVE_INFINITY;
   const max = def?.max ?? Number.POSITIVE_INFINITY;
   return Math.min(Math.max(Math.floor(value), min), max);
+}
+
+/**
+ * 读一个开关配置（带兜底）。
+ *
+ * 与 numberSetting 同构：模块只关心"现在开着还是关着"，库里没有该键或被改成
+ * 非布尔值时都退回 fallback，不把脏数据抛给调用方。
+ */
+export function booleanSetting(db: SqliteDatabase, key: string, fallback: boolean): boolean {
+  const def = SETTING_BY_KEY.get(key);
+  const raw = effectiveSettings(db).effective[key];
+  if (typeof raw === 'boolean') return raw;
+  if (typeof def?.defaultValue === 'boolean') return def.defaultValue;
+  return fallback;
 }
 
 export function createSettingsService(deps: { db: SqliteDatabase }): SettingsService {

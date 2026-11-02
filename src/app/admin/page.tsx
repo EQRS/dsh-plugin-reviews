@@ -262,6 +262,19 @@ export default async function AdminPage({
         </p>
       </section>
 
+      {/* 问题反馈：站点自身的 bug / 建议 / 账号问题收件箱（纯私有，不对站外公开）。 */}
+      <section className="panel" style={{ marginTop: 24 }}>
+        <div className="section-head">
+          <h2>问题反馈</h2>
+        </div>
+        <p className="muted" style={{ marginTop: 0 }}>
+          用户报告的站点功能问题。处理时必须写理由，结果会通过站内通知回给提交人。
+        </p>
+        <p style={{ marginBottom: 0 }}>
+          <Link href="/admin/feedback">前往反馈队列 →</Link>
+        </p>
+      </section>
+
       {/* 插件清单导入：批量收录入口（与「发现」互补：那个是搜出来的，这个是给定清单）。 */}
       <section className="panel" style={{ marginTop: 24 }}>
         <div className="section-head">

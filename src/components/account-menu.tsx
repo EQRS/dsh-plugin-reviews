@@ -18,7 +18,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { ThemeMenuRow } from './theme-switch';
 
-type GlyphName = 'review' | 'star' | 'bell' | 'settings' | 'logout' | 'close' | 'chevron';
+type GlyphName = 'review' | 'star' | 'bell' | 'settings' | 'logout' | 'close' | 'chevron' | 'feedback';
 
 /** 线性图标：与页头铃铛同一套画法（stroke=currentColor，视觉重量一致）。 */
 function Glyph({ name }: { name: GlyphName }) {
@@ -56,6 +56,15 @@ function Glyph({ name }: { name: GlyphName }) {
         <svg {...common}>
           <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
           <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+        </svg>
+      );
+    case 'feedback':
+      // 反馈：一个对话气泡（报问题 = 找站点聊）
+      return (
+        <svg {...common}>
+          <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-3.9-.9L3 21l1.9-4.8A8.4 8.4 0 0 1 12 3.1a8.4 8.4 0 0 1 9 8.4z" />
+          <line x1="12" y1="8" x2="12" y2="12.5" />
+          <line x1="12" y1="15.4" x2="12" y2="15.5" />
         </svg>
       );
     case 'settings':
@@ -207,6 +216,11 @@ export function AccountMenu({
           <Link href="/me/settings" role="menuitem" className="menu-row" onClick={() => close()}>
             <Glyph name="settings" />
             <span className="menu-row-label">个人设置</span>
+            <Glyph name="chevron" />
+          </Link>
+          <Link href="/feedback" role="menuitem" className="menu-row" onClick={() => close()}>
+            <Glyph name="feedback" />
+            <span className="menu-row-label">反馈问题</span>
             <Glyph name="chevron" />
           </Link>
 

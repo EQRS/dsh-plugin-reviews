@@ -21,7 +21,8 @@ export type NotificationKind =
   | 'comment_on_content'
   | 'reply_to_comment'
   | 'moderation_result'
-  | 'featured_published';
+  | 'featured_published'
+  | 'feedback_result';
 
 export interface NotificationView {
   id: string;
@@ -204,6 +205,52 @@ export function deliverFeaturedPublishedNotification(
       `INSERT INTO notifications
          (id, recipient_id, kind, actor_id, comment_id, content_entity_id, deduplication_key, detail, link_url, read_at, created_at)
        VALUES (?, ?, 'featured_published', ?, NULL, NULL, ?, ?, ?, NULL, ?)
+       ON CONFLICT (deduplication_key) DO NOTHING`,
+    )
+    .run(
+      newId(input.now),
+      input.recipientId,
+      input.actorId,
+      input.deduplicationKey,
+      detail,
+      input.linkUrl,
+      input.now,
+    );
+
+  if (inserted.changes === 0) return { created: false, reason: 'duplicate', recipientId: input.recipientId };
+  return { created: true, reason: null, recipientId: input.recipientId };
+}
+
+/**
+ * 投递一条「问题反馈处理结果」通知。
+ *
+ * 与处理结果通知的区别：反馈票不是内容实体，跳转地址由调用方给（/feedback/{id}，存 link_url）。
+ * 去重键由调用方给（feedback:{ticketId}:{recordId}）：重试不会重复发。
+ */
+export function deliverFeedbackResultNotification(
+  db: SqliteDatabase,
+  input: {
+    recipientId: string;
+    actorId: string;
+    detail: string;
+    linkUrl: string;
+    deduplicationKey: string;
+    now: number;
+  },
+): DeliverResult {
+  const detail = input.detail.trim();
+  if (detail.length === 0) {
+    throw err.internal('反馈通知缺少说明文字，拒绝写入。');
+  }
+  if (input.recipientId === input.actorId) {
+    return { created: false, reason: 'self', recipientId: input.recipientId };
+  }
+
+  const inserted = db
+    .prepare(
+      `INSERT INTO notifications
+         (id, recipient_id, kind, actor_id, comment_id, content_entity_id, deduplication_key, detail, link_url, read_at, created_at)
+       VALUES (?, ?, 'feedback_result', ?, NULL, NULL, ?, ?, ?, NULL, ?)
        ON CONFLICT (deduplication_key) DO NOTHING`,
     )
     .run(

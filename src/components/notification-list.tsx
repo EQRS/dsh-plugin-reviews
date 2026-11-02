@@ -17,7 +17,12 @@ import { SkeletonLines } from './skeleton';
 
 interface NotificationItem {
   id: string;
-  kind: 'comment_on_content' | 'reply_to_comment' | 'moderation_result' | 'featured_published';
+  kind:
+    | 'comment_on_content'
+    | 'reply_to_comment'
+    | 'moderation_result'
+    | 'featured_published'
+    | 'feedback_result';
   commentId: string | null;
   contentEntityId: string | null;
   href: string | null;
@@ -142,7 +147,9 @@ export function NotificationList() {
                     ? ' 处理结果'
                     : n.kind === 'featured_published'
                       ? ' 发布了新的精选'
-                      : ' 评论了你的内容'}
+                      : n.kind === 'feedback_result'
+                        ? ' 处理了你的反馈'
+                        : ' 评论了你的内容'}
                 <span className="muted">
                   {' · '}
                   {formatDateTime(n.createdAt)}

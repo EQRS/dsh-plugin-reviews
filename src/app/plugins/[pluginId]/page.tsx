@@ -209,6 +209,13 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ p
           </div>
         </aside>
       </div>
+
+      {/* 这一页的反馈入口：把当前路径带过去，省得用户再描述"在哪一页" */}
+      <p className="muted" style={{ marginTop: 24, fontSize: 13 }}>
+        <Link href={'/feedback?from=' + encodeURIComponent('/plugins/' + plugin.pluginId)}>
+          这一页有问题？反馈给站方
+        </Link>
+      </p>
     </div>
   );
 }
