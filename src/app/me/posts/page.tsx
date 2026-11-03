@@ -1,8 +1,9 @@
 /**
- * 我的帖子：已发布 / 已删除两个子页。
+ * 我的帖子：已发布 / 草稿 / 已删除三个子页。
  *
- * 与评测那页的区别：讨论区没有「草稿」概念（发帖即公开），所以这里只有
- * 已发布与已删除；删除是软删，作者仍能看到自己删过什么。
+ *   * 草稿在 forum_post_drafts，与正式帖子分表存（设计文档 §3.6）；这一页是它唯一的入口。
+ *   * 删除是软删，作者仍能看到自己删过什么。
+ *   * 草稿列表不分页：每人最多 100 条封顶，见 drafts.ts。
  */
 
 import Link from 'next/link';
@@ -10,16 +11,18 @@ import { getDb } from '@/server/platform/db';
 import { currentContext } from '../../api/_lib/context';
 import { MeNav } from '@/components/me-nav';
 import { createForumPostService } from '@/server/modules/forum/posts';
+import { createForumDraftService } from '@/server/modules/forum/drafts';
 import { booleanSetting } from '@/server/modules/settings';
 import { formatDateTimeOr } from '@/packages/common/time';
 import type { ForumContentStatus } from '@/packages/common/forum';
 
 export const dynamic = 'force-dynamic';
 
-type Tab = 'published' | 'deleted';
+type Tab = 'published' | 'drafts' | 'deleted';
 
 const TAB_LABELS: Record<Tab, string> = {
   published: '已发布',
+  drafts: '草稿',
   deleted: '已删除',
 };
 
@@ -28,7 +31,13 @@ function firstValue(v: string | string[] | undefined): string | undefined {
 }
 
 function readTab(raw: string | undefined): Tab {
-  return raw === 'deleted' ? 'deleted' : 'published';
+  if (raw === 'deleted') return 'deleted';
+  if (raw === 'drafts') return 'drafts';
+  return 'published';
+}
+
+function tabHref(key: Tab): string {
+  return key === 'published' ? '/me/posts' : '/me/posts?tab=' + key;
 }
 
 export default async function MePostsPage({
@@ -75,7 +84,8 @@ export default async function MePostsPage({
   }
 
   const status: ForumContentStatus = tab === 'deleted' ? 'deleted' : 'published';
-  const list = await createForumPostService({ db }).listMine(ctx, { page, status });
+  const list = tab === 'drafts' ? null : await createForumPostService({ db }).listMine(ctx, { page, status });
+  const drafts = tab === 'drafts' ? await createForumDraftService({ db }).listMine(ctx) : null;
 
   return (
     <div>
@@ -85,12 +95,8 @@ export default async function MePostsPage({
         <div>
           <div className="section-head" style={{ marginBottom: 16 }}>
             <div style={{ display: 'flex', gap: 8 }}>
-              {(['published', 'deleted'] as Tab[]).map((key) => (
-                <Link
-                  key={key}
-                  href={'/me/posts' + (key === 'published' ? '' : '?tab=' + key)}
-                  className={tab === key ? 'tag site' : 'tag'}
-                >
+              {(['published', 'drafts', 'deleted'] as Tab[]).map((key) => (
+                <Link key={key} href={tabHref(key)} className={tab === key ? 'tag site' : 'tag'}>
                   {TAB_LABELS[key]}
                 </Link>
               ))}
@@ -100,7 +106,31 @@ export default async function MePostsPage({
             </Link>
           </div>
 
-          {list.items.length === 0 ? (
+          {drafts !== null ? (
+            drafts.items.length === 0 ? (
+              <p className="empty">没有草稿。发帖时点「存草稿」，没写完的会留在这儿。</p>
+            ) : (
+              <ul className="item-list">
+                {drafts.items.map((draft) => (
+                  <li key={draft.draftId} className="item">
+                    <div className="item-body">
+                      <h3 className="item-title">
+                        {/* 按标题或正文开头给个能认出来的名字，空草稿也不至于是一行空白 */}
+                        <Link href={'/forum/new?draft=' + draft.draftId}>
+                          {draft.title.trim().length > 0 ? draft.title : draft.bodyMd.slice(0, 40) || '（空草稿）'}
+                        </Link>
+                      </h3>
+                      <div className="list-meta">
+                        <span>{draft.boardName}</span>
+                        <span>改于 {formatDateTimeOr(draft.updatedAt, '未知')}</span>
+                        {draft.fileIds.length > 0 ? <span>{draft.fileIds.length} 张图</span> : null}
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )
+          ) : list === null ? null : list.items.length === 0 ? (
             <p className="empty">
               {tab === 'published'
                 ? '还没有发布过帖子。去讨论区看看，或者直接发一个。'
@@ -126,7 +156,7 @@ export default async function MePostsPage({
             </ul>
           )}
 
-          {list.total_pages > 1 ? (
+          {list !== null && list.total_pages > 1 ? (
             <div className="pagination" style={{ marginTop: 16 }}>
               {page > 1 ? (
                 <Link href={'/me/posts?tab=' + tab + '&page=' + (page - 1)}>上一页</Link>

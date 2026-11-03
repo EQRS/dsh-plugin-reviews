@@ -1,8 +1,12 @@
 /**
- * 发帖页：/forum/new?board={slug}
+ * 发帖页：/forum/new?board={slug}&draft={draftId}
  *
  * 分区从查询串带过来（从分区页点「发帖」进来时已经选好）；
+ * 带 draft 时从草稿续写——表单会带着 draftId，保存是更新而不是新建。
  * 未登录先去登录，回来还能接着写。
+ *
+ * 保底：草稿不存在（已发布 / 已删 / 不是本人的）时不报错，按空表单继续写，
+ * 不把一个已经没用的 id 变成拦路的错误页。
  */
 
 import Link from 'next/link';
@@ -12,6 +16,7 @@ import { currentContext } from '@/app/api/_lib/context';
 import { isAuthenticated } from '@/server/platform/context';
 import { booleanSetting } from '@/server/modules/settings';
 import { createForumBoardService } from '@/server/modules/forum/boards';
+import { createForumDraftService } from '@/server/modules/forum/drafts';
 import { ForumPostForm } from '@/components/forum-post-form';
 
 export const dynamic = 'force-dynamic';
@@ -30,6 +35,7 @@ export default async function NewForumPostPage({
 
   const sp = await searchParams;
   const boardSlug = (firstValue(sp.board) ?? '').trim();
+  const draftParam = (firstValue(sp.draft) ?? '').trim();
 
   const ctx = await currentContext();
   if (!isAuthenticated(ctx)) {
@@ -39,7 +45,21 @@ export default async function NewForumPostPage({
   const service = createForumBoardService({ db });
   const boards = await service.listBoards(ctx);
   const postable = boards.filter((b) => b.canPost);
-  const selected = postable.find((b) => b.slug === boardSlug) ?? postable[0];
+
+  // 草稿读不到就当作没带草稿（见文件头「保底」）
+  let draft: Awaited<ReturnType<ReturnType<typeof createForumDraftService>['getDraft']>> | null = null;
+  if (draftParam.length > 0) {
+    try {
+      draft = await createForumDraftService({ db }).getDraft(ctx, draftParam);
+    } catch {
+      draft = null;
+    }
+  }
+
+  const selected =
+    (draft ? postable.find((b) => b.slug === draft.boardSlug) : undefined) ??
+    postable.find((b) => b.slug === boardSlug) ??
+    postable[0];
 
   if (!selected) {
     return (
@@ -62,7 +82,22 @@ export default async function NewForumPostPage({
       <p className="muted" style={{ marginTop: 0 }}>
         支持 Markdown，可以插入图片。发帖前请确认内容符合该分区的主题。
       </p>
-      <ForumPostForm boards={postable.map((b) => ({ slug: b.slug, name: b.name }))} initialBoard={selected.slug} />
+      <ForumPostForm
+        boards={postable.map((b) => ({ id: b.boardId, slug: b.slug, name: b.name }))}
+        initialBoard={selected.slug}
+        draft={
+          draft
+            ? {
+                draftId: draft.draftId,
+                boardId: draft.boardId,
+                boardSlug: draft.boardSlug,
+                title: draft.title,
+                bodyMd: draft.bodyMd,
+                fileIds: draft.fileIds,
+              }
+            : undefined
+        }
+      />
     </div>
   );
 }
