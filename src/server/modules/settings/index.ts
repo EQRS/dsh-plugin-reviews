@@ -312,6 +312,20 @@ export function numberSetting(db: SqliteDatabase, key: string, fallback: number)
   return Math.min(Math.max(Math.floor(value), min), max);
 }
 
+/**
+ * 读一个开关配置（带兜底）。
+ *
+ * 与 numberSetting 同构：模块只关心"现在开着还是关着"，库里没有该键或被改成
+ * 非布尔值时都退回 fallback，不把脏数据抛给调用方。
+ */
+export function booleanSetting(db: SqliteDatabase, key: string, fallback: boolean): boolean {
+  const def = SETTING_BY_KEY.get(key);
+  const raw = effectiveSettings(db).effective[key];
+  if (typeof raw === 'boolean') return raw;
+  if (typeof def?.defaultValue === 'boolean') return def.defaultValue;
+  return fallback;
+}
+
 export function createSettingsService(deps: { db: SqliteDatabase }): SettingsService {
   const { db } = deps;
 

@@ -309,6 +309,19 @@ export default async function AdminPage({
         </p>
       </section>
 
+      <section className="panel" style={{ marginTop: 24 }}>
+        <div className="section-head">
+          <h2>讨论区</h2>
+        </div>
+        <p className="muted" style={{ marginTop: 0 }}>
+          用户在这里申请新建分区。通过后申请人自动成为该分区区长，可管理发帖权限、置顶与删除帖子；
+          拒绝需要写理由，会通知申请人。
+        </p>
+        <p style={{ marginBottom: 0 }}>
+          <Link href="/admin/forum">前往分区申请审核 →</Link>
+        </p>
+      </section>
+
       {/* 站点状态：管理员视角的完整报告。 */}
       <section className="panel" style={{ marginTop: 24 }}>
         <div className="section-head">
