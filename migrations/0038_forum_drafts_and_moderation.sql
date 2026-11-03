@@ -99,8 +99,10 @@ CREATE TABLE reports_new (
   detail            TEXT    CHECK (detail IS NULL OR length(detail) <= 1000),
   state             TEXT    NOT NULL DEFAULT 'open' CHECK (state IN ('open','resolved','dismissed')),
   created_at        INTEGER NOT NULL CHECK (created_at >= 0),
-  -- 每种目标类型只填自己那一列：多态外键用 CHECK 收口，避免四列都填或都不填
-  CHECK ((target_kind IN ('review','pack_release')) = (content_entity_id IS NOT NULL)),
+  -- 每种目标类型只填自己那一列：多态外键用 CHECK 收口，避免四列都填或都不填。
+  -- 注意 content_entity_id 的口径沿用 0012：评测 / 整合包版本填它自己，**评论填所属内容实体**，
+  -- 所以它只对讨论区两类目标必须为空，不能写成"只有 review/pack_release 才非空"。
+  CHECK ((target_kind IN ('review','pack_release','comment')) = (content_entity_id IS NOT NULL)),
   CHECK ((target_kind = 'comment') = (comment_id IS NOT NULL)),
   CHECK ((target_kind = 'post') = (post_id IS NOT NULL)),
   CHECK ((target_kind = 'forum_reply') = (forum_reply_id IS NOT NULL))
@@ -116,9 +118,11 @@ DROP TABLE reports;
 
 ALTER TABLE reports_new RENAME TO reports;
 
--- 同一人 + 同一目标 + 同一原因只允许一条未处理的举报（与 0012 同口径）
+-- 同一人 + 同一目标 + 同一原因只允许一条未处理的举报（与 0012 同口径）。
+-- content_entity_id 对评论/帖子恒为 NULL，只靠它去重会把不同评论当成同一个目标，
+-- 所以把后三类目标各自的 id 也并进索引键。
 CREATE UNIQUE INDEX uq_reports_open_same
-  ON reports(reporter_id, target_kind, content_entity_id, reason)
+  ON reports(reporter_id, target_kind, content_entity_id, comment_id, post_id, forum_reply_id, reason)
   WHERE state = 'open';
 
 CREATE INDEX idx_reports_queue ON reports(state, created_at, id);

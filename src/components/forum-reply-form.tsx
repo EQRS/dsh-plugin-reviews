@@ -11,6 +11,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ApiError, ErrorNotice, apiFetch } from './api-client';
 import { FORUM_LIMITS } from '@/packages/common/forum';
+import { ForumImageUpload } from './forum-image-upload';
 
 export function ForumReplyForm({
   postId,
@@ -65,6 +66,13 @@ export function ForumReplyForm({
         placeholder={parentId ? '回复这条回复…' : '写下你的回复…'}
         style={{ width: '100%' }}
       />
+      {/* 回复的回复不能带图（使用者口径）：只有顶层回复给上传入口 */}
+      {parentId === undefined ? (
+        <ForumImageUpload
+          disabled={busy}
+          onInsert={(md) => setBodyMd((prev) => (prev ? prev + '\n\n' + md : md))}
+        />
+      ) : null}
       <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center' }}>
         <button
           type="button"
