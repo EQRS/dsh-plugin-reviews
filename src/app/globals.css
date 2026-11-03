@@ -2479,10 +2479,16 @@ input[type='search']:focus {
   border-bottom: none;
 }
 
-/* 首页辅栏插件卡片：压成「标题 + 一行简介 + 一行元信息」，10 条约一屏 */
+/* 首页辅栏插件卡片：压成「标题 + 一行简介 + 一行元信息」，10 条约一屏。
+   min-height 是**内容所需的最小高度**，不是审美选择：桌面端靠 flex 均分把 10 条
+   铺满面板，窗口一矮就被压到低于内容高度，而卡片里三行字不收缩、也不裁切，
+   于是串到下一行去（主人报的"上下两个插件的信息叠在一起"）。给一个下限，
+   空间不足时 flex 只会停止压缩，文字不会再越界。
+   算式：3 行文字（标题 14×1.35 + 简介 12×1.4 + 元信息 11×1.4 ≈ 51）撑主导，
+   图标只有 32，所以下限取文字侧；上下内边距各 8 让相邻条目之间有可见的空气。 */
 .item-list > .home-plugin-item {
-  min-height: 0;
-  padding: 4px 12px;
+  min-height: 52px;
+  padding: 8px 12px;
 }
 .home-plugin-card {
   display: flex;
@@ -2568,8 +2574,10 @@ input[type='search']:focus {
     flex: 1 1 auto;
     flex-direction: column;
   }
+  /* 均分剩余高度，但**不压到内容以下**：原来的 `flex: 1 1 0` 配 min-height:0 会
+     一路压穿文字行高（见上条注释）。这里把收缩基线换成上面给的最小高度。 */
   .home-feed aside .home-plugin-list > .home-plugin-item {
-    flex: 1 1 0;
+    flex: 1 1 auto;
   }
 }
 
@@ -3389,7 +3397,10 @@ input[type='search']:focus {
   /* 首页辅栏只展示 10 条：压到一屏，内边距比通用列表更小；手机上不再显示简介，
      只留「名字 + 评测数/标签」，10 条稳定放进一屏。 */
   .item-list > .home-plugin-item {
-    padding: 5px 12px;
+    /* 手机上隐藏了简介，只剩「名字 + 评测数/标签」两行；下限随之降到内容高度，
+       但仍不取 0 —— 否则窄屏滚动时同样会压出重叠。 */
+    min-height: 44px;
+    padding: 7px 12px;
   }
   .home-plugin-item .item-body > .home-plugin-desc {
     display: none;
