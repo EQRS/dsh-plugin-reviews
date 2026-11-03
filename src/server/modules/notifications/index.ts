@@ -17,7 +17,12 @@ import type { SqliteDatabase } from '@/server/platform/db';
 import { newId } from '@/server/platform/id';
 import { err } from '@/packages/common/errors';
 
-export type NotificationKind = 'comment_on_content' | 'reply_to_comment' | 'moderation_result';
+export type NotificationKind =
+  | 'comment_on_content'
+  | 'reply_to_comment'
+  | 'moderation_result'
+  | 'forum_reply'
+  | 'forum_reply_to_reply';
 
 export interface NotificationView {
   id: string;
@@ -160,6 +165,53 @@ export function deliverModerationResultNotification(
       input.recipientId,
       input.actorId,
       input.contentEntityId,
+      input.deduplicationKey,
+      detail,
+      input.now,
+    );
+
+  if (inserted.changes === 0) return { created: false, reason: 'duplicate', recipientId: input.recipientId };
+  return { created: true, reason: null, recipientId: input.recipientId };
+}
+
+/**
+ * 投递一条讨论区通知（**在发帖/回复事务内**调用）。
+ *
+ * 与评论通知的差别：讨论区不是 content_entities，所以没有 content_entity_id，
+ * 正文位置用 `detail`（一句摘要）。kind 区分「回复你的帖子」与「回复你的回复」，
+ * 去重键按**回复 id** 而非内容：同一人可能对你的帖子回复多次，那是多条通知。
+ */
+export function deliverForumReplyNotification(
+  db: SqliteDatabase,
+  input: {
+    recipientId: string;
+    actorId: string;
+    kind: 'forum_reply' | 'forum_reply_to_reply';
+    detail: string;
+    deduplicationKey: string;
+    now: number;
+  },
+): DeliverResult {
+  const detail = input.detail.trim();
+  if (detail.length === 0) {
+    throw err.internal('讨论区通知缺少摘要，拒绝写入。');
+  }
+  if (input.recipientId === input.actorId) {
+    return { created: false, reason: 'self', recipientId: input.recipientId };
+  }
+
+  const inserted = db
+    .prepare(
+      `INSERT INTO notifications
+         (id, recipient_id, kind, actor_id, comment_id, content_entity_id, deduplication_key, detail, read_at, created_at)
+       VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, NULL, ?)
+       ON CONFLICT (deduplication_key) DO NOTHING`,
+    )
+    .run(
+      newId(input.now),
+      input.recipientId,
+      input.kind,
+      input.actorId,
       input.deduplicationKey,
       detail,
       input.now,
