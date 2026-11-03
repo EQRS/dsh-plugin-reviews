@@ -11,6 +11,7 @@ import { getDb } from '@/server/platform/db';
 import { createCatalogService } from '@/server/modules/catalog';
 import { resolveVisibilityInTx } from '@/server/modules/content';
 import { currentContext } from '@/app/api/_lib/context';
+import { featuredCountsForPlugins } from '@/server/modules/featured';
 import { BackLink } from '@/components/back-link';
 import { StartDraftButton } from '@/components/start-draft-button';
 import { FavoriteButton } from '@/components/favorite-button';
@@ -50,6 +51,9 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ p
   const initial = displayName.slice(0, 1).toUpperCase();
   const availability = repositoryAvailabilityLabels[plugin.repository.availabilityState];
   const author = plugin.authorLogin ?? plugin.ownerLogin ?? '未知';
+
+  // 「精选」标签：这个插件被多少期已发布专栏推荐过（不进排序，只做背书展示）
+  const featuredCount = featuredCountsForPlugins(getDb(), [plugin.pluginId]).get(plugin.pluginId) ?? 0;
 
   return (
     <div>
@@ -103,6 +107,11 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ p
               {securityLabel(plugin.securityAudit)}
             </span>
             {plugin.repository.isArchived ? <span className="tag warn">已归档</span> : null}
+            {featuredCount > 0 ? (
+              <span className="tag site" title={`被 ${featuredCount} 期精选推荐过`}>
+                精选 ×{featuredCount}
+              </span>
+            ) : null}
           </div>
 
           {plugin.topics.length > 0 ? (
@@ -200,6 +209,13 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ p
           </div>
         </aside>
       </div>
+
+      {/* 这一页的反馈入口：把当前路径带过去，省得用户再描述"在哪一页" */}
+      <p className="muted" style={{ marginTop: 24, fontSize: 13 }}>
+        <Link href={'/feedback?from=' + encodeURIComponent('/plugins/' + plugin.pluginId)}>
+          这一页有问题？反馈给站方
+        </Link>
+      </p>
     </div>
   );
 }

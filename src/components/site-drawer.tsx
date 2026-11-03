@@ -20,7 +20,16 @@ import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { ThemeMenuRow } from './theme-switch';
 
-type GlyphName = 'review' | 'bell' | 'settings' | 'logout' | 'login' | 'menu' | 'close' | 'chevron';
+type GlyphName =
+  | 'review'
+  | 'bell'
+  | 'settings'
+  | 'feedback'
+  | 'logout'
+  | 'login'
+  | 'menu'
+  | 'close'
+  | 'chevron';
 
 function Glyph({ name }: { name: GlyphName }) {
   const common = {
@@ -71,6 +80,12 @@ function Glyph({ name }: { name: GlyphName }) {
           <line x1="4" y1="16" x2="20" y2="16" />
           <circle cx="9" cy="8" r="2.4" />
           <circle cx="15" cy="16" r="2.4" />
+        </svg>
+      );
+    case 'feedback':
+      return (
+        <svg {...common}>
+          <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-3.8-.8L3 21l1.9-4.9A8.4 8.4 0 0 1 3.6 11.5a8.4 8.4 0 0 1 9-8.4 8.4 8.4 0 0 1 8.4 8.4z" />
         </svg>
       );
     case 'logout':
@@ -211,6 +226,9 @@ export function SiteDrawer({
                 </Link>
                 <Link href="/me/settings" role="menuitem" className="menu-row" onClick={() => close()}>
                   {row('settings', '个人设置')}
+                </Link>
+                <Link href="/feedback" role="menuitem" className="menu-row" onClick={() => close()}>
+                  {row('feedback', '反馈问题')}
                 </Link>
 
                 <div className="divider" />

@@ -13,6 +13,7 @@ import { SearchGoButton } from '@/components/search-go-button';
 import { HomeFeed } from '@/components/home-feed';
 import { getDb } from '@/server/platform/db';
 import { numberSetting } from '@/server/modules/settings';
+import { createFeaturedService } from '@/server/modules/featured';
 import { createCatalogService } from '@/server/modules/catalog';
 import { formatDateTimeOr } from '@/packages/common/time';
 
@@ -78,6 +79,9 @@ export default async function HomePage() {
   });
   // 页面 chip 行用**分类**（中文、按不同仓库计数），不再直接暴露原始 topics
   const categories = await catalog.listCategories();
+  // 首页露出最近一期精选（没有已发布期就不渲染整块）
+  const featuredLatest =
+    (await createFeaturedService({ db }).listPublished({ page: 1, pageSize: 1 })).items[0] ?? null;
 
   return (
     <div className="home-page">
@@ -112,6 +116,29 @@ export default async function HomePage() {
           </div>
         ) : null}
       </section>
+
+      {/* 最近一期精选：站方专栏入口（没发布过就不渲染）。
+          放在双栏之外：HomeFeed 是两列网格，塞第三个子元素会破坏版式。 */}
+      {featuredLatest ? (
+        <section className="panel" style={{ marginTop: 24 }} aria-label="精选">
+          <div className="section-head">
+            <h2>精选</h2>
+            <Link href="/featured" className="muted" style={{ fontSize: 13 }}>
+              查看全部 →
+            </Link>
+          </div>
+          <Link href={'/featured/' + featuredLatest.issueNumber} prefetch={false}>
+            <div className="list-meta" style={{ marginBottom: 4 }}>
+              <span className="tag site">第 {featuredLatest.issueNumber} 期</span>
+              <span>{featuredLatest.itemCount} 个插件</span>
+            </div>
+            <strong>{featuredLatest.title}</strong>
+            <p className="muted" style={{ margin: '4px 0 0' }}>
+              {featuredLatest.theme}
+            </p>
+          </Link>
+        </section>
+      ) : null}
 
       {/* 双栏内容：整页一直向下滚，接近底部时自动加载下一批（桌面/手机一致）。 */}
       <HomeFeed>

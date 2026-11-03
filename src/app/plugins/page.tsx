@@ -17,6 +17,7 @@ import { tierLabel, securityLabel } from '@/packages/common/assessment';
 import { isPageOutOfRange } from '@/packages/common/pagination';
 import type { PluginSummary } from '@/server/modules/catalog/types';
 import { PageJump } from '@/components/page-jump';
+import { featuredCountsForPlugins } from '@/server/modules/featured';
 
 export const dynamic = 'force-dynamic';
 
@@ -106,7 +107,7 @@ function Chip({ text, tone = 'plain' }: { text: string; tone?: 'plain' | 'tag' |
   return <span className={cls}>{text}</span>;
 }
 
-function PluginCard({ plugin }: { plugin: PluginSummary }) {
+function PluginCard({ plugin, featuredCount = 0 }: { plugin: PluginSummary; featuredCount?: number }) {
   const label = `${plugin.repositoryFullName}${plugin.pluginPath === '.' ? '' : ` / ${plugin.pluginPath}`}`;
   const title = plugin.displayName ?? label;
   const initial = (plugin.displayName ?? plugin.repositoryFullName).slice(0, 1).toUpperCase();
@@ -148,6 +149,7 @@ function PluginCard({ plugin }: { plugin: PluginSummary }) {
           )}
           <Chip text={tierLabel(plugin.assessmentTier)} />
           <Chip text={securityLabel(plugin.securityAudit)} tone={plugin.securityAudit === true ? 'tag' : 'plain'} />
+          {featuredCount > 0 ? <Chip text={'精选 ×' + featuredCount} tone="tag" /> : null}
           {plugin.isArchived ? <Chip text="已归档" tone="warn" /> : null}
           {plugin.availabilityState !== 'available' ? <Chip text="仓库暂不可访问" tone="warn" /> : null}
         </div>
@@ -184,6 +186,8 @@ export default async function PluginsPage({
   });
   // 侧栏 chip 用分类（中文、按不同仓库计数）
   const categories = await catalog.listCategories();
+  // 精选标签：一次 IN 查询批量取，避免逐行 N+1（只统计已发布期）
+  const featuredCounts = featuredCountsForPlugins(getDb(), result.items.map((p) => p.pluginId));
 
   // 空结果时再问一次"不带条件时有多少" —— 这样能把"目录为空"与"筛选没匹配到"分开。
   const totalWithoutFilter =
@@ -386,7 +390,11 @@ export default async function PluginsPage({
             <div className="panel" style={{ marginTop: 'var(--space-4)' }}>
               <ul className="item-list">
                 {result.items.map((p) => (
-                  <PluginCard key={p.pluginId} plugin={p} />
+                  <PluginCard
+                    key={p.pluginId}
+                    plugin={p}
+                    featuredCount={featuredCounts.get(p.pluginId) ?? 0}
+                  />
                 ))}
               </ul>
 

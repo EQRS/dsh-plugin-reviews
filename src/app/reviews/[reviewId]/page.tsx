@@ -19,6 +19,7 @@ import { ArticleHero } from '@/components/article-hero';
 import { WithdrawButton } from '@/components/withdraw-button';
 import { EditReviewButton } from '@/components/edit-review-button';
 import { AdminHideForm } from '@/components/admin-hide-form';
+import Link from 'next/link';
 import { BackLink } from '@/components/back-link';
 import { HelpfulButton } from '@/components/helpful-button';
 import { ReportButton } from '@/components/report-button';
@@ -442,6 +443,13 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ r
         ) : null}
       </aside>
       </div>
+
+      {/* 这一页的反馈入口：与插件详情页同一处措辞，把当前路径带过去 */}
+      <p className="muted" style={{ marginTop: 24, fontSize: 13 }}>
+        <Link href={'/feedback?from=' + encodeURIComponent('/reviews/' + reviewId)}>
+          这一页有问题？反馈给站方
+        </Link>
+      </p>
     </div>
   );
 }
