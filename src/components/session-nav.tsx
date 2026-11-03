@@ -99,6 +99,7 @@ export function SessionNav() {
   const inPlugins = pathname === '/plugins' || pathname.startsWith('/plugins/');
   const inPacks = pathname === '/packs' || pathname.startsWith('/packs/');
   const inReviews = pathname === '/reviews' || pathname.startsWith('/reviews/');
+  const inForum = pathname === '/forum' || pathname.startsWith('/forum/');
   const inSpec = pathname === '/spec' || pathname.startsWith('/spec/');
   const inFeatured = pathname === '/featured' || pathname.startsWith('/featured/');
 
@@ -121,6 +122,9 @@ export function SessionNav() {
           </Link>
           <Link href="/featured" className={inFeatured ? 'active' : ''} aria-current={inFeatured ? 'page' : undefined}>
             精选
+          </Link>
+          <Link href="/forum" className={inForum ? 'active' : ''} aria-current={inForum ? 'page' : undefined}>
+            讨论区
           </Link>
           <Link href="/spec" className={inSpec ? 'active' : ''} aria-current={inSpec ? 'page' : undefined}>
             规范
