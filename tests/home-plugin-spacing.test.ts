@@ -24,6 +24,15 @@ function ruleBody(selector: string): string {
   return css.slice(start + 1, end);
 }
 
+/** 取一个选择器的**最后一处**规则体（媒体查询会覆盖同名选择器）。 */
+function lastRuleBody(selector: string): string {
+  const at = css.lastIndexOf(selector + ' {');
+  if (at === -1) throw new Error('找不到规则：' + selector);
+  const start = css.indexOf('{', at);
+  const end = css.indexOf('}', start);
+  return css.slice(start + 1, end);
+}
+
 function minHeightPx(body: string): number {
   const m = body.match(/min-height:\s*(\d+)px/);
   if (!m) throw new Error('规则里没有 px 单位的 min-height');
@@ -31,12 +40,23 @@ function minHeightPx(body: string): number {
 }
 
 describe('首页近期更新插件：条目不重叠', () => {
-  it('条目最小高度不为 0，且能容纳「标题 + 简介 + 元信息」三行', () => {
+  it('条目最小高度不为 0，且能容纳「标题 + 简介 + 元信息」三行**加内边距**', () => {
     const body = ruleBody('.item-list > .home-plugin-item');
     const minHeight = minHeightPx(body);
-    // 三行文字的实际行高：标题 14×1.35 + 简介 12×1.4 + 元信息 11×1.4 ≈ 51px
-    expect(minHeight).toBeGreaterThan(0);
-    expect(minHeight).toBeGreaterThanOrEqual(51);
+    // 三行文字的实际行高：标题 14×1.35 + 简介 12×1.4 + 元信息 11×1.4 ≈ 51px。
+    // globals.css 顶部有 `box-sizing: border-box`，min-height 包含内边距，
+    // 所以下限必须是 51 + 上下 padding（8×2 = 16）→ 67 起步；只写 51/52
+    // 会把内容盒挤到 36px，窗口一矮文字仍然溢出（上一版就是这么漏的）。
+    const paddingY = Number(body.match(/padding:\s*(\d+)px/)?.[1] ?? NaN);
+    expect(Number.isFinite(paddingY)).toBe(true);
+    expect(minHeight).toBeGreaterThanOrEqual(51 + paddingY * 2);
+  });
+
+  it('手机端下限同样扣掉上下内边距后仍装得下两行（约 34px）', () => {
+    const mobile = lastRuleBody('.item-list > .home-plugin-item');
+    const minHeight = minHeightPx(mobile);
+    const paddingY = Number(mobile.match(/padding:\s*(\d+)px/)?.[1] ?? NaN);
+    expect(minHeight).toBeGreaterThanOrEqual(34 + paddingY * 2);
   });
 
   it('条目上下内边距给足，相邻两条之间有可见间隔', () => {
