@@ -14,14 +14,14 @@ export async function POST(
 ): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
+    // 鉴权先于路径参数解析与读 body：匿名 + 非法期号应当是 401，不是 400。
+    const ctx = await currentContext();
+    assertCanAdmin(ctx);
     const { issue } = await params;
     const issueNumber = Number.parseInt(issue, 10);
     if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
       throw err.input('期号不合法。', [{ path: 'issue', message: '正整数' }]);
     }
-    const ctx = await currentContext();
-    // 鉴权先于读 body：匿名/越权请求不该先拿到「参数错误」(400)
-    assertCanAdmin(ctx);
     const body = (await readJson(request)) as { expectedVersion?: unknown };
     if (typeof body.expectedVersion !== 'number') {
       throw err.input('缺少预期版本。', [{ path: 'expectedVersion', message: '必填' }]);

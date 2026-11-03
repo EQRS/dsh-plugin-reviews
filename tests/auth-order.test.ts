@@ -32,6 +32,8 @@ import { POST as uploadChunk } from '../src/app/api/imports/author/[batchId]/chu
 import { POST as finishInput } from '../src/app/api/imports/author/[batchId]/finish/route';
 import { POST as bindDraftPlugin } from '../src/app/api/drafts/plugin/route';
 import { PATCH as updatePreferences } from '../src/app/api/me/preferences/route';
+import { GET as getFeaturedIssue, PATCH as patchFeaturedIssue } from '../src/app/api/admin/featured/[issue]/route';
+import { POST as publishFeatured } from '../src/app/api/admin/featured/[issue]/publish/route';
 import { closeDb, type SqliteDatabase } from '../src/server/platform/db';
 import { createIdentityService } from '../src/server/modules/identity';
 import { createTestDb, insertUser, type TestDb } from './support/db';
@@ -75,6 +77,10 @@ function appealParams(): { params: Promise<{ appealId: string }> } {
 
 function batchParams(): { params: Promise<{ batchId: string }> } {
   return { params: Promise.resolve({ batchId: 'b1' }) };
+}
+
+function issueParams(issue = 'x'): { params: Promise<{ issue: string }> } {
+  return { params: Promise.resolve({ issue }) };
 }
 
 interface ErrorBody {
@@ -209,5 +215,30 @@ describe('#40 新增接口：先鉴权后读 body', () => {
     const body = (await res.json()) as ErrorBody;
     expect(res.status).toBe(403);
     expect(body.error.code).toBe('forbidden');
+  });
+});
+
+describe('精选专栏管理：鉴权先于期号解析', () => {
+  it('匿名 + 非法期号 → 401（不是 400）', async () => {
+    const got = await getFeaturedIssue(postJson({}), issueParams());
+    expect(got.status).toBe(401);
+    const body = (await got.json()) as ErrorBody;
+    expect(body.error.code).toBe('unauthenticated');
+  });
+
+  it('普通用户 + 非法期号 → 403；管理员 + 非法期号 → 400', async () => {
+    await signIn(insertUser(db, { role: 'user' }));
+    expect((await getFeaturedIssue(postJson({}), issueParams())).status).toBe(403);
+
+    await signIn(insertUser(db, { role: 'admin' }));
+    const res = await getFeaturedIssue(postJson({}), issueParams());
+    const body = (await res.json()) as ErrorBody;
+    expect(res.status).toBe(400);
+    expect(body.error.code).toBe('input_invalid');
+  });
+
+  it('保存与发布：匿名 + 非法期号同样先拿 401', async () => {
+    expect((await patchFeaturedIssue(postJson({}), issueParams())).status).toBe(401);
+    expect((await publishFeatured(postJson({}), issueParams())).status).toBe(401);
   });
 });

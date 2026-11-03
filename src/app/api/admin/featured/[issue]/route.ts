@@ -30,10 +30,10 @@ export async function GET(
 ): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
-    const issueNumber = await readIssue(params);
+    // 鉴权先于路径参数解析：匿名 + 非法期号应当是 401，不是 400。
     const ctx = await currentContext();
-    // 鉴权先于读 body：匿名/越权请求不该先拿到「参数错误」(400)
     assertCanAdmin(ctx);
+    const issueNumber = await readIssue(params);
     const service = createFeaturedService({ db: getDb() });
     return okJson(await service.getForEdit(ctx, issueNumber), requestId);
   } catch (e) {
@@ -47,10 +47,10 @@ export async function PATCH(
 ): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
-    const issueNumber = await readIssue(params);
+    // 鉴权先于路径参数解析与读 body：匿名/越权请求不该先拿到「参数错误」(400)。
     const ctx = await currentContext();
-    // 鉴权先于读 body：匿名/越权请求不该先拿到「参数错误」(400)
     assertCanAdmin(ctx);
+    const issueNumber = await readIssue(params);
     const body = (await readJson(request)) as {
       title?: unknown;
       theme?: unknown;
@@ -87,10 +87,10 @@ export async function DELETE(
 ): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
-    const issueNumber = await readIssue(params);
+    // 鉴权先于路径参数解析：匿名 + 非法期号应当是 401，不是 400。
     const ctx = await currentContext();
-    // 鉴权先于读 body：匿名/越权请求不该先拿到「参数错误」(400)
     assertCanAdmin(ctx);
+    const issueNumber = await readIssue(params);
     const service = createFeaturedService({ db: getDb() });
     return okJson(await service.deleteDraft(ctx, issueNumber), requestId);
   } catch (e) {

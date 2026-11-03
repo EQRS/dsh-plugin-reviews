@@ -188,6 +188,15 @@ export const REQUIRED_TABLES = [
   'batch_input_files',
   'batch_input_upload_attempts',
   'batch_item_input_links',
+  // 0033：精选专栏（编辑推荐位）与订阅
+  'featured_columns',
+  'featured_column_items',
+  'featured_subscriptions',
+  // 0034：精选发布通知（notifications 重建，kind 增 featured_published + link_url）
+  // 0036：问题反馈工单、处理记录与附件引用
+  'feedback_tickets',
+  'feedback_handling_records',
+  'feedback_attachment_links',
 ] as const;
 
 export function selfCheck(db: SqliteDatabase): SelfCheckResult {
