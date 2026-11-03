@@ -14,6 +14,7 @@ import { createForumPostService } from '@/server/modules/forum/posts';
 import { renderMarkdownToSafeHtml } from '@/server/platform/markdown';
 import { formatDateTimeOr } from '@/packages/common/time';
 import { DomainError, ErrorCodes } from '@/packages/common/errors';
+import { ReportButton } from '@/components/report-button';
 import { ForumPostActions } from '@/components/forum-post-actions';
 import { ForumReplyForm } from '@/components/forum-reply-form';
 
@@ -72,6 +73,12 @@ export default async function ForumPostPage({
           />
         )}
       </article>
+
+      <div style={{ marginTop: 8, display: 'flex', gap: 12, alignItems: 'center' }}>
+        {post.status === 'published' ? (
+          <ReportButton targetKind="post" targetId={post.postId} authenticated={authenticated} />
+        ) : null}
+      </div>
 
       <ForumPostActions
         postId={post.postId}
@@ -152,8 +159,13 @@ export default async function ForumPostPage({
                     </ul>
                   ) : null}
 
-                  {authenticated && post.status === 'published' && reply.status === 'published' ? (
-                    <ForumReplyForm postId={post.postId} parentId={reply.replyId} compact />
+                  {reply.status === 'published' && post.status === 'published' ? (
+                    <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 4 }}>
+                      <ReportButton targetKind="forum_reply" targetId={reply.replyId} authenticated={authenticated} />
+                      {authenticated ? (
+                        <ForumReplyForm postId={post.postId} parentId={reply.replyId} compact />
+                      ) : null}
+                    </div>
                   ) : null}
                 </div>
               </li>
