@@ -25,6 +25,7 @@ import {
   type PostSortOption,
 } from '@/packages/common/forum';
 import { deliverForumReplyNotification } from '@/server/modules/notifications';
+import { DEFAULT_BANNED_WORDS, screenPost } from './screening';
 
 // ============================================================
 // 视图
@@ -166,7 +167,7 @@ export interface ForumPostService {
   listPosts(ctx: CallerContext, boardSlug: string, input?: ListPostsInput): Promise<PageResult<PostListItem>>;
   getPost(ctx: CallerContext, postId: string): Promise<PostDetail>;
   listReplies(ctx: CallerContext, postId: string): Promise<{ items: ReplyView[]; total: number }>;
-  createPost(ctx: CallerContext, input: CreatePostInput): Promise<{ postId: string }>;
+  createPost(ctx: CallerContext, input: CreatePostInput): Promise<{ postId: string; pendingReview: boolean }>;
   editPost(ctx: CallerContext, postId: string, input: { title: unknown; bodyMd: unknown }): Promise<void>;
   deletePost(ctx: CallerContext, postId: string): Promise<void>;
   createReply(ctx: CallerContext, postId: string, input: CreateReplyInput): Promise<{ replyId: string }>;
@@ -177,6 +178,30 @@ export interface ForumPostService {
   setPinned(ctx: CallerContext, postId: string, pinned: boolean): Promise<void>;
   /** 我的帖子（个人中心）：不含已删除。 */
   listMine(ctx: CallerContext, input?: { page?: number; status?: ForumContentStatus }): Promise<PageResult<PostListItem>>;
+}
+
+/**
+ * 读违禁词表。
+ *
+ * 放在站点设置里（forum.banned_words，逗号分隔）：词表会随情况变，
+ * 改词表不该要求发版。没配就用内置的一组。
+ */
+function readBannedWords(conn: SqliteDatabase): readonly string[] {
+  const row = conn
+    .prepare("SELECT value FROM site_settings WHERE key = 'forum.banned_words'")
+    .get() as { value: string } | undefined;
+  if (!row) return DEFAULT_BANNED_WORDS;
+  try {
+    const parsed = JSON.parse(row.value);
+    if (typeof parsed !== 'string' || parsed.trim().length === 0) return DEFAULT_BANNED_WORDS;
+    const words = parsed
+      .split(',')
+      .map((w) => w.trim())
+      .filter((w) => w.length > 0);
+    return words.length > 0 ? words : DEFAULT_BANNED_WORDS;
+  } catch {
+    return DEFAULT_BANNED_WORDS;
+  }
 }
 
 export function createForumPostService(deps: { db: SqliteDatabase }): ForumPostService {
@@ -272,13 +297,15 @@ export function createForumPostService(deps: { db: SqliteDatabase }): ForumPostS
             : 'p.is_pinned DESC, p.created_at DESC, p.id DESC';
 
         const total = conn
-          .prepare("SELECT COUNT(*) AS c FROM forum_posts p WHERE p.board_id = ? AND p.status = 'published'")
+          .prepare(
+            "SELECT COUNT(*) AS c FROM forum_posts p WHERE p.board_id = ? AND p.status = 'published' AND p.review_state = 'published'",
+          )
           .get(board.id) as { c: number };
 
         const rows = conn
           .prepare(
             POST_SELECT +
-              ` WHERE p.board_id = ? AND p.status = 'published'
+              ` WHERE p.board_id = ? AND p.status = 'published' AND p.review_state = 'published'
                 ORDER BY ${order} LIMIT ? OFFSET ?`,
           )
           .all(board.id, pageSize, (page - 1) * pageSize) as PostRow[];
@@ -434,15 +461,33 @@ export function createForumPostService(deps: { db: SqliteDatabase }): ForumPostS
 
         const postId = newId();
         const now = nowMs();
+
+        // 自动审核：命中规则就压成待审，不进公开列表
+        const screened = screenPost({
+          title,
+          body,
+          bannedWords: readBannedWords(conn),
+        });
+        const reviewState = screened.verdict === 'blocked' ? 'pending_review' : 'published';
+
         conn
           .prepare(
             `INSERT INTO forum_posts
-               (id, board_id, author_id, title, body_md, status, is_pinned, like_count, reply_count, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, 'published', 0, 0, 0, ?, ?)`,
+               (id, board_id, author_id, title, body_md, status, review_state, is_pinned, like_count, reply_count, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, 'published', ?, 0, 0, 0, ?, ?)`,
           )
-          .run(postId, board.id, ctx.userId, title, body, now, now);
+          .run(postId, board.id, ctx.userId, title, body, reviewState, now, now);
         attachFiles(conn, 'forum_post_attachment_links', 'post_id', postId, input.fileIds, now);
-        return { postId };
+
+        // 审核记录：放行与挡下都记，后台能看到"这篇为什么进了人工"
+        conn
+          .prepare(
+            `INSERT INTO forum_post_screenings (id, post_id, rule, verdict, detail, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+          )
+          .run(newId(), postId, screened.rule, screened.verdict, screened.detail, now);
+
+        return { postId, pendingReview: reviewState === 'pending_review' };
       }, db);
     },
 
