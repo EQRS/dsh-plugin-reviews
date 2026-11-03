@@ -196,6 +196,9 @@ export function createForumBoardService(deps: { db: SqliteDatabase }): ForumBoar
 
   return {
     async listBoards(ctx) {
+      // 空库兜底：迁移里的种子要求"至少存在一个用户"（created_by 非空），
+      // 全新库安装时可能还没有用户，这里补建一次。幂等，有分区就直接返回。
+      ensureDefaultBoards(db);
       return withRead((conn) => {
         const rows = conn
           .prepare(
