@@ -18,7 +18,8 @@ const SEARCH_PAGES = [
   'src/app/reviews/page.tsx',
   'src/app/packs/page.tsx',
   'src/app/me/page.tsx',
-  'src/app/me/favorites/page.tsx',
+  // 收藏页拆成三类子页（迁移 0039）后，带搜索框的是插件子页，不是顶层重定向壳
+  'src/app/me/favorites/plugins/page.tsx',
   'src/app/me/drafts/[draftId]/choose-plugin/page.tsx',
 ];
 
