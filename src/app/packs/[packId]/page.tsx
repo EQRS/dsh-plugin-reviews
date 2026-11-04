@@ -15,7 +15,7 @@ import { renderMarkdownToSafeHtml } from '@/server/platform/markdown';
 import { formatVersionLabel } from '@/packages/common/status-text';
 import { formatDateTimeOr } from '@/packages/common/time';
 import { CopyButton } from '@/components/copy-button';
-import { PackFavoriteButton } from '@/components/pack-favorite-button';
+import { FavoritePicker } from '@/components/favorite-picker';
 import { PackHelpfulButton } from '@/components/pack-helpful-button';
 import { ReportButton } from '@/components/report-button';
 import { CommentSection } from '@/components/comment-section';
@@ -111,10 +111,15 @@ export default async function PackDetailPage({
               <span>{formatDateTimeOr(selected.publishedAt, '时间未知')}</span>
             </>
           ) : null}
-          <PackFavoriteButton
-            packId={detail.packId}
+          {/*
+            整合包收藏统一走 interactions（`pack_favorites`）：与 /me/favorites/packs 同源。
+            以前这里是 "一点收藏、再点取消" 的按钮，改成与插件一致的选择器，
+            收藏数由页面外壳提供（服务端已读好），这里只给开关。
+          */}
+          <FavoritePicker
+            kind="pack"
+            targetId={detail.packId}
             initialFavorited={detail.favoritedByMe}
-            initialCount={detail.favoriteCount}
             authenticated={ctx.userId !== null}
           />
           {selected ? (

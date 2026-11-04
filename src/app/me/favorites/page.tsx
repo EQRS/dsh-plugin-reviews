@@ -1,22 +1,13 @@
 /**
- * 我的收藏：收藏夹列表 + 标题搜索。
+ * /me/favorites → /me/favorites/plugins（设计文档 §4.3）。
  *
- * - 顶层可以新建收藏夹；
- * - 点击收藏夹进入 /me/favorites/[folderId] 查看内容；
- * - 收藏夹详情里**不提供**新建收藏夹（避免嵌套）。
+ * 收藏体系扩到三类内容之后，顶层这个路径只做重定向：老书签与老链接照旧能用，
+ * 落地页是插件子页（0039 之前这里本来就只有插件收藏）。带 q 搜索参数时一并带过去。
  */
 
-import Link from 'next/link';
-import { SearchGoButton } from '@/components/search-go-button';
 import { redirect } from 'next/navigation';
-import { isAdmin, isAuthenticated } from '@/server/platform/context';
-import { currentContext } from '../../api/_lib/context';
-import { getDb } from '@/server/platform/db';
-import { createInteractionsService } from '@/server/modules/interactions';
-import { MeNav } from '@/components/me-nav';
-import { CreateFolderForm } from '@/components/create-folder-form';
-import { FolderActions } from '@/components/folder-actions';
-import { formatDateTime } from '@/packages/common/time';
+// 本页只做重定向，不再渲染任何内容——原先的那些组件都已搬到子页。
+
 
 export const dynamic = 'force-dynamic';
 
@@ -24,132 +15,12 @@ function firstValue(v: string | string[] | undefined): string | undefined {
   return Array.isArray(v) ? v[0] : v;
 }
 
-export default async function FavoritesPage({
+export default async function FavoritesIndexPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const ctx = await currentContext();
-  if (!isAuthenticated(ctx)) redirect('/onboarding?returnTo=/me/favorites');
-
-  const isAdminView = isAdmin(ctx);
-
   const sp = await searchParams;
   const q = (firstValue(sp.q) ?? '').trim().slice(0, 100);
-  const service = createInteractionsService({ db: getDb() });
-  const folders = await service.listFavoriteFolders(ctx);
-  const results = q ? await service.searchFavorites(ctx, q) : [];
-
-  return (
-    <div>
-      <h1>我的收藏</h1>
-      <div className="me-layout">
-        <MeNav current="favorites" />
-        <div>
-          {/*
-            精选专栏入口：仅管理员可见。
-            收藏夹在这里的角色是「选品来源」——点进去先建一期草稿，再在编辑页从收藏夹挑插件。
-          */}
-          {isAdminView ? (
-            <p style={{ marginTop: 0 }}>
-              <Link href="/admin/featured?new=1" className="button primary">
-                创建精选专栏
-              </Link>
-            </p>
-          ) : null}
-          <form action="/me/favorites" method="get" className="search" style={{ marginBottom: 12 }}>
-            <input
-              type="search"
-              name="q"
-              defaultValue={q}
-              placeholder="按插件标题搜索"
-              aria-label="按插件标题搜索"
-              maxLength={100}
-            />
-            <SearchGoButton label="按插件标题搜索" />
-          </form>
-
-          {q ? (
-            <section className="panel" aria-label="搜索结果">
-              <div className="section-head">
-                <h2>搜索结果（{results.length}）</h2>
-              </div>
-              {results.length === 0 ? (
-                <p className="empty" style={{ marginBottom: 0 }}>
-                  没有匹配「{q}」的收藏插件。
-                </p>
-              ) : (
-                <ul className="item-list">
-                  {results.map((f) => (
-                    <li key={`${f.folderId}:${f.pluginId}`} className="item">
-                      <div className="item-body">
-                        <h3>
-                          <Link href={`/plugins/${f.pluginId}`}>{f.displayName ?? f.repositoryFullName}</Link>
-                          {f.pluginPath !== '.' ? <span className="muted"> · {f.pluginPath}</span> : null}
-                          <span className="tag site" style={{ marginLeft: 8 }}>
-                            在「{f.folderName}」
-                          </span>
-                        </h3>
-                        <div className="list-meta">
-                          <span>{f.repositoryFullName}</span>
-                          <span>收藏于 {formatDateTime(f.createdAt)}</span>
-                          {f.isArchived ? <span className="tag warn">已归档</span> : null}
-                        </div>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          ) : (
-            <>
-              <section className="panel" aria-label="收藏夹">
-                <div className="section-head">
-                  <h2>收藏夹（{folders.length}）</h2>
-                </div>
-                <CreateFolderForm />
-                <ul className="item-list">
-                  {folders.map((f) => (
-                    <li key={f.folderId} className="item">
-                      <div className="item-body">
-                        <h3>
-                          <Link href={`/me/favorites/${f.folderId}`}>{f.name}</Link>
-                          {f.isDefault ? (
-                            <span className="tag" style={{ marginLeft: 8 }}>
-                              默认
-                            </span>
-                          ) : null}
-                        </h3>
-                        <div className="list-meta">
-                          <span>{f.count} 个插件</span>
-                          <span>创建于 {formatDateTime(f.createdAt)}</span>
-                          <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 10, alignItems: 'center' }}>
-                            <Link href="/me/packs/new">创建整合包</Link>
-                            <FolderActions
-                              folderId={f.folderId}
-                              name={f.name}
-                              isDefault={f.isDefault}
-                              count={f.count}
-                            />
-                          </span>
-                        </div>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-                {folders.length === 0 ? (
-                  <p className="empty" style={{ marginBottom: 0 }}>
-                    还没有收藏夹。先在上面新建一个，或去<Link href="/plugins">插件目录</Link>收藏插件。
-                  </p>
-                ) : null}
-              </section>
-              <p className="muted" style={{ marginTop: 12, fontSize: 13 }}>
-                点击收藏夹查看里面的插件；在插件详情页点「☆ 收藏」可以直接选择收藏夹。
-              </p>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
+  redirect(q ? `/me/favorites/plugins?q=${encodeURIComponent(q)}` : '/me/favorites/plugins');
 }

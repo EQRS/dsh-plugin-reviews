@@ -14,7 +14,9 @@ import { createForumPostService } from '@/server/modules/forum/posts';
 import { renderMarkdownToSafeHtml } from '@/server/platform/markdown';
 import { formatDateTimeOr } from '@/packages/common/time';
 import { DomainError, ErrorCodes } from '@/packages/common/errors';
+import { createInteractionsService } from '@/server/modules/interactions';
 import { ReportButton } from '@/components/report-button';
+import { FavoritePicker } from '@/components/favorite-picker';
 import { ForumPostActions } from '@/components/forum-post-actions';
 import { ForumReplyForm } from '@/components/forum-reply-form';
 
@@ -46,6 +48,10 @@ export default async function ForumPostPage({
   // 这里不能再渲染，否则要么报类型错、要么把空串渲染成看起来「帖子没内容」。
   const bodyHtml = post.bodyMd === null ? '' : renderMarkdownToSafeHtml(post.bodyMd);
   const authenticated = ctx.userId !== null;
+  // 收藏状态服务端读好再传下去，省掉客户端一次往返；未登录直接给 false。
+  const favorited = authenticated
+    ? await createInteractionsService({ db }).isFavorited(ctx, 'post', postId)
+    : false;
 
   return (
     <div>
@@ -80,8 +86,17 @@ export default async function ForumPostPage({
       </article>
 
       <div style={{ marginTop: 8, display: 'flex', gap: 12, alignItems: 'center' }}>
+        {/* 待审 / 已删的帖子不给收藏入口：服务端的 assertFavoriteTarget 也会拒，但没必要让他点了才看到错误 */}
         {post.status === 'published' ? (
-          <ReportButton targetKind="post" targetId={post.postId} authenticated={authenticated} />
+          <>
+            <FavoritePicker
+              kind="post"
+              targetId={post.postId}
+              initialFavorited={favorited}
+              authenticated={authenticated}
+            />
+            <ReportButton targetKind="post" targetId={post.postId} authenticated={authenticated} />
+          </>
         ) : null}
       </div>
 

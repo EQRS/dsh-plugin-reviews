@@ -1,8 +1,11 @@
 /**
- * 我的整合包：我创建的 / 我收藏的 两个子页。
+ * 我的整合包：只剩「我创建的」。
  *
- * 创建页的状态：未提交 / 待审核 / 需补充 / 已发布 / 已撤回 / 已拒绝；
- * 收藏页绑定包本身，全部版本不可公开时保留状态。
+ * 「我收藏的」标签已改链到 /me/favorites/packs（0039 之后收藏统一的落点）：
+ * 两处各渲染一份收藏列表，迟早会一边改了另一边没改 —— 交接文档 §6.4 第 5 点。
+ * 老的 ?tab=favorites 链接仍然可用，直接重定向过去，不让人白点。
+ *
+ * 创建页的状态：未提交 / 待审核 / 需补充 / 已发布 / 已撤回 / 已拒绝。
  */
 
 import Link from 'next/link';
@@ -50,16 +53,11 @@ export default async function MyPacksPage({
   if (!isAuthenticated(ctx)) redirect('/onboarding?returnTo=/me/packs');
 
   const sp = await searchParams;
-  const tab = first(sp, 'tab') === 'favorites' ? 'favorites' : 'owned';
-  const pageRaw = Number.parseInt(first(sp, 'page') ?? '1', 10);
-  const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+  // 老链接（含收藏页的上一页/下一页）直接送到新的统一收藏页
+  if (first(sp, 'tab') === 'favorites') redirect('/me/favorites/packs');
 
   const service = createPacksService({ db: getDb() });
-  const owned = tab === 'owned' ? await service.listMyPacks(ctx) : [];
-  const favorite = tab === 'favorites' ? await service.listFavoritePacks(ctx, { page, page_size: 20 }) : null;
-
-  const tabHref = (next: 'owned' | 'favorites'): string =>
-    next === 'owned' ? '/me/packs' : '/me/packs?tab=favorites';
+  const owned = await service.listMyPacks(ctx);
 
   return (
     <div>
@@ -68,21 +66,19 @@ export default async function MyPacksPage({
         <MeNav current="packs" />
         <div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-            <Link href={tabHref('owned')} className={tab === 'owned' ? 'button primary' : 'button'}>
+            <Link href="/me/packs" className="button primary">
               我创建的
             </Link>
-            <Link href={tabHref('favorites')} className={tab === 'favorites' ? 'button primary' : 'button'}>
+            {/* 收藏已统一到 /me/favorites/packs，这里只留一跳，不再各渲染一份 */}
+            <Link href="/me/favorites/packs" className="button">
               我收藏的
             </Link>
-            {tab === 'owned' ? (
-              <Link href="/me/packs/new" className="button" style={{ marginLeft: 'auto' }}>
-                新建整合包
-              </Link>
-            ) : null}
+            <Link href="/me/packs/new" className="button" style={{ marginLeft: 'auto' }}>
+              新建整合包
+            </Link>
           </div>
 
-          {tab === 'owned' ? (
-            <section className="panel" aria-label="我创建的整合包">
+          <section className="panel" aria-label="我创建的整合包">
               <div className="section-head">
                 <h2>我创建的（{owned.length}）</h2>
               </div>
@@ -142,72 +138,7 @@ export default async function MyPacksPage({
                   ))}
                 </ul>
               )}
-            </section>
-          ) : null}
-
-          {tab === 'favorites' && favorite ? (
-            <section className="panel" aria-label="我收藏的整合包">
-              <div className="section-head">
-                <h2>我收藏的（{favorite.total}）</h2>
-              </div>
-              {favorite.items.length === 0 ? (
-                <p className="empty" style={{ marginBottom: 0 }}>
-                  还没有收藏别人的整合包。去<Link href="/packs">整合包广场</Link>看看。
-                </p>
-              ) : (
-                <ul className="item-list">
-                  {favorite.items.map((pack) => (
-                    <li key={pack.packId} className="item">
-                      <div className="item-body">
-                        <h3>
-                          {pack.hasPublicRelease ? (
-                            <Link href={`/packs/${pack.packId}`}>{pack.title}</Link>
-                          ) : (
-                            <span className="muted">{pack.title}</span>
-                          )}
-                        </h3>
-                        <div className="list-meta">
-                          <span>作者 {pack.authorNickname}</span>
-                          {pack.hasPublicRelease ? (
-                            <>
-                              <span>{pack.pluginCount} 个插件</span>
-                              <span>第 {pack.releaseNumber} 版</span>
-                            </>
-                          ) : (
-                            <span className="tag warn">
-                              {pack.hidden ? '已被隐藏' : '暂无可公开版本'}
-                            </span>
-                          )}
-                          <span>{pack.favoriteCount} 收藏</span>
-                        </div>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {favorite.total_pages > 1 ? (
-                <div className="pagination" style={{ marginTop: 12 }}>
-                  {favorite.page > 1 ? (
-                    <Link href={`/me/packs?tab=favorites&page=${favorite.page - 1}`} className="button">
-                      ← 上一页
-                    </Link>
-                  ) : (
-                    <span className="button" aria-disabled="true">← 上一页</span>
-                  )}
-                  <span className="muted">
-                    第 {favorite.page} / {favorite.total_pages} 页
-                  </span>
-                  {favorite.page < favorite.total_pages ? (
-                    <Link href={`/me/packs?tab=favorites&page=${favorite.page + 1}`} className="button">
-                      下一页 →
-                    </Link>
-                  ) : (
-                    <span className="button" aria-disabled="true">下一页 →</span>
-                  )}
-                </div>
-              ) : null}
-            </section>
-          ) : null}
+          </section>
 
           <p className="muted" style={{ marginTop: 12, fontSize: 13 }}>
             版本一旦发布即冻结：修正内容需要发布新版本，旧版本保持可查。
