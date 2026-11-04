@@ -106,7 +106,7 @@ describe('有帮助', () => {
 });
 
 describe('收藏', () => {
-  it('切换收藏、列出收藏；不存在的插件与 pack 被拒', async () => {
+  it('切换收藏、列出收藏；不存在的插件与不存在的整合包都被拒', async () => {
     ctx = createTestDb();
     const db = ctx.db;
     const service = createInteractionsService({ db });
@@ -131,9 +131,11 @@ describe('收藏', () => {
     await expect(
       service.toggleFavorite(caller(db, user), { kind: 'plugin', targetId: newId() }),
     ).rejects.toMatchObject({ code: 'target_unavailable' });
+    // 迁移 0039 之前整合包收藏是「暂不支持」（input_invalid）；现在真的能收，
+    // 所以这里的期望从「功能没开」变成「目标不存在」，与插件同口径。
     await expect(
       service.toggleFavorite(caller(db, user), { kind: 'pack', targetId: newId() }),
-    ).rejects.toMatchObject({ code: 'input_invalid' });
+    ).rejects.toMatchObject({ code: 'target_unavailable' });
   });
 });
 
