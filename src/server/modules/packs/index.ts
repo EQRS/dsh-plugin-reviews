@@ -20,6 +20,7 @@ import { assertCanWrite, isAdmin, type CallerContext } from '@/server/platform/c
 import { deliverModerationResultNotification } from '@/server/modules/notifications';
 import { verifyInstallTarget } from './verify';
 import { recordOperationInTx } from '@/server/modules/operations';
+import { createInteractionsService } from '@/server/modules/interactions';
 import { createHash } from 'node:crypto';
 import type { VersionValue } from '@/packages/common/field-rules';
 import { buildPage, type PageRequest, type PageResult } from '@/packages/common/result';
@@ -1294,7 +1295,7 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
              SELECT p.id AS pack_id, p.author_id, u.nickname, l.id AS release_id, l.release_number,
                     l.title, l.purpose, l.submitted_at,
                     (SELECT COUNT(*) FROM plugin_pack_release_items i WHERE i.release_id = l.id) AS item_count,
-                    (SELECT COUNT(*) FROM plugin_pack_favorites f WHERE f.pack_id = p.id) AS favorite_count
+                    (SELECT COUNT(*) FROM pack_favorites f WHERE f.pack_id = p.id) AS favorite_count
                FROM plugin_packs p
                JOIN latest l ON l.pack_id = p.id AND l.rn = 1
                JOIN users u ON u.id = p.author_id
@@ -1349,7 +1350,7 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
              SELECT p.id AS pack_id, p.author_id, u.nickname, l.id AS release_id, l.release_number,
                     l.review_status, l.review_note, l.auto_check_result, l.title, l.purpose, l.submitted_at,
                     (SELECT COUNT(*) FROM plugin_pack_release_items i WHERE i.release_id = l.id) AS item_count,
-                    (SELECT COUNT(*) FROM plugin_pack_favorites f WHERE f.pack_id = p.id) AS favorite_count,
+                    (SELECT COUNT(*) FROM pack_favorites f WHERE f.pack_id = p.id) AS favorite_count,
                     ce.withdrawn_at, ce.hidden_at
                FROM plugin_packs p
                JOIN latest l ON l.pack_id = p.id AND l.rn = 1
@@ -1459,13 +1460,15 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
           }
         }
 
+        // 收藏一律读 pack_favorites（0039 之后的新表）：详情页与 /me/favorites/packs 必须同源，
+        // 否则详情页点了收藏、新收藏页里看不到（交接文档 §6.4 的读写分裂）。
         const favoriteCount = (conn
-          .prepare('SELECT COUNT(*) AS c FROM plugin_pack_favorites WHERE pack_id = ?')
+          .prepare('SELECT COUNT(*) AS c FROM pack_favorites WHERE pack_id = ?')
           .get(packId) as { c: number }).c;
         const favoritedByMe =
           ctx.userId === null
             ? false
-            : conn.prepare('SELECT 1 AS x FROM plugin_pack_favorites WHERE pack_id = ? AND user_id = ?').get(packId, ctx.userId) !==
+            : conn.prepare('SELECT 1 AS x FROM pack_favorites WHERE pack_id = ? AND user_id = ?').get(packId, ctx.userId) !==
               undefined;
 
         let selected: PackReleaseDetail | null = null;
@@ -1542,40 +1545,20 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
       }, injectedDb ?? db);
     },
 
-    /** 收藏切换（关联包本身；没有公开版本的包不允许收藏）。 */
+    /**
+     * 收藏切换（关联包本身；没有公开版本的包不允许收藏）。
+     *
+     * **转发到 interactions**，不再自己读写收藏表：收藏的唯一真源是 interactions
+     * （三张收藏表 + 默认夹 + 「能不能收藏」口径）。旧实现写 plugin_pack_favorites，
+     * 而新收藏页读 pack_favorites，两边会对不上（交接文档 §6.4）。
+     */
     async togglePackFavorite(
       ctx: CallerContext,
       packId: string,
       injectedDb?: SqliteDatabase,
     ): Promise<{ favorited: boolean }> {
-      assertCanWrite(ctx);
-      const userId = ctx.userId;
-      return withTransaction((tx) => {
-        const conn = tx.db;
-        const exists = conn.prepare('SELECT 1 AS x FROM plugin_packs WHERE id = ?').get(packId);
-        if (!exists) throw err.unavailable('整合包不存在。');
-        const publicCount = (conn
-          .prepare(
-            `SELECT COUNT(*) AS c FROM plugin_pack_releases rel
-               JOIN content_entities ce ON ce.id = rel.id
-              WHERE rel.pack_id = ? AND rel.release_number IS NOT NULL AND rel.review_status = 'published'
-                AND ce.withdrawn_at IS NULL AND ce.hidden_at IS NULL`,
-          )
-          .get(packId) as { c: number }).c;
-        if (Number(publicCount) === 0) throw err.unavailable('这个整合包当前没有公开版本，无法收藏。');
-
-        const current = conn
-          .prepare('SELECT 1 AS x FROM plugin_pack_favorites WHERE pack_id = ? AND user_id = ?')
-          .get(packId, userId);
-        if (current) {
-          conn.prepare('DELETE FROM plugin_pack_favorites WHERE pack_id = ? AND user_id = ?').run(packId, userId);
-          return { favorited: false };
-        }
-        conn
-          .prepare('INSERT INTO plugin_pack_favorites (user_id, pack_id, created_at) VALUES (?, ?, ?)')
-          .run(userId, packId, nowMs());
-        return { favorited: true };
-      }, injectedDb ?? db);
+      const interactions = createInteractionsService({ db: injectedDb ?? db });
+      return interactions.toggleFavorite(ctx, { kind: 'pack', targetId: packId }, injectedDb);
     },
 
     /** 整合包版本的有帮助状态（匿名只给总数）。 */
@@ -1667,7 +1650,7 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
       return withRead((conn) => {
         const total = (
           conn
-            .prepare('SELECT COUNT(*) AS c FROM plugin_pack_favorites WHERE user_id = ?')
+            .prepare('SELECT COUNT(*) AS c FROM pack_favorites WHERE user_id = ?')
             .get(userId) as { c: number }
         ).c;
         const rows = conn
@@ -1681,9 +1664,9 @@ export function createPacksService(deps: { db?: SqliteDatabase } = {}) {
              SELECT p.id AS pack_id, u.nickname, l.id AS release_id, l.release_number, l.review_status,
                     l.title, l.purpose, l.submitted_at,
                     (SELECT COUNT(*) FROM plugin_pack_release_items i WHERE i.release_id = l.id) AS item_count,
-                    (SELECT COUNT(*) FROM plugin_pack_favorites f2 WHERE f2.pack_id = p.id) AS favorite_count,
+                    (SELECT COUNT(*) FROM pack_favorites f2 WHERE f2.pack_id = p.id) AS favorite_count,
                     ce.withdrawn_at, ce.hidden_at
-               FROM plugin_pack_favorites f
+               FROM pack_favorites f
                JOIN plugin_packs p ON p.id = f.pack_id
                LEFT JOIN latest l ON l.pack_id = p.id AND l.rn = 1
                LEFT JOIN content_entities ce ON ce.id = l.id

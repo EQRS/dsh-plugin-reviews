@@ -16,6 +16,7 @@ import {
   type TestDb,
 } from './support/db';
 import { createPacksService } from '../src/server/modules/packs';
+import { createInteractionsService } from '../src/server/modules/interactions';
 import { contentService } from '../src/server/modules/content';
 import { buildInstallCommands, normalizeInstallTarget, type InstallTarget } from '../src/packages/common/pack-install';
 import type { CallerContext } from '@/server/platform/context';
@@ -287,6 +288,45 @@ describe('整合包：发布与快照', () => {
 
     expect(await service.togglePackFavorite(caller(db, reader), created.packId, db)).toEqual({ favorited: false });
     expect((await service.listFavoritePacks(caller(db, reader), {}, db)).items).toHaveLength(0);
+  });
+
+  it('收藏同源：详情页 / 旧分页列表 / 新收藏页三处读写的是同一张表', async () => {
+    // 这条盯住交接文档 §6.4 的读写分裂：以前详情页写 plugin_pack_favorites，
+    // 新收藏页读 pack_favorites —— 详情页点了收藏，新收藏页里看不到。
+    ctx = createTestDb();
+    const db = ctx.db;
+    const packs = createPacksService({ db });
+    const interactions = createInteractionsService({ db });
+    const author = insertUser(db, { nickname: '作者' });
+    const reader = insertUser(db, { nickname: '读者' });
+    const plugins = seedPlugins(db, 1);
+
+    const created = await packs.createPackWithFirstRelease(caller(db, author), releaseInput(plugins), db);
+
+    // ① 走详情页入口（packs.togglePackFavorite）后，新收藏页必须看得到
+    expect(await packs.togglePackFavorite(caller(db, reader), created.packId, db)).toEqual({ favorited: true });
+    expect(await interactions.listFavoritePacks(caller(db, reader), db)).toHaveLength(1);
+    expect(await interactions.isFavorited(caller(db, reader), 'pack', created.packId, db)).toBe(true);
+    // 读的是新表，旧表一行都不该写
+    const legacyRows = db.prepare('SELECT COUNT(*) AS c FROM plugin_pack_favorites').get() as { c: number };
+    expect(legacyRows.c).toBe(0);
+
+    // ② 反过来：走新收藏页入口后，详情页的计数与「已收藏」也必须跟上
+    const detail = await packs.getPack(caller(db, reader), created.packId, {}, db);
+    expect(detail.favoritedByMe).toBe(true);
+    expect(detail.favoriteCount).toBe(1);
+    expect((await packs.listPublicPacks({ page: 1, page_size: 20 }, db)).items[0]!.favoriteCount).toBe(1);
+    expect((await packs.listFavoritePacks(caller(db, reader), {}, db)).items[0]!.favoriteCount).toBe(1);
+
+    // ③ 在新收藏页取消，详情页不留残影
+    expect(await interactions.toggleFavorite(caller(db, reader), { kind: 'pack', targetId: created.packId }, db)).toEqual({
+      favorited: false,
+    });
+    const afterCancel = await packs.getPack(caller(db, reader), created.packId, {}, db);
+    expect(afterCancel.favoritedByMe).toBe(false);
+    expect(afterCancel.favoriteCount).toBe(0);
+    expect((await packs.listFavoritePacks(caller(db, reader), {}, db)).items).toHaveLength(0);
+    expect((await packs.listPublicPacks({ page: 1, page_size: 20 }, db)).items[0]!.favoriteCount).toBe(0);
   });
 });
 
