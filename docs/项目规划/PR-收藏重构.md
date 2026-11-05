@@ -1,11 +1,25 @@
 # PR：收藏重构（三类内容共用收藏夹）
 
-分支 `feat/favorites-v3` → `feat/forum`（**依赖 PR A 的帖子表，合入顺序：PR A 先、本 PR 后**）。
+分支 `feat/favorites-v3` → `main`。
 
-> **本分支已按新的 PR A 重建。** 原先的 `feat/favorites-v2` 基于 `feat/forum@6781107`；
+> ## ⚠️ 合并前必读：本 PR 依赖 PR A，且提交数看起来偏多
+>
+> **本 PR 基于 PR A 的分支（`feat/forum`）建立，包含 PR A 的全部提交。**
+> GitHub 会显示 **22 个提交**，其中 **17 个属于 PR A、只有 5 个是本 PR 自己的**。
+> 这是叠罗汉式 PR 的正常现象，不是把无关改动混进来了。
+>
+> **合并顺序：必须先合并 PR A（#45），再合并本 PR。**
+> PR A 合入 main 后，本 PR 的 diff 会自动缩小到 5 个文件。
+>
+> 若先合本 PR：技术上不会坏（本 PR 包含 PR A 的全部内容），
+> 但会**绕过 PR A 正在进行的审核**——这是唯一要避免的情况。
+>
+> 已在本地推演过：main + PR A + 本 PR **两次都是 Fast-forward，零冲突**。
+
+> **为什么是重建过的分支**：原先的 `feat/favorites-v2` 基于 `feat/forum@6781107`；
 > PR A 复审后 rebase 到 `685c6a9`，历史被重写，直接合并会让 37 个文件全部变成 `add/add` 冲突。
-> 现在用 `git rebase --onto fix/forum-review feat/forum` 把 4 个提交摘下来重新接到新 PR A 上，
-> **冲突从 37 处降到 1 处**（且那 1 处是真问题，见下）。后续 PR A 再有改动，同一条命令即可跟上。
+> 现在用 `git rebase --onto fix/forum-review feat/forum` 把提交摘下来重新接到新 PR A 上，
+> **冲突从 37 处降到 1 处**（且那 1 处是真问题，见下方「本次重建时额外修掉的回归」）。
 
 ---
 
@@ -145,9 +159,15 @@ vitest run     → 82 文件 / 948 用例全绿（200.1 秒）
 
 ## 合入顺序
 
-**PR A（`feat/forum`）先合，本 PR 后合。** 本 PR 的 `post_favorites` 外键指向 `forum_posts`，
-迁移 0039 排在 0037/0038 之后。若 PR A 在复审中被改动，本分支用同一条命令跟上：
+**PR A（`feat/forum` → #45）先合，本 PR 后合。**
+
+技术原因：本 PR 的 `post_favorites` 外键指向 `forum_posts`，迁移 0039 排在 0037/0038 之后执行；
+没有 PR A 就没有这张表。
+
+**若 PR A 在复审中被改动**，本分支会失效（带着修改前的旧代码），用同一条命令跟上：
 
 ```bash
+git fetch origin
 git rebase --onto <新的 PR A 提交> feat/forum feat/favorites-v3
+git push --force-with-lease origin feat/favorites-v3
 ```
