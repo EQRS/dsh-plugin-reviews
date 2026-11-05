@@ -42,7 +42,9 @@ export default async function ForumPostPage({
   if (post.boardSlug !== slug) notFound();
 
   const replies = await service.listReplies(ctx, postId);
-  const bodyHtml = post.status === 'published' ? renderMarkdownToSafeHtml(post.bodyMd) : '';
+  // 服务层对无权查看的正文（待审帖、已删帖）返回 bodyMd = null：
+  // 这里不能再渲染，否则要么报类型错、要么把空串渲染成看起来「帖子没内容」。
+  const bodyHtml = post.bodyMd === null ? '' : renderMarkdownToSafeHtml(post.bodyMd);
   const authenticated = ctx.userId !== null;
 
   return (
@@ -66,6 +68,9 @@ export default async function ForumPostPage({
 
         {post.status === 'deleted' ? (
           <p className="notice">该帖已被作者或管理员删除。</p>
+        ) : post.bodyMd === null ? (
+          // 正文对当前访客不可见：待审帖只有作者与站方管理员看得到正文
+          <p className="notice">该帖正在审核中，暂不对外显示。</p>
         ) : (
           <div
             className="markdown-body"
@@ -125,6 +130,10 @@ export default async function ForumPostPage({
                     <p className="muted" style={{ margin: '6px 0' }}>
                       该回复已被删除。
                     </p>
+                  ) : reply.bodyMd === null ? (
+                    <p className="muted" style={{ margin: '6px 0' }}>
+                      该回复已被删除。
+                    </p>
                   ) : (
                     <div
                       className="markdown-body"
@@ -143,6 +152,10 @@ export default async function ForumPostPage({
                               <span>{formatDateTimeOr(child.createdAt, '未知')}</span>
                             </div>
                             {child.status === 'deleted' ? (
+                              <p className="muted" style={{ margin: '6px 0' }}>
+                                该回复已被删除。
+                              </p>
+                            ) : child.bodyMd === null ? (
                               <p className="muted" style={{ margin: '6px 0' }}>
                                 该回复已被删除。
                               </p>
