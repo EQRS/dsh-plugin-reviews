@@ -839,10 +839,22 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
         const postId = input.targetKind === 'post' ? input.targetId : null;
         const forumReplyId = input.targetKind === 'forum_reply' ? input.targetId : null;
 
-        // 去重按目标列判：讨论区目标没有 content_entity_id，用 NULL 比会永远不等
+        // 去重按**目标各自那一列**判，与迁移 0038 的四条部分唯一索引一一对应：
+        //   review / pack_release → content_entity_id
+        //   comment               → comment_id
+        //   post                  → post_id
+        //   forum_reply           → forum_reply_id
+        // 评论此前落到了 content_entity_id 上：同一条评测下两条不同评论的举报
+        // 会共用一个去重键，第一条挂起后第二条直接被当成"重复"挤掉。
         const dedupeColumn =
-          postId !== null ? 'post_id' : forumReplyId !== null ? 'forum_reply_id' : 'content_entity_id';
-        const dedupeValue = postId ?? forumReplyId ?? contentEntityId;
+          postId !== null
+            ? 'post_id'
+            : forumReplyId !== null
+              ? 'forum_reply_id'
+              : commentId !== null
+                ? 'comment_id'
+                : 'content_entity_id';
+        const dedupeValue = postId ?? forumReplyId ?? commentId ?? contentEntityId;
         const existing = conn
           .prepare(
             `SELECT id FROM reports
@@ -1060,11 +1072,12 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
               now,
             );
           } else if (report.target_kind === 'forum_reply' && report.forum_reply_id !== null) {
-            authorId = (
-              conn.prepare('SELECT author_id FROM forum_post_replies WHERE id = ?').get(report.forum_reply_id) as
-                | { author_id: string }
-                | undefined
-            )?.author_id ?? null;
+            const reply = conn
+              .prepare('SELECT author_id, post_id, parent_id, status FROM forum_post_replies WHERE id = ?')
+              .get(report.forum_reply_id) as
+              | { author_id: string; post_id: string; parent_id: string | null; status: string }
+              | undefined;
+            authorId = reply?.author_id ?? null;
             conn
               .prepare(
                 `UPDATE forum_post_replies
@@ -1072,6 +1085,15 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
                   WHERE id = ? AND status = 'published'`,
               )
               .run(adminId, now, now, report.forum_reply_id);
+            // 计数与 deleteReply 对齐：只有**顶层回复**才进 reply_count
+            // （createReply 只给 parent_id 为空的回复 +1）。漏掉这一步的话，
+            // 被举报隐藏的回复会一直算进"这条帖子有几条回复"，计数永久漂移；
+            // 而且 UPDATE 带 status='published' 守卫，重复处理不会重复扣减。
+            if (reply && reply.status === 'published' && reply.parent_id === null) {
+              conn
+                .prepare('UPDATE forum_posts SET reply_count = MAX(reply_count - 1, 0), updated_at = ? WHERE id = ?')
+                .run(now, reply.post_id);
+            }
             recordOperationInTx(
               conn,
               {
