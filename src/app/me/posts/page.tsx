@@ -7,6 +7,7 @@
  */
 
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
 import { getDb } from '@/server/platform/db';
 import { currentContext } from '../../api/_lib/context';
 import { MeNav } from '@/components/me-nav';
@@ -69,19 +70,9 @@ export default async function MePostsPage({
     );
   }
 
-  if (!booleanSetting(db, 'forum.enabled', true)) {
-    return (
-      <div>
-        <h1>我的帖子</h1>
-        <div className="me-layout">
-          <MeNav current="posts" />
-          <div>
-            <p className="empty">讨论区暂未开放。</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // 讨论区关掉时整页按不存在处理：只给提示等于告诉访客「这里本来有个讨论区」，
+  // 与 API 侧统一 404 的口径保持一致。
+  if (!booleanSetting(db, 'forum.enabled', true)) notFound();
 
   const status: ForumContentStatus = tab === 'deleted' ? 'deleted' : 'published';
   const list = tab === 'drafts' ? null : await createForumPostService({ db }).listMine(ctx, { page, status });

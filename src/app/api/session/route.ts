@@ -17,6 +17,7 @@ import { clearSessionCookie, readSessionToken } from '@/server/platform/session-
 import { createGithubLoginAdapter } from '@/server/adapters/login';
 import { currentContext, okJson, errorResponse, requestMeta } from '../_lib/context';
 import { testLoginAllowed } from '@/server/platform/test-login';
+import { booleanSetting } from '@/server/modules/settings';
 
 export const runtime = 'nodejs';
 
@@ -49,6 +50,10 @@ export async function GET(request: Request): Promise<Response> {
               accountStatus: ctx.accountStatus,
             }),
         githubLoginConfigured: githubConfigured,
+        // 讨论区总开关：导航栏据此隐藏入口。关站时 /forum 页面与接口都是 404
+        // （见 api/_lib/context.ts 的 assertForumEnabled），留着入口只会把人送进 404。
+        // 挂在会话接口上而不是新开一个：导航栏已经在这里取数据，不另起一次请求。
+        forumEnabled: booleanSetting(getDb(), 'forum.enabled', true),
         // 诊断字段：让本地能一眼看出测试通道开关是否生效（不含任何秘密）。
         testLoginEnabled: testLoginAllowed(),
       },

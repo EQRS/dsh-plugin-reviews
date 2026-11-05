@@ -19,7 +19,7 @@ import { newId } from '@/server/platform/id';
 import { withTransaction } from '@/server/platform/tx';
 import { numberSetting } from '@/server/modules/settings';
 import { err } from '@/packages/common/errors';
-import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../../_lib/context';
+import { currentContext, okJson, errorResponse, requestMeta, readJson, assertForumEnabled } from '../../_lib/context';
 
 export const runtime = 'nodejs';
 
@@ -29,6 +29,7 @@ const HARD_MAX_PER_ENTRY = 9;
 export async function POST(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
+    assertForumEnabled();
     const ctx = await currentContext();
     assertCanWrite(ctx);
 

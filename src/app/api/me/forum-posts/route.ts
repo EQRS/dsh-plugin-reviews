@@ -4,13 +4,15 @@ import { getDb } from '@/server/platform/db';
 import { assertCanWrite } from '@/server/platform/context';
 import { createForumPostService } from '@/server/modules/forum/posts';
 import type { ForumContentStatus } from '@/packages/common/forum';
-import { currentContext, okJson, errorResponse, requestMeta } from '../../_lib/context';
+import { currentContext, okJson, errorResponse, requestMeta, assertForumEnabled } from '../../_lib/context';
 
 export const runtime = 'nodejs';
 
 export async function GET(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
+    // 「我的帖子」是讨论区的一部分：关站后它与 /api/forum/** 同一口径（404），不单独留一个入口
+    assertForumEnabled();
     const ctx = await currentContext();
     assertCanWrite(ctx);
     const url = new URL(request.url);

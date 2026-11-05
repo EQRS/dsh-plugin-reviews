@@ -94,6 +94,30 @@ export interface PostingDecisionInput {
 }
 
 /**
+ * 编辑权限。
+ *
+ * 设计文档 §5 的权限表：**编辑帖子 = 作者 / 站方管理员 / 分区 owner**，
+ * 协管（moderator）只有软删与置顶，没有编辑。帖子正文是作者的署名作品，
+ * 让协管改字等于替别人发言——这与"协管能下架违规内容"是两件事。
+ *
+ * 放在这里而不是 posts.ts：权限判定只有一份，帖子服务与将来任何
+ * 编辑入口都走同一个函数，避免两处各写一套再漂移。
+ */
+export function decideEdit(input: {
+  /** 调用者是不是帖子作者。 */
+  isAuthor: boolean;
+  /** 站方管理员。 */
+  admin: boolean;
+  /** 调用者在本区的角色；不在本区任职为 null。 */
+  boardRole: BoardMemberRole | null;
+}): { allowed: boolean; reason: string } {
+  if (input.isAuthor) return { allowed: true, reason: '' };
+  if (input.admin) return { allowed: true, reason: '' };
+  if (input.boardRole === 'owner') return { allowed: true, reason: '' };
+  return { allowed: false, reason: '只有作者、分区区长或站方管理员可以编辑该帖。' };
+}
+
+/**
  * 判断能否在本区发帖。
  *
  * 返回 { allowed, reason }：拒绝时给出可读原因，页面直接展示，
@@ -196,9 +220,11 @@ export function createForumBoardService(deps: { db: SqliteDatabase }): ForumBoar
 
   return {
     async listBoards(ctx) {
-      // 空库兜底：迁移里的种子要求"至少存在一个用户"（created_by 非空），
-      // 全新库安装时可能还没有用户，这里补建一次。幂等，有分区就直接返回。
-      ensureDefaultBoards(db);
+      // 读路径**不写库**：分区为空时这里补建一次（幂等），但补建走的是
+      // "捕获唯一约束冲突后重读"而不是裸写——两个并发的首次访问会同时看到
+      // 空表，各自 INSERT，后到的那个撞 uq_forum_boards_slug，匿名浏览
+      // 首页就变成 500。谁先插进去都行，结果一样，所以撞了就重读。
+      ensureDefaultBoardsQuietly(db);
       return withRead((conn) => {
         const rows = conn
           .prepare(
@@ -306,6 +332,15 @@ export function createForumBoardService(deps: { db: SqliteDatabase }): ForumBoar
         conn
           .prepare('DELETE FROM forum_board_moderators WHERE board_id = ? AND user_id = ?')
           .run(boardId, userId);
+        // 撤销 owner 必须同时清掉 forum_boards.owner_id：它不只是展示字段，
+        // 还是"这个区的区长是谁"的权威副本。只删关系表会让分区列表继续挂着
+        // 一个已被罢免的人，而 transferOwner 又拿它做幂等判断——
+        // 于是"撤销 → 重新任命同一人"变成了 no-op，人回不来。
+        if (targetRole === 'owner' || row.owner_id === userId) {
+          conn
+            .prepare('UPDATE forum_boards SET owner_id = NULL, updated_at = ? WHERE id = ? AND owner_id = ?')
+            .run(nowMs(), boardId, userId);
+        }
       }, db);
     },
 
@@ -318,7 +353,10 @@ export function createForumBoardService(deps: { db: SqliteDatabase }): ForumBoar
           | { id: string }
           | undefined;
         if (!target) throw err.input('找不到该用户。', [{ path: 'userId', message: '未知用户' }]);
-        if (row.owner_id === userId) return; // 幂等
+        // 幂等判据看**两处**：分区上的 owner_id 与关系表里的角色。
+        // 只比 owner_id 不够——历史数据里 owner 被撤销后 owner_id 可能没清，
+        // 那时"重新任命同一人"会被误判成 no-op，人回不来。
+        if (row.owner_id === userId && roleOf(conn, boardId, userId) === 'owner') return;
 
         const now = nowMs();
         // 先把旧 owner 降为协管（保留其管理能力），再把新 owner 升上去
@@ -405,6 +443,27 @@ export function createForumBoardService(deps: { db: SqliteDatabase }): ForumBoar
 // ============================================================
 // 默认分区兜底
 // ============================================================
+
+/** SQLite 唯一约束冲突（better-sqlite3 把扩展错误码放在 code 上）。 */
+function isUniqueViolation(e: unknown): boolean {
+  const code = (e as { code?: unknown })?.code;
+  return code === 'SQLITE_CONSTRAINT_UNIQUE' || code === 'SQLITE_CONSTRAINT_PRIMARYKEY';
+}
+
+/**
+ * 读路径用的补建：与 `ensureDefaultBoards` 同一份数据，但**冲突即吞掉**。
+ *
+ * 浏览分区列表是匿名可做的只读操作，它不该因为"另一个请求刚好在建默认分区"
+ * 而回 500。真正写失败（比如库只读、磁盘满）仍然要抛——那说明系统坏了，
+ * 吞掉只会把一个明确的问题变成"分区列表莫名是空的"。
+ */
+function ensureDefaultBoardsQuietly(db: SqliteDatabase): void {
+  try {
+    ensureDefaultBoards(db);
+  } catch (e) {
+    if (!isUniqueViolation(e)) throw e;
+  }
+}
 
 /**
  * 保证默认分区存在。

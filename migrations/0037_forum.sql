@@ -259,32 +259,52 @@ SELECT 'board_general', 'general', '综合讨论', '插件、评测、整合包�
 -- ============================================================
 --
 -- 新增三个 kind：回复你的帖子 / 回复你的回复 / 分区申请结果。
--- 三者都不挂 content_entities（讨论区不是内容实体），靠 detail + 未来加 link_url 承载。
+-- 三者都不挂 content_entities（讨论区不是内容实体），靠 detail + link_url 承载。
+--
+-- ⚠️ 这里重建的是**全部迁移并集**后的 notifications，不是 0016 那一版的口径。
+-- 本仓库的迁移按文件名字典序执行，0037 跑完时表已经过了 0034（精选订阅）与 0036（问题反馈）：
+--   * 0034 加了 `link_url` 列（精选是"栏目"不是 content_entities 行，靠它指路）；
+--   * 0034 加了 kind `featured_published`，0036 又加了 `feedback_result`。
+-- 重建时若照搬旧口径，等于把后两个迁移加的列与 kind 一起删掉——查询侧一插就报
+-- "no column named link_url"，精选发布与反馈结果的站内通知整条链路失效。
+-- 所以 kind 列表、link_url 列、以及两条 detail / content_entity_id 的 CHECK 分组
+-- 都必须取 0034 + 0036 + 本文件的**并集**（与 0036 的版本逐字对齐后追加本文件三个 kind）。
+--
+-- 适用范围（重要）：本文件假定**0034 已经在本仓库里**，即执行到这里时源表已有
+-- `link_url` 列。PR 合并前工作区还缺 0034/0036，那时单独跑本文件会报
+-- "no such column: link_url" —— 这是缺上游迁移，不是本文件的缺陷；
+-- SQLite 也不支持 `ADD COLUMN IF NOT EXISTS`，无从在 SQL 里兜这个底。
+-- 因此本文件的测试必须以 0034/0036 在场为前提（见 tests/migrations-forum-union.test.ts）。
 --
 -- 沿用 0016 的重建方式。
 
 CREATE TABLE notifications_new (
   id                TEXT    PRIMARY KEY,
   recipient_id      TEXT    NOT NULL REFERENCES users(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
-  kind              TEXT    NOT NULL CHECK (kind IN ('comment_on_content', 'reply_to_comment', 'moderation_result', 'forum_reply', 'forum_reply_to_reply', 'forum_board_application')),
+  kind              TEXT    NOT NULL CHECK (kind IN ('comment_on_content', 'reply_to_comment', 'moderation_result', 'featured_published', 'feedback_result', 'forum_reply', 'forum_reply_to_reply', 'forum_board_application')),
   actor_id          TEXT    NOT NULL REFERENCES users(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
   comment_id        TEXT    REFERENCES comments(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
   content_entity_id TEXT    REFERENCES content_entities(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
   deduplication_key TEXT    NOT NULL CHECK (trim(deduplication_key) <> ''),
   detail            TEXT,
+  -- 站内跳转地址（精选 / 反馈 / 讨论区都是"栏目类"通知，没有 content_entity_id，靠它指路）
+  link_url          TEXT,
   read_at           INTEGER CHECK (read_at IS NULL OR read_at >= 0),
   created_at        INTEGER NOT NULL CHECK (created_at >= 0),
   CHECK (recipient_id <> actor_id),
+  -- 评论类 ⇔ 有 comment_id
   CHECK ((kind IN ('comment_on_content', 'reply_to_comment')) = (comment_id IS NOT NULL)),
-  CHECK ((kind IN ('moderation_result', 'forum_reply', 'forum_reply_to_reply', 'forum_board_application')) = (detail IS NOT NULL)),
-  CHECK (kind IN ('moderation_result', 'forum_reply', 'forum_reply_to_reply', 'forum_board_application') OR content_entity_id IS NOT NULL),
+  -- 处理结果 / 精选发布 / 反馈结果 / 讨论区三类 ⇔ 有 detail
+  CHECK ((kind IN ('moderation_result', 'featured_published', 'feedback_result', 'forum_reply', 'forum_reply_to_reply', 'forum_board_application')) = (detail IS NOT NULL)),
+  -- 只有"栏目类"通知允许没有内容锚点
+  CHECK (kind IN ('moderation_result', 'featured_published', 'feedback_result', 'forum_reply', 'forum_reply_to_reply', 'forum_board_application') OR content_entity_id IS NOT NULL),
   UNIQUE (deduplication_key)
 );
 
 INSERT INTO notifications_new
-  (id, recipient_id, kind, actor_id, comment_id, content_entity_id, deduplication_key, detail, read_at, created_at)
+  (id, recipient_id, kind, actor_id, comment_id, content_entity_id, deduplication_key, detail, link_url, read_at, created_at)
 SELECT
-  id, recipient_id, kind, actor_id, comment_id, content_entity_id, deduplication_key, detail, read_at, created_at
+  id, recipient_id, kind, actor_id, comment_id, content_entity_id, deduplication_key, detail, link_url, read_at, created_at
 FROM notifications;
 
 DROP TABLE notifications;

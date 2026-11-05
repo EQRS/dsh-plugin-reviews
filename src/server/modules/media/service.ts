@@ -252,6 +252,8 @@ export interface MediaService {
 function toView(row: AttachmentRow, file: FileRow | null): AttachmentView {
   const ready = row.processing_state === 'ready' && file !== null;
   return {
+    // ⚠️ 这是 attachments 主键，不是 attachment_files 主键。
+    // 讨论区等业务表引用文件时用的是 file_id（= displayFileId），两者不能混用。
     attachmentId: row.id,
     processingState: row.processing_state,
     lastErrorCode: row.last_error_code,
@@ -517,7 +519,9 @@ export function createMediaService(deps: MediaServiceDeps): MediaService {
           return { storageKey: file.storage_key, mime: file.mime_type };
         }
         if (file.variant_role !== 'display') return null;
-        if (!isPubliclyReferenced(conn, file.id)) return null;
+        if (!isPubliclyReferenced(conn, file.id) && !isForumPubliclyReferenced(conn, file.id)) {
+          return null;
+        }
         return { storageKey: file.storage_key, mime: file.mime_type };
       }, db);
 
@@ -562,6 +566,69 @@ function isPubliclyReferenced(db: SqliteDatabase, fileId: string): boolean {
     )
     .get(fileId) as { c: number };
   return row.c > 0;
+}
+
+/**
+ * 该文件是否被「当前可按公开链接访问」的讨论区内容引用。
+ *
+ * 只判最短的一组条件：帖子已发布（status='published' 且 review_state='published'）、
+ * 所在分区未归档。帖子层的细粒度可见性（删除原因、待审）归论坛模块，
+ * 这里不重复实现——媒体层只需要回答「一个拿到图片地址的访客该不该看见字节」。
+ *
+ * ⚠️ 回复的可见性跟着帖子走：帖子不可见时，回复里的图也一并读不到。
+ */
+function isForumPubliclyReferenced(db: SqliteDatabase, fileId: string): boolean {
+  // 讨论区的三张引用表来自迁移 0037。只跑了部分迁移的库（例如只装了基础的
+  // 部署形态、或只跑 0001-0003 的单元测试库）里没有这些表，此时直接判「未被
+  // 讨论区引用」即可 —— 媒体层不该因为业务模块未安装就抛 no such table。
+  if (!hasForumAttachmentTables(db)) return false;
+
+  const post = db
+    .prepare(
+      `SELECT count(*) AS c
+         FROM forum_post_attachment_links l
+         JOIN forum_posts p ON p.id = l.post_id
+         JOIN forum_boards b ON b.id = p.board_id
+        WHERE l.file_id = ?
+          AND p.status = 'published'
+          AND p.review_state = 'published'
+          AND b.status = 'active'`,
+    )
+    .get(fileId) as { c: number };
+  if (post.c > 0) return true;
+
+  const reply = db
+    .prepare(
+      `SELECT count(*) AS c
+         FROM forum_reply_attachment_links l
+         JOIN forum_post_replies r ON r.id = l.reply_id
+         JOIN forum_posts p ON p.id = r.post_id
+         JOIN forum_boards b ON b.id = p.board_id
+        WHERE l.file_id = ?
+          AND r.status = 'published'
+          AND p.status = 'published'
+          AND p.review_state = 'published'
+          AND b.status = 'active'`,
+    )
+    .get(fileId) as { c: number };
+  return reply.c > 0;
+}
+
+/**
+ * 讨论区附件引用表是否已迁移到位。
+ *
+ * 用 sqlite_master 查一次而不是 try/catch：后者会把「表结构写错」这类真错误
+ * 也一并吞掉，问题会以「图片莫名读不到」的形式藏起来。
+ */
+function hasForumAttachmentTables(db: SqliteDatabase): boolean {
+  const row = db
+    .prepare(
+      `SELECT count(*) AS c FROM sqlite_master
+        WHERE type = 'table'
+          AND name IN ('forum_post_attachment_links', 'forum_reply_attachment_links')`,
+    )
+    .get() as { c: number };
+  return row.c === 2;
 }
 
 /** 进程级单例（Web 与 worker 各自持有）。 */

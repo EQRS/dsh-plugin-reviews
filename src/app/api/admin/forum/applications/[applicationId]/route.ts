@@ -7,13 +7,14 @@ import { getDb } from '@/server/platform/db';
 import { assertCanAdmin } from '@/server/platform/context';
 import { createForumBoardApplicationService } from '@/server/modules/forum/applications';
 import { err } from '@/packages/common/errors';
-import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../../../../_lib/context';
+import { currentContext, okJson, errorResponse, requestMeta, readJson, assertForumEnabled } from '../../../../_lib/context';
 
 export const runtime = 'nodejs';
 
 export async function POST(request: Request, { params }: { params: Promise<{ applicationId: string }> }) {
   const { requestId } = requestMeta(request);
   try {
+    assertForumEnabled();
     const { applicationId } = await params;
     const ctx = await currentContext();
     assertCanAdmin(ctx);

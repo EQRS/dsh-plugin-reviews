@@ -9,13 +9,14 @@ import { assertCanWrite } from '@/server/platform/context';
 import { enforceRateLimit, refundQuietly, RATE_LIMIT_RULES } from '@/server/platform/rate-limit';
 import { rateLimitOverrideFor } from '@/server/modules/settings';
 import { createForumBoardApplicationService } from '@/server/modules/forum/applications';
-import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../../_lib/context';
+import { currentContext, okJson, errorResponse, requestMeta, readJson, assertForumEnabled } from '../../_lib/context';
 
 export const runtime = 'nodejs';
 
 export async function GET(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
+    assertForumEnabled();
     const ctx = await currentContext();
     assertCanWrite(ctx);
     const service = createForumBoardApplicationService({ db: getDb() });
@@ -28,6 +29,7 @@ export async function GET(request: Request): Promise<Response> {
 export async function POST(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
+    assertForumEnabled();
     const ctx = await currentContext();
     assertCanWrite(ctx);
     const body = await readJson(request);

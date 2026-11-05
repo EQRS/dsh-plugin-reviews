@@ -140,6 +140,13 @@ describe('两层回复', () => {
 });
 
 describe('图片', () => {
+  /**
+   * 造一张「已就绪」的图，返回 display 变体的文件 id。
+   *
+   * 讨论区的引用表 file_id 指向 attachment_files.id，且服务层只接受 display
+   * 变体（原图不能直接引用）。这两条是 S1 修复后确立的契约；此前这里造的是
+   * original 变体并直接当文件 id 传，等于绕过了前端真实会传的东西。
+   */
   function makeAttachment(db: TestDb['db'], owner: string, tag: string): string {
     const att = 'att_' + tag;
     const file = 'file_' + tag;
@@ -152,8 +159,8 @@ describe('图片', () => {
     ).run(
       file,
       att,
-      'orig',
-      'original',
+      'disp',
+      'display',
       'image/png',
       100,
       10,
@@ -190,7 +197,7 @@ describe('图片', () => {
     const bobFile = makeAttachment(db, bob, 'y1');
     await expect(
       posts.createPost(caller(db, alice), { ...basePost, fileIds: [bobFile] }),
-    ).rejects.toThrow(/只能引用本人上传的附件/);
+    ).rejects.toThrow(/只能引用自己上传的图片/);
   });
 });
 

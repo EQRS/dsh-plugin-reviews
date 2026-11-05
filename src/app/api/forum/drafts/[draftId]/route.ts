@@ -7,18 +7,20 @@
  */
 
 import { getDb } from '@/server/platform/db';
+import { withTransaction } from '@/server/platform/tx';
 import { assertCanWrite } from '@/server/platform/context';
 import { enforceRateLimit, refundQuietly, RATE_LIMIT_RULES } from '@/server/platform/rate-limit';
 import { rateLimitOverrideFor } from '@/server/modules/settings';
-import { createForumDraftService } from '@/server/modules/forum/drafts';
+import { createForumDraftService, deleteDraftInTx } from '@/server/modules/forum/drafts';
 import { createForumPostService } from '@/server/modules/forum/posts';
-import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../../../_lib/context';
+import { currentContext, okJson, errorResponse, requestMeta, readJson, assertForumEnabled } from '../../../_lib/context';
 
 export const runtime = 'nodejs';
 
 export async function GET(request: Request, context: { params: Promise<{ draftId: string }> }): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
+    assertForumEnabled();
     const ctx = await currentContext();
     assertCanWrite(ctx);
     const { draftId } = await context.params;
@@ -32,6 +34,7 @@ export async function GET(request: Request, context: { params: Promise<{ draftId
 export async function PATCH(request: Request, context: { params: Promise<{ draftId: string }> }): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
+    assertForumEnabled();
     const ctx = await currentContext();
     assertCanWrite(ctx);
     const { draftId } = await context.params;
@@ -39,6 +42,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ draft
       boardId?: unknown;
       title?: unknown;
       bodyMd?: unknown;
+      attachmentIds?: unknown;
+      /** @deprecated 旧字段名，等价于 attachmentIds。 */
       fileIds?: unknown;
     };
     const service = createForumDraftService({ db: getDb() });
@@ -47,6 +52,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ draft
       boardId: typeof body.boardId === 'string' ? body.boardId : undefined,
       title: typeof body.title === 'string' ? body.title : undefined,
       bodyMd: typeof body.bodyMd === 'string' ? body.bodyMd : undefined,
+      attachmentIds: body.attachmentIds,
       fileIds: body.fileIds,
     });
     return okJson(result, requestId);
@@ -58,6 +64,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ draft
 export async function DELETE(request: Request, context: { params: Promise<{ draftId: string }> }): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
+    assertForumEnabled();
     const ctx = await currentContext();
     assertCanWrite(ctx);
     const { draftId } = await context.params;
@@ -73,6 +80,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ draf
 export async function POST(request: Request, context: { params: Promise<{ draftId: string }> }): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
+    assertForumEnabled();
     const ctx = await currentContext();
     assertCanWrite(ctx);
     const { draftId } = await context.params;
@@ -85,14 +93,23 @@ export async function POST(request: Request, context: { params: Promise<{ draftI
 
     const ticket = await enforceRateLimit(db, 'forum_post', ctx.userId, 1, await rateLimitOverrideFor(db, RATE_LIMIT_RULES.forum_post));
     try {
-      const result = await postService.createPost(ctx, {
-        boardSlug: draft.boardSlug,
-        title: draft.title,
-        bodyMd: draft.bodyMd,
-        fileIds: draft.fileIds,
-      });
-      // 帖子已经落地，草稿留着反而让人以为没发出去
-      await draftService.deleteDraft(ctx, draftId);
+      // 建帖与删草稿在**同一个事务**里：此前是两个独立提交，帖子写进去之后
+      // 删草稿失败会回 500，用户重试就发出第二篇一模一样的帖子。
+      // 现在一起回滚，重试是安全的（帖子与草稿要么都在、要么都不在）。
+      //
+      // 注意 withTransaction 的回调必须是同步函数，而两个服务方法都是 async——
+      // 所以这里直接调它们的同步内核（postService.createPostInTx / deleteDraftInTx），
+      // 与外层事务共用同一个连接，绝不嵌套 withTransaction。
+      const result = withTransaction((tx) => {
+        const created = postService.createPostInTx(tx.db, ctx, {
+          boardSlug: draft.boardSlug,
+          title: draft.title,
+          bodyMd: draft.bodyMd,
+          fileIds: draft.fileIds,
+        });
+        deleteDraftInTx(tx.db, draftId, ctx.userId ?? '');
+        return created;
+      }, db);
       return okJson(result, requestId, 201);
     } catch (e) {
       await refundQuietly(ticket);

@@ -96,7 +96,9 @@ CREATE TABLE reports_new (
   post_id           TEXT    REFERENCES forum_posts(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
   forum_reply_id    TEXT    REFERENCES forum_post_replies(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
   reason            TEXT    NOT NULL CHECK (reason IN ('spam','abuse','misinformation','copyright','other')),
-  detail            TEXT    CHECK (detail IS NULL OR length(detail) <= 1000),
+  -- 与接口校验（interactions 举报提交）和前端计数文案一致：2000。这里不能收紧成 1000，
+  -- 否则接口放行的 1000-2000 字说明会在落库时被 CHECK 拒掉。
+  detail            TEXT    CHECK (detail IS NULL OR length(detail) <= 2000),
   state             TEXT    NOT NULL DEFAULT 'open' CHECK (state IN ('open','resolved','dismissed')),
   created_at        INTEGER NOT NULL CHECK (created_at >= 0),
   -- 每种目标类型只填自己那一列：多态外键用 CHECK 收口，避免四列都填或都不填。
@@ -119,11 +121,34 @@ DROP TABLE reports;
 ALTER TABLE reports_new RENAME TO reports;
 
 -- 同一人 + 同一目标 + 同一原因只允许一条未处理的举报（与 0012 同口径）。
--- content_entity_id 对评论/帖子恒为 NULL，只靠它去重会把不同评论当成同一个目标，
--- 所以把后三类目标各自的 id 也并进索引键。
-CREATE UNIQUE INDEX uq_reports_open_same
-  ON reports(reporter_id, target_kind, content_entity_id, comment_id, post_id, forum_reply_id, reason)
-  WHERE state = 'open';
+--
+-- ⚠️ 不能把四个目标列平铺进同一个唯一索引键：SQLite 的唯一索引把 NULL 视为互不相等，
+-- 而上面的 CHECK 保证每行**恰好一类**目标列非空、其余全为 NULL —— 四列一起进键，
+-- 任何两行都必在某列上一个 NULL、一个非 NULL，于是永远判为"不重复"，
+-- 对五类目标全部失效（0012 的 idx_reports_open_dedup 又随重建一起没了，等于举报去重整体回归）。
+-- 正确做法是按 target_kind 拆成部分唯一索引，每个索引的键里只放这一类**恒非空**的目标列：
+--   * review / pack_release：目标就是 content_entity_id 本身，两列合并成一个索引；
+--   * comment：0012 的口径是 content_entity_id 填**所属内容实体**（不是评论自己），
+--     所以去重键必须落在 comment_id 上，否则同一实体下的不同评论会被当成同一个目标；
+--   * post / forum_reply：各自那一列。
+-- WHERE 里带 target_kind，保证每个索引只覆盖自己这一类，互不干扰。
+--
+-- 覆盖度由 0038 自己的测试逐类实测（插两条相同举报，第二条必须被拒）。
+CREATE UNIQUE INDEX uq_reports_open_review
+  ON reports(reporter_id, target_kind, content_entity_id, reason)
+  WHERE state = 'open' AND target_kind IN ('review', 'pack_release');
+
+CREATE UNIQUE INDEX uq_reports_open_comment
+  ON reports(reporter_id, target_kind, comment_id, reason)
+  WHERE state = 'open' AND target_kind = 'comment';
+
+CREATE UNIQUE INDEX uq_reports_open_post
+  ON reports(reporter_id, target_kind, post_id, reason)
+  WHERE state = 'open' AND target_kind = 'post';
+
+CREATE UNIQUE INDEX uq_reports_open_forum_reply
+  ON reports(reporter_id, target_kind, forum_reply_id, reason)
+  WHERE state = 'open' AND target_kind = 'forum_reply';
 
 CREATE INDEX idx_reports_queue ON reports(state, created_at, id);
 

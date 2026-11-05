@@ -17,8 +17,11 @@ const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_BYTES = 10 * 1024 * 1024;
 
 interface AttachmentView {
+  /** attachments 主键：附件身份，不是文件 id。 */
   attachmentId: string;
   processingState: string;
+  /** attachment_files 主键（display 变体）：讨论区引用表要的正是它，就绪时非空。 */
+  displayFileId?: string | null;
   displayUrl?: string | null;
   lastErrorCode?: string | null;
 }
@@ -30,7 +33,13 @@ export function ForumImageUpload({
 }: {
   /** 拿到可用的图片地址后，由父组件决定插到哪里。 */
   onInsert: (markdown: string) => void;
-  /** 图片就绪时回调附件 id：发帖/回复的 fileIds 靠它收集，否则图只在正文里、不算附件。 */
+  /**
+   * 图片就绪时回调**文件 id**（attachment_files.id）：发帖/回复的附件引用靠它收集，
+   * 否则图只在正文里、不算附件。
+   *
+   * ⚠️ 不能回调 attachmentId：那是 attachments 主键，讨论区三张引用表的 file_id
+   * 外键指向的是 attachment_files。传错会被外键/触发器挡下，最后变成一次 500。
+   */
   onUploaded?: (fileId: string) => void;
   disabled?: boolean;
 }) {
@@ -70,8 +79,10 @@ export function ForumImageUpload({
 
       if (ready.processingState === 'ready' && ready.displayUrl) {
         onInsert('![' + file.name + '](' + ready.displayUrl + ')');
-        // 只有就绪的图才登记成附件：处理中的图引用进来也打不开
-        onUploaded?.(ready.attachmentId);
+        // 只有就绪的图才登记成附件：处理中的图引用进来也打不开。
+        // 登记的是 displayFileId（attachment_files.id），不是 attachmentId：
+        // 讨论区引用表的外键指向后者所在的表，传附件 id 会在写入时炸成 500。
+        if (ready.displayFileId) onUploaded?.(ready.displayFileId);
         setNote('图片已插入正文。');
         return;
       }

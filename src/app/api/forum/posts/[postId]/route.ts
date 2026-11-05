@@ -7,13 +7,14 @@
 import { getDb } from '@/server/platform/db';
 import { assertCanWrite } from '@/server/platform/context';
 import { createForumPostService } from '@/server/modules/forum/posts';
-import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../../../_lib/context';
+import { currentContext, okJson, errorResponse, requestMeta, readJson, assertForumEnabled } from '../../../_lib/context';
 
 export const runtime = 'nodejs';
 
 export async function GET(request: Request, { params }: { params: Promise<{ postId: string }> }) {
   const { requestId } = requestMeta(request);
   try {
+    assertForumEnabled();
     const { postId } = await params;
     const ctx = await currentContext();
     const service = createForumPostService({ db: getDb() });
@@ -26,6 +27,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ post
 export async function PATCH(request: Request, { params }: { params: Promise<{ postId: string }> }) {
   const { requestId } = requestMeta(request);
   try {
+    assertForumEnabled();
     const { postId } = await params;
     const ctx = await currentContext();
     assertCanWrite(ctx);
@@ -41,6 +43,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ po
 export async function DELETE(request: Request, { params }: { params: Promise<{ postId: string }> }) {
   const { requestId } = requestMeta(request);
   try {
+    assertForumEnabled();
     const { postId } = await params;
     const ctx = await currentContext();
     assertCanWrite(ctx);

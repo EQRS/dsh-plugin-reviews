@@ -4,7 +4,7 @@ import { getDb } from '@/server/platform/db';
 import { assertCanAdmin } from '@/server/platform/context';
 import { createForumBoardApplicationService } from '@/server/modules/forum/applications';
 import type { BoardApplicationStatus } from '@/packages/common/forum';
-import { currentContext, okJson, errorResponse, requestMeta } from '../../../_lib/context';
+import { currentContext, okJson, errorResponse, requestMeta, assertForumEnabled } from '../../../_lib/context';
 
 export const runtime = 'nodejs';
 
@@ -13,6 +13,7 @@ const STATUSES: BoardApplicationStatus[] = ['pending', 'approved', 'rejected'];
 export async function GET(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
+    assertForumEnabled();
     const ctx = await currentContext();
     assertCanAdmin(ctx);
     const url = new URL(request.url);

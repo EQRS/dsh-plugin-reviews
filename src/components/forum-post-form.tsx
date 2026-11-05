@@ -32,7 +32,8 @@ export function ForumPostForm({
   const [title, setTitle] = useState(draft?.title ?? '');
   const [bodyMd, setBodyMd] = useState(draft?.bodyMd ?? '');
   const [draftId, setDraftId] = useState<string | null>(draft?.draftId ?? null);
-  const [fileIds, setFileIds] = useState<string[]>(draft?.fileIds ?? []);
+  // 正文图片的文件 id（attachment_files.id）；上传控件回传的就是它
+  const [attachmentIds, setAttachmentIds] = useState<string[]>(draft?.fileIds ?? []);
   const [busy, setBusy] = useState(false);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [error, setError] = useState<ApiError | null>(null);
@@ -50,7 +51,7 @@ export function ForumPostForm({
           boardId: draftId === null ? boardId : undefined,
           title,
           bodyMd,
-          fileIds,
+          attachmentIds,
         },
       });
       setDraftId(result.draftId);
@@ -69,7 +70,7 @@ export function ForumPostForm({
     try {
       const result = await apiFetch<{ postId: string; pendingReview: boolean }>('/api/forum/posts', {
         method: 'POST',
-        json: { boardSlug, title: title.trim(), bodyMd: bodyMd.trim(), fileIds },
+        json: { boardSlug, title: title.trim(), bodyMd: bodyMd.trim(), attachmentIds },
       });
       // 帖子已落地就删草稿；删不掉也不拦着跳转（最坏留一条可手工删的草稿）
       if (draftId !== null) {
@@ -137,7 +138,9 @@ export function ForumPostForm({
         <ForumImageUpload
           disabled={busy}
           onInsert={(md) => setBodyMd((prev) => (prev ? prev + '\n\n' + md : md))}
-          onUploaded={(fileId) => setFileIds((prev) => (prev.includes(fileId) ? prev : [...prev, fileId]))}
+          onUploaded={(fileId) =>
+            setAttachmentIds((prev) => (prev.includes(fileId) ? prev : [...prev, fileId]))
+          }
         />
       </div>
 

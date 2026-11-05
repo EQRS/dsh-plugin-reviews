@@ -6,13 +6,14 @@
 
 import { getDb } from '@/server/platform/db';
 import { createForumBoardService } from '@/server/modules/forum/boards';
-import { currentContext, okJson, errorResponse, requestMeta } from '../../_lib/context';
+import { currentContext, okJson, errorResponse, requestMeta, assertForumEnabled } from '../../_lib/context';
 
 export const runtime = 'nodejs';
 
 export async function GET(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
+    assertForumEnabled();
     const ctx = await currentContext();
     const service = createForumBoardService({ db: getDb() });
     return okJson({ items: await service.listBoards(ctx) }, requestId);

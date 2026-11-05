@@ -1,5 +1,8 @@
 /**
- * 发帖：POST /api/forum/posts  { boardSlug, title, bodyMd, fileIds? }
+ * 发帖：POST /api/forum/posts  { boardSlug, title, bodyMd, attachmentIds? }
+ *
+ * attachmentIds 可以传 attachments.id（上传控件拿到的就是它），也可以传
+ * attachment_files.id；服务端统一解析。旧字段名 fileIds 仍接受。
  *
  * 频控走 rate_limits.forum_post_per_hour（后台可调）。
  * 鉴权先于读 body：匿名用户不该先拿到「参数错误」。
@@ -11,13 +14,14 @@ import { enforceRateLimit, refundQuietly, RATE_LIMIT_RULES } from '@/server/plat
 import { rateLimitOverrideFor } from '@/server/modules/settings';
 import { createForumPostService } from '@/server/modules/forum/posts';
 import { err } from '@/packages/common/errors';
-import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../../_lib/context';
+import { currentContext, okJson, errorResponse, requestMeta, readJson, assertForumEnabled } from '../../_lib/context';
 
 export const runtime = 'nodejs';
 
 export async function POST(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
+    assertForumEnabled();
     const ctx = await currentContext();
     assertCanWrite(ctx);
 
@@ -25,6 +29,8 @@ export async function POST(request: Request): Promise<Response> {
       boardSlug?: unknown;
       title?: unknown;
       bodyMd?: unknown;
+      attachmentIds?: unknown;
+      /** @deprecated 旧字段名，等价于 attachmentIds。 */
       fileIds?: unknown;
     };
     if (typeof body.boardSlug !== 'string' || body.boardSlug.length === 0) {
@@ -39,6 +45,7 @@ export async function POST(request: Request): Promise<Response> {
         boardSlug: body.boardSlug,
         title: body.title,
         bodyMd: body.bodyMd,
+        attachmentIds: Array.isArray(body.attachmentIds) ? body.attachmentIds : undefined,
         fileIds: Array.isArray(body.fileIds) ? body.fileIds : undefined,
       });
       return okJson(result, requestId, 201);

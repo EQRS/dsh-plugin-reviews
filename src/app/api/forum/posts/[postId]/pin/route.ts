@@ -4,13 +4,14 @@ import { getDb } from '@/server/platform/db';
 import { assertCanWrite } from '@/server/platform/context';
 import { createForumPostService } from '@/server/modules/forum/posts';
 import { err } from '@/packages/common/errors';
-import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../../../../_lib/context';
+import { currentContext, okJson, errorResponse, requestMeta, readJson, assertForumEnabled } from '../../../../_lib/context';
 
 export const runtime = 'nodejs';
 
 export async function POST(request: Request, { params }: { params: Promise<{ postId: string }> }) {
   const { requestId } = requestMeta(request);
   try {
+    assertForumEnabled();
     const { postId } = await params;
     const ctx = await currentContext();
     assertCanWrite(ctx);

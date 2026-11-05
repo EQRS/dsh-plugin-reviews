@@ -227,6 +227,8 @@ export function createForumBoardApplicationService(deps: {
           recipientId: app.applicant_id,
           actorId: ctx.userId,
           contentEntityId: null,
+          // 走分区申请自己的 kind（迁移 0037 已建这类），不再冒充 moderation_result
+          kind: 'forum_board_application',
           detail: '分区「' + app.name + '」已通过审核，你可以开始发帖了。' + (noteText ? '附言：' + noteText : ''),
           deduplicationKey: 'forum_board_application:' + applicationId + ':' + app.applicant_id,
           now,
@@ -258,6 +260,7 @@ export function createForumBoardApplicationService(deps: {
           recipientId: app.applicant_id,
           actorId: ctx.userId,
           contentEntityId: null,
+          kind: 'forum_board_application',
           detail: '分区申请「' + app.name + '」未通过：' + noteText,
           deduplicationKey: 'forum_board_application:' + applicationId + ':' + app.applicant_id,
           now,

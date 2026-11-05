@@ -7,13 +7,14 @@
 import { getDb } from '@/server/platform/db';
 import { assertCanWrite } from '@/server/platform/context';
 import { createForumDraftService } from '@/server/modules/forum/drafts';
-import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../../_lib/context';
+import { currentContext, okJson, errorResponse, requestMeta, readJson, assertForumEnabled } from '../../_lib/context';
 
 export const runtime = 'nodejs';
 
 export async function GET(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
+    assertForumEnabled();
     const ctx = await currentContext();
     assertCanWrite(ctx);
     const service = createForumDraftService({ db: getDb() });
@@ -31,6 +32,7 @@ export async function GET(request: Request): Promise<Response> {
 export async function POST(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
+    assertForumEnabled();
     const ctx = await currentContext();
     assertCanWrite(ctx);
     const body = (await readJson(request)) as {
@@ -38,6 +40,8 @@ export async function POST(request: Request): Promise<Response> {
       boardId?: unknown;
       title?: unknown;
       bodyMd?: unknown;
+      attachmentIds?: unknown;
+      /** @deprecated 旧字段名，等价于 attachmentIds。 */
       fileIds?: unknown;
     };
     const service = createForumDraftService({ db: getDb() });
@@ -46,6 +50,7 @@ export async function POST(request: Request): Promise<Response> {
       boardId: typeof body.boardId === 'string' ? body.boardId : undefined,
       title: typeof body.title === 'string' ? body.title : undefined,
       bodyMd: typeof body.bodyMd === 'string' ? body.bodyMd : undefined,
+      attachmentIds: body.attachmentIds,
       fileIds: body.fileIds,
     });
     return okJson(result, requestId, result.created ? 201 : 200);

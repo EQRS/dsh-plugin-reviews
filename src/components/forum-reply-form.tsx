@@ -24,6 +24,12 @@ export function ForumReplyForm({
 }) {
   const router = useRouter();
   const [bodyMd, setBodyMd] = useState('');
+  /**
+   * 已上传的正文图片（attachment_files.id）。回复没有草稿层，附件引用只在提交
+   * 那一刻随请求体一次送到服务端——不收集的话，图只以 Markdown 留在正文里，
+   * 不算附件，别人也就读不到（媒体层按引用判可见性）。
+   */
+  const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [open, setOpen] = useState(!compact);
@@ -34,9 +40,15 @@ export function ForumReplyForm({
     try {
       await apiFetch('/api/forum/posts/' + postId + '/replies', {
         method: 'POST',
-        json: { bodyMd: bodyMd.trim(), parentId },
+        json: {
+          bodyMd: bodyMd.trim(),
+          parentId,
+          // 顶层回复才有图；回复的回复不带（服务端也会拒）
+          attachmentIds: parentId === undefined ? attachmentIds : undefined,
+        },
       });
       setBodyMd('');
+      setAttachmentIds([]);
       if (compact) setOpen(false);
       router.refresh();
     } catch (e) {
@@ -71,6 +83,9 @@ export function ForumReplyForm({
         <ForumImageUpload
           disabled={busy}
           onInsert={(md) => setBodyMd((prev) => (prev ? prev + '\n\n' + md : md))}
+          onUploaded={(fileId) =>
+            setAttachmentIds((prev) => (prev.includes(fileId) ? prev : [...prev, fileId]))
+          }
         />
       ) : null}
       <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center' }}>

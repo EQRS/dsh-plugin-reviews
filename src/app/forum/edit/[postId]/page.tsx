@@ -42,7 +42,10 @@ export default async function EditForumPostPage({ params }: { params: Promise<{ 
       <ForumPostEditForm
         postId={post.postId}
         initialTitle={post.title}
-        initialBody={post.bodyMd}
+        // getPost 对无权查看的正文返回 null；但能进到编辑页的人（canEdit 已过）
+        // 必然是作者或管理员，服务层对他们始终给出正文。这里用 ?? '' 只为类型收口，
+        // 真出现 null 说明服务层可见性判定与这里不一致，不是正常路径。
+        initialBody={post.bodyMd ?? ''}
         returnHref={'/forum/' + post.boardSlug + '/' + post.postId}
       />
     </div>
