@@ -25,6 +25,7 @@ import { newId } from '@/server/platform/id';
 import { nowMs } from '@/server/platform/time';
 import { err } from '@/packages/common/errors';
 import { assertCanWrite, isAdmin, type CallerContext } from '@/server/platform/context';
+import { deliverPluginClaimResultNotification } from '@/server/modules/notifications';
 
 export type OwnershipStatus = 'pending' | 'verified' | 'rejected';
 export type OwnershipSource = 'github_match' | 'claimed';
@@ -162,6 +163,36 @@ export interface PluginOwnershipService {
   countVerifiedForUser(userId: string, injectedDb?: SqliteDatabase): Promise<number>;
 }
 
+/**
+ * 认领结果通知（设计 §7）。
+ *
+ * 在审核事务内投递：投递函数返回 DeliverResult、不抛业务错，
+ * 所以通知发不出去不会回滚审核结论（审核结论比通知重要）。
+ * 去重键带结果，同一结论重放只发一条。
+ */
+function deliverClaimResult(
+  conn: SqliteDatabase,
+  input: {
+    ownershipId: string;
+    recipientId: string;
+    adminId: string;
+    approved: boolean;
+    note: string | null;
+    now: number;
+  },
+): void {
+  deliverPluginClaimResultNotification(conn, {
+    recipientId: input.recipientId,
+    actorId: input.adminId,
+    detail: input.approved
+      ? '你认领的插件已通过审核，可以在「我的插件」里看到。'
+      : `你认领的插件未通过审核${input.note ? `：${input.note}` : '。'}`,
+    linkUrl: '/me/my-plugins',
+    deduplicationKey: `plugin_claim:${input.ownershipId}:${input.recipientId}:${input.approved ? 'approved' : 'rejected'}`,
+    now: input.now,
+  });
+}
+
 export function createPluginOwnershipService(deps: { db: SqliteDatabase }): PluginOwnershipService {
   const db = deps.db;
 
@@ -275,9 +306,9 @@ export function createPluginOwnershipService(deps: { db: SqliteDatabase }): Plug
       return withTransaction((tx) => {
         const conn = tx.db;
         const row = conn
-          .prepare('SELECT id, status, source, plugin_id FROM plugin_ownerships WHERE id = ?')
+          .prepare('SELECT id, user_id, status, source, plugin_id FROM plugin_ownerships WHERE id = ?')
           .get(ownershipId) as
-          | { id: string; status: OwnershipStatus; source: OwnershipSource; plugin_id: string }
+          | { id: string; user_id: string; status: OwnershipStatus; source: OwnershipSource; plugin_id: string }
           | undefined;
         if (!row) throw err.unavailable('认领记录不存在。');
         if (row.status !== 'pending') throw err.conflict('这条认领已经处理过了。');
@@ -294,6 +325,14 @@ export function createPluginOwnershipService(deps: { db: SqliteDatabase }): Plug
               "UPDATE plugin_ownerships SET status = 'verified', reviewer_id = ?, reviewed_at = ? WHERE id = ?",
             )
             .run(adminId, now, ownershipId);
+          deliverClaimResult(conn, {
+            ownershipId,
+            recipientId: row.user_id,
+            adminId: adminId as string,
+            approved: true,
+            note: null,
+            now,
+          });
           return;
         }
 
@@ -304,6 +343,14 @@ export function createPluginOwnershipService(deps: { db: SqliteDatabase }): Plug
               WHERE id = ?`,
           )
           .run(adminId, now, note !== null && note.trim().length > 0 ? note.trim().slice(0, 500) : null, ownershipId);
+        deliverClaimResult(conn, {
+          ownershipId,
+          recipientId: row.user_id,
+          adminId: adminId as string,
+          approved: false,
+          note: note !== null && note.trim().length > 0 ? note.trim().slice(0, 500) : null,
+          now,
+        });
       }, injectedDb ?? db);
     },
 
