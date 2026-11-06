@@ -22,7 +22,22 @@ export type NotificationKind =
   | 'reply_to_comment'
   | 'moderation_result'
   | 'featured_published'
-  | 'feedback_result';
+  | 'feedback_result'
+  | 'forum_reply'
+  | 'forum_reply_to_reply'
+  /**
+   * 分区申请审核结果。迁移 0037 建了这一类，服务层此前却一律用
+   * `moderation_result` 发（且没有跳转地址）——数据库允许的 kind 没有任何代码产生它，
+   * 属于"表里写着、实际走不到"的死 kind。现在申请审核走它，队列能按 kind 分流。
+   */
+  | 'forum_board_application';
+
+/** 讨论区类通知：没有 content_entity_id，锚点要另外记（见下方锚点解析）。 */
+const FORUM_KINDS: ReadonlySet<NotificationKind> = new Set<NotificationKind>([
+  'forum_reply',
+  'forum_reply_to_reply',
+  'forum_board_application',
+]);
 
 export interface NotificationView {
   id: string;
@@ -140,9 +155,15 @@ export function deliverModerationResultNotification(
     contentEntityId: string | null;
     detail: string;
     deduplicationKey: string;
+    /** 默认 moderation_result；讨论区分区申请审核用 forum_board_application。 */
+    kind?: NotificationKind;
     now: number;
   },
 ): DeliverResult {
+  // kind 可覆盖：分区申请审核结果有自己的一类（迁移 0037 的 forum_board_application），
+  // 此前一律记成 moderation_result，后台队列就没法按"分区申请"分流。
+  // 默认值保持 moderation_result，旧调用点行为不变。
+  const kind: NotificationKind = input.kind ?? 'moderation_result';
   const detail = input.detail.trim();
   if (detail.length === 0) {
     // 编程错误：处理结果必须有一句人话说明，否则用户收到一条空通知。
@@ -157,12 +178,13 @@ export function deliverModerationResultNotification(
     .prepare(
       `INSERT INTO notifications
          (id, recipient_id, kind, actor_id, comment_id, content_entity_id, deduplication_key, detail, read_at, created_at)
-       VALUES (?, ?, 'moderation_result', ?, NULL, ?, ?, ?, NULL, ?)
+       VALUES (?, ?, ?, ?, NULL, ?, ?, ?, NULL, ?)
        ON CONFLICT (deduplication_key) DO NOTHING`,
     )
     .run(
       newId(input.now),
       input.recipientId,
+      kind,
       input.actorId,
       input.contentEntityId,
       input.deduplicationKey,
@@ -174,6 +196,7 @@ export function deliverModerationResultNotification(
   return { created: true, reason: null, recipientId: input.recipientId };
 }
 
+/**
 /**
  * 投递一条「精选发布」通知（订阅了栏目的人各收一条）。
  *
@@ -214,6 +237,59 @@ export function deliverFeaturedPublishedNotification(
       input.deduplicationKey,
       detail,
       input.linkUrl,
+      input.now,
+    );
+
+  if (inserted.changes === 0) return { created: false, reason: 'duplicate', recipientId: input.recipientId };
+  return { created: true, reason: null, recipientId: input.recipientId };
+}
+
+/**
+ * 投递一条讨论区通知（**在发帖/回复事务内**调用）。
+ *
+ * 与评论通知的差别：讨论区不是 content_entities，所以没有 content_entity_id，
+ * 正文位置用 `detail`（一句摘要）。kind 区分「回复你的帖子」与「回复你的回复」，
+ * 去重键按**回复 id** 而非内容：同一人可能对你的帖子回复多次，那是多条通知。
+ */
+export function deliverForumReplyNotification(
+  db: SqliteDatabase,
+  input: {
+    recipientId: string;
+    actorId: string;
+    kind: 'forum_reply' | 'forum_reply_to_reply';
+    detail: string;
+    deduplicationKey: string;
+    /** 被回复的那条回复（点通知要能落到它上面）。 */
+    replyId?: string | null;
+    /** 回复所在帖子，用于拼跳转地址。 */
+    postId?: string | null;
+    now: number;
+  },
+): DeliverResult {
+  const detail = input.detail.trim();
+  if (detail.length === 0) {
+    throw err.internal('讨论区通知缺少摘要，拒绝写入。');
+  }
+  if (input.recipientId === input.actorId) {
+    return { created: false, reason: 'self', recipientId: input.recipientId };
+  }
+
+  const inserted = db
+    .prepare(
+      `INSERT INTO notifications
+         (id, recipient_id, kind, actor_id, comment_id, content_entity_id, deduplication_key, detail, read_at, created_at)
+       VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, NULL, ?)
+       ON CONFLICT (deduplication_key) DO NOTHING`,
+    )
+    .run(
+      newId(input.now),
+      input.recipientId,
+      input.kind,
+      input.actorId,
+      // 讨论区通知不占 comment_id 列（迁移 0037 的 CHECK 要求这两列只能二选一）。
+      // 跳到哪一条回复从去重键 forum_reply:<replyId>:<recipient> 里解析。
+      input.deduplicationKey,
+      detail,
       input.now,
     );
 
@@ -297,7 +373,7 @@ export function createNotificationsService(deps: { db: SqliteDatabase }): Notifi
       const unreadOnly = req.unreadOnly === true;
       const rows = db
         .prepare(
-          `SELECT n.id, n.kind, n.comment_id, n.content_entity_id, n.read_at, n.created_at,
+          `SELECT n.id, n.kind, n.comment_id, n.content_entity_id, n.deduplication_key, n.read_at, n.created_at,
                   u.nickname AS actor_nickname, u.avatar_url AS actor_avatar_url,
                   ce.content_type, rev.body AS body, n.detail AS detail, n.link_url
              FROM notifications n
@@ -314,7 +390,8 @@ export function createNotificationsService(deps: { db: SqliteDatabase }): Notifi
         id: string;
         kind: NotificationKind;
         comment_id: string | null;
-        content_entity_id: string;
+        content_entity_id: string | null;
+        deduplication_key: string;
         read_at: number | null;
         created_at: number;
         actor_nickname: string;
@@ -338,14 +415,52 @@ export function createNotificationsService(deps: { db: SqliteDatabase }): Notifi
         return null;
       };
 
+      /**
+       * 讨论区通知的跳转地址。
+       *
+       * 此前 hrefFor 只看 content_entity_id，而讨论区通知这一列恒为 NULL，
+       * 于是**所有**"有人回复了你"的通知都是点不开的。锚点按 kind 取：
+       *   forum_reply / forum_reply_to_reply → 落到具体回复所在的帖子页，带 #reply-{id}
+       *   forum_board_application            → 申请人的"我的分区申请"页
+       * 取不到对应行（帖子/回复被硬删）时返回 null，前端按"无跳转"展示，
+       * 不编一个会 404 的地址出来。
+       */
+      const forumHrefFor = (kind: NotificationKind, deduplicationKey: string): string | null => {
+        if (kind === 'forum_board_application') return '/forum/applications';
+        if (kind === 'forum_reply' || kind === 'forum_reply_to_reply') {
+          // 去重键的形态是 forum_reply:<replyId>:<recipientId>（见 forum/posts.ts）。
+          // 迁移 0037 的 CHECK 不允许讨论区通知占用 comment_id / content_entity_id，
+          // 所以锚点从去重键里取——它本来就唯一且稳定。
+          const replyId = deduplicationKey.split(':')[1] ?? '';
+          if (replyId.length > 0) {
+            const byReply = db
+              .prepare(
+                `SELECT p.id AS post_id, b.slug AS board_slug
+                   FROM forum_post_replies r
+                   JOIN forum_posts p ON p.id = r.post_id
+                   JOIN forum_boards b ON b.id = p.board_id
+                  WHERE r.id = ?`,
+              )
+              .get(replyId) as { post_id: string; board_slug: string } | undefined;
+            if (byReply) return `/forum/${byReply.board_slug}/${byReply.post_id}#reply-${replyId}`;
+          }
+        }
+        // 取不到对应行（帖子/回复被硬删）时返回 null，前端按"无跳转"展示，
+        // 不编一个会 404 的地址出来。
+        return null;
+      };
+
       return {
         items: rows.map((r) => ({
           id: r.id,
           kind: r.kind,
           commentId: r.comment_id,
           contentEntityId: r.content_entity_id,
-          // 栏目类通知（精选）没有 content_entity_id，跳转地址存在 link_url
-          href: r.link_url ?? hrefFor(r.content_entity_id, r.content_type),
+          // 讨论区类没有 content_entity_id，锚点从去重键解析；
+          // 其余栏目类（精选 / 反馈）跳转地址存在 link_url。
+          href: FORUM_KINDS.has(r.kind)
+            ? forumHrefFor(r.kind, r.deduplication_key)
+            : (r.link_url ?? hrefFor(r.content_entity_id, r.content_type)),
           actorNickname: r.actor_nickname,
           actorAvatarUrl: r.actor_avatar_url,
           // 处理结果通知没有评论正文，正文位置放它自己的说明

@@ -23,7 +23,7 @@ export function ReportButton({
   targetId,
   authenticated,
 }: {
-  targetKind: 'review' | 'comment' | 'pack_release';
+  targetKind: 'review' | 'comment' | 'pack_release' | 'post' | 'forum_reply';
   targetId: string;
   authenticated: boolean;
 }) {

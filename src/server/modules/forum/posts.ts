@@ -1,0 +1,919 @@
+/**
+ * 讨论区 · 帖子与回复。
+ *
+ * 形态（设计文档 §3.2）：
+ *   * 帖子与顶层回复都用 Markdown，可带图片；**回复的回复不能带图**。
+ *   * 回复只有两层，第三层由迁移 0037 的触发器拒绝——这里再判一次是为了给出
+ *     能看懂的错误，而不是把 SQL 的 ABORT 文案抛给用户。
+ *   * 删除是**软删**：行保留、status='deleted'，回复者与收藏者能看到"已删除"
+ *     而不是内容凭空消失。软删不级联删回复与点赞，那些是别人的痕迹。
+ *   * like_count / reply_count / last_reply_at 在写事务内维护，列表排序靠它们。
+ */
+
+import { assertCanWrite, isAdmin, type CallerContext } from '@/server/platform/context';
+import { nowMs } from '@/server/platform/time';
+import { newId } from '@/server/platform/id';
+import { withRead, withTransaction } from '@/server/platform/tx';
+import type { SqliteDatabase } from '@/server/platform/db';
+import { err } from '@/packages/common/errors';
+import type { PageResult } from '@/packages/common/result';
+import { buildPage, PaginationDefaults } from '@/packages/common/result';
+import {
+  FORUM_LIMITS,
+  normalizeBoardSlug,
+  type BoardStatus,
+  type ForumContentStatus,
+  type PostingPolicy,
+  type PostSortOption,
+} from '@/packages/common/forum';
+import { deliverForumReplyNotification } from '@/server/modules/notifications';
+import { decideEdit, decidePosting, ensureDefaultBoards } from './boards';
+import { DEFAULT_BANNED_WORDS, screenPost } from './screening';
+import { resolveAttachmentFileIds } from './attachments';
+
+// ============================================================
+// 视图
+// ============================================================
+
+export interface PostListItem {
+  postId: string;
+  boardId: string;
+  boardSlug: string;
+  boardName: string;
+  authorId: string;
+  authorNickname: string;
+  authorAvatarUrl: string | null;
+  title: string;
+  excerpt: string;
+  status: ForumContentStatus;
+  isPinned: boolean;
+  likeCount: number;
+  replyCount: number;
+  createdAt: number;
+  lastReplyAt: number | null;
+}
+
+/** 帖子审核状态（迁移 0038 的 review_state）。 */
+export type PostReviewState = 'published' | 'pending_review';
+
+export interface ReplyView {
+  replyId: string;
+  postId: string;
+  authorId: string;
+  authorNickname: string;
+  authorAvatarUrl: string | null;
+  /** null = 顶层回复。 */
+  parentId: string | null;
+  /** 已删除的回复对无权查看者为 null（保留作者、时间与占位）。 */
+  bodyMd: string | null;
+  status: ForumContentStatus;
+  likeCount: number;
+  likedByMe: boolean;
+  createdAt: number;
+  editedAt: number | null;
+  /** 仅顶层回复有：其下的回复（回复的回复）。 */
+  children: ReplyView[];
+}
+
+export interface PostDetail {
+  postId: string;
+  boardId: string;
+  boardSlug: string;
+  boardName: string;
+  authorId: string;
+  authorNickname: string;
+  authorAvatarUrl: string | null;
+  title: string;
+  /** 正文；无权查看时为 null（已删除 / 待审帖只对作者与管理者留正文）。 */
+  bodyMd: string | null;
+  status: ForumContentStatus;
+  /** 自动审核状态：pending_review 的帖子不进公开列表，非作者/站方看不到。 */
+  reviewState: PostReviewState;
+  deletedBy: string | null;
+  isPinned: boolean;
+  likeCount: number;
+  likedByMe: boolean;
+  replyCount: number;
+  createdAt: number;
+  updatedAt: number;
+  editedAt: number | null;
+  /** 调用者能否编辑这篇（作者 / 站方管理员 / 本区 owner）。 */
+  canEdit: boolean;
+  /** 调用者能否软删这篇。 */
+  canDelete: boolean;
+  canModerate: boolean;
+}
+
+interface PostRow {
+  id: string;
+  board_id: string;
+  author_id: string;
+  title: string;
+  body_md: string;
+  status: ForumContentStatus;
+  review_state: PostReviewState;
+  deleted_by: string | null;
+  is_pinned: number;
+  like_count: number;
+  reply_count: number;
+  last_reply_at: number | null;
+  created_at: number;
+  updated_at: number;
+  edited_at: number | null;
+  author_nickname: string;
+  author_avatar_url: string | null;
+  board_slug: string;
+  board_name: string;
+}
+
+const POST_SELECT = `
+  SELECT p.*, u.nickname AS author_nickname, u.avatar_url AS author_avatar_url,
+         b.slug AS board_slug, b.name AS board_name
+    FROM forum_posts p
+    JOIN users u ON u.id = p.author_id
+    JOIN forum_boards b ON b.id = p.board_id
+`;
+
+/**
+ * 无权查看时标题的位置。
+ *
+ * 标题同样是内容：待审帖的标题若照常回传，"正文藏了、标题漏了"等于没藏。
+ * 保留一条可渲染的占位，并带 `canViewBody: false` 让页面直接用「不可见」文案。
+ */
+const REDACTED_TITLE = '（内容不可见）';
+
+/** 列表摘要：从 Markdown 里剥掉标记，避免把 `##` 之类的符号塞进列表。 */
+function excerptOf(markdown: string, max = 120): string {
+  const plain = markdown
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[#>*_~\-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return plain.length > max ? plain.slice(0, max) + '…' : plain;
+}
+
+// ============================================================
+// 输入
+// ============================================================
+
+export interface CreatePostInput {
+  boardSlug: string;
+  title: unknown;
+  bodyMd: unknown;
+  /**
+   * 正文图片。可传 attachments.id（上传控件拿到的就是它），也可传
+   * attachment_files.id，写入引用前统一解析成文件 id（见 ./attachments）。
+   * 只接受本人上传、已就绪的展示图，最多 FORUM_LIMITS.postAttachmentsMax 张。
+   */
+  attachmentIds?: unknown[];
+  /** @deprecated 旧字段名，等价于 attachmentIds。 */
+  fileIds?: unknown[];
+}
+
+/** 建帖结果（`createPost` 与 `createPostInTx` 共用）。 */
+export interface CreatePostResult {
+  postId: string;
+  pendingReview: boolean;
+}
+
+export interface CreateReplyInput {
+  bodyMd: unknown;
+  /** 非空 = 回复某条顶层回复。 */
+  parentId?: unknown;
+  /** 同 CreatePostInput.attachmentIds。 */
+  attachmentIds?: unknown[];
+  /** @deprecated 旧字段名，等价于 attachmentIds。 */
+  fileIds?: unknown[];
+}
+
+/** 两个字段名等价：attachmentIds 是正名，fileIds 是旧名（客户端可能还在用）。 */
+export function rawAttachmentIds(input: {
+  attachmentIds?: unknown[];
+  fileIds?: unknown[];
+}): unknown[] | undefined {
+  return input.attachmentIds !== undefined ? input.attachmentIds : input.fileIds;
+}
+
+export interface ListPostsInput {
+  page?: number;
+  pageSize?: number;
+  sort?: PostSortOption;
+}
+
+// ============================================================
+// 服务
+// ============================================================
+
+export interface ForumPostService {
+  listPosts(ctx: CallerContext, boardSlug: string, input?: ListPostsInput): Promise<PageResult<PostListItem>>;
+  getPost(ctx: CallerContext, postId: string): Promise<PostDetail>;
+  listReplies(ctx: CallerContext, postId: string): Promise<{ items: ReplyView[]; total: number }>;
+  createPost(ctx: CallerContext, input: CreatePostInput): Promise<CreatePostResult>;
+  /**
+   * 建帖的同步事务内核：调用方自己持有事务（用于"发布草稿"把建帖与删草稿
+   * 合成一次提交），绝不在此内部再开事务。
+   */
+  createPostInTx(conn: SqliteDatabase, ctx: CallerContext, input: CreatePostInput): CreatePostResult;
+  editPost(ctx: CallerContext, postId: string, input: { title: unknown; bodyMd: unknown }): Promise<void>;
+  deletePost(ctx: CallerContext, postId: string): Promise<void>;
+  createReply(ctx: CallerContext, postId: string, input: CreateReplyInput): Promise<{ replyId: string }>;
+  deleteReply(ctx: CallerContext, replyId: string): Promise<void>;
+  togglePostLike(ctx: CallerContext, postId: string): Promise<{ liked: boolean; count: number }>;
+  toggleReplyLike(ctx: CallerContext, replyId: string): Promise<{ liked: boolean; count: number }>;
+  /** 置顶 / 取消置顶（本区 owner、协管或站方管理员）。 */
+  setPinned(ctx: CallerContext, postId: string, pinned: boolean): Promise<void>;
+  /** 我的帖子（个人中心）：不含已删除。 */
+  listMine(ctx: CallerContext, input?: { page?: number; status?: ForumContentStatus }): Promise<PageResult<PostListItem>>;
+}
+
+/**
+ * 读违禁词表。
+ *
+ * 放在站点设置里（forum.banned_words，逗号分隔）：词表会随情况变，
+ * 改词表不该要求发版。没配就用内置的一组。
+ */
+function readBannedWords(conn: SqliteDatabase): readonly string[] {
+  const row = conn
+    .prepare("SELECT value FROM site_settings WHERE key = 'forum.banned_words'")
+    .get() as { value: string } | undefined;
+  if (!row) return DEFAULT_BANNED_WORDS;
+  try {
+    const parsed = JSON.parse(row.value);
+    if (typeof parsed !== 'string' || parsed.trim().length === 0) return DEFAULT_BANNED_WORDS;
+    const words = parsed
+      .split(',')
+      .map((w) => w.trim())
+      .filter((w) => w.length > 0);
+    return words.length > 0 ? words : DEFAULT_BANNED_WORDS;
+  } catch {
+    return DEFAULT_BANNED_WORDS;
+  }
+}
+
+/** 判定发帖/回复权限所需的分区最小信息（多取一列不如少写一个形状）。 */
+interface BoardShort {
+  id: string;
+  status: BoardStatus;
+  posting_policy: PostingPolicy;
+  is_official?: number;
+}
+
+export function createForumPostService(deps: { db: SqliteDatabase }): ForumPostService {
+  const { db } = deps;
+
+  function boardBySlug(conn: SqliteDatabase, slug: string): BoardShort & { slug: string; name: string } {
+    const row = conn
+      .prepare('SELECT id, slug, name, status, posting_policy, is_official FROM forum_boards WHERE slug = ?')
+      .get(normalizeBoardSlug(slug)) as BoardShort | undefined;
+    if (!row) throw err.unavailable('分区不存在。');
+    return row as BoardShort & { slug: string; name: string };
+  }
+
+  function readPost(conn: SqliteDatabase, postId: string): PostRow {
+    const row = conn.prepare(POST_SELECT + ' WHERE p.id = ?').get(postId) as PostRow | undefined;
+    if (!row) throw err.unavailable('帖子不存在。');
+    return row;
+  }
+
+  function boardRole(conn: SqliteDatabase, boardId: string, userId: string | null): 'owner' | 'moderator' | null {
+    if (userId === null) return null;
+    const row = conn
+      .prepare('SELECT role FROM forum_board_moderators WHERE board_id = ? AND user_id = ?')
+      .get(boardId, userId) as { role: 'owner' | 'moderator' } | undefined;
+    return row ? row.role : null;
+  }
+
+  /** 调用者在某区的白/黑名单状态；不在名单里返回 null。 */
+  function postingRuleOf(conn: SqliteDatabase, boardId: string, userId: string | null): 'allow' | 'deny' | null {
+    if (userId === null) return null;
+    const row = conn
+      .prepare('SELECT mode FROM forum_board_posting_rules WHERE board_id = ? AND user_id = ?')
+      .get(boardId, userId) as { mode: 'allow' | 'deny' } | undefined;
+    return row ? row.mode : null;
+  }
+
+  /** 本区管理者（owner 或协管）或站方管理员。 */
+  function canModerateBoard(conn: SqliteDatabase, ctx: CallerContext, boardId: string): boolean {
+    if (isAdmin(ctx)) return true;
+    const role = boardRole(conn, boardId, ctx.userId);
+    return role === 'owner' || role === 'moderator';
+  }
+
+  /**
+   * 在本区发/回帖的权限判定。
+   *
+   * 直接复用 `boards.ts` 的 `decidePosting`（站方管理员 → 分区 owner → 黑名单 →
+   * admin_only / whitelist → 放行），不在这里重写一遍：发帖与回复必须同一口径，
+   * 两处各写一套正是"黑名单能拦发帖却拦不住回复"这类漏洞的来源。
+   */
+  function assertCanPostInBoard(conn: SqliteDatabase, ctx: CallerContext, board: BoardShort): void {
+    const decision = decidePosting({
+      policy: board.posting_policy,
+      boardStatus: board.status,
+      admin: isAdmin(ctx),
+      boardRole: boardRole(conn, board.id, ctx.userId),
+      rule: postingRuleOf(conn, board.id, ctx.userId),
+    });
+    if (!decision.allowed) throw err.forbidden(decision.reason);
+  }
+
+  /**
+   * 已删除 / 待审的帖子：正文只给作者、本区管理者与站方管理员看。
+   *
+   * 返回 false = 只给脱敏视图（bodyMd 置 null、标题打码），不抛错。
+   * 为什么是"脱敏对象"而不是 `err.unavailable`：
+   *   * 站点的软删模型是"行保留、痕迹在"（设计文档 §3.2）—— 已删除的帖子在列表里
+   *     有占位、在个人中心能看到；`GET /posts/{id}` 直接 404 会让作者与管理者
+   *     失去入口，与既有行为相反；
+   *   * 待审帖更要在"内容不可见"的前提下保住"这篇在审"这件事本身（作者需要知道进度）。
+   * 真正敏感的只是正文，所以按字段脱敏，而不是把整个资源藏起来。
+   */
+  function canReadPostContent(
+    conn: SqliteDatabase,
+    ctx: CallerContext,
+    post: { author_id: string; board_id: string; status: ForumContentStatus; review_state: PostReviewState },
+  ): boolean {
+    const isAuthor = ctx.userId !== null && ctx.userId === post.author_id;
+    const moderate = canModerateBoard(conn, ctx, post.board_id);
+    if (post.status === 'deleted') return isAuthor || moderate;
+    if (post.review_state !== 'published') return isAuthor || isAdmin(ctx);
+    return true;
+  }
+
+  function validateTitle(raw: unknown): string {
+    const title = typeof raw === 'string' ? raw.trim() : '';
+    if (title.length === 0) throw err.input('标题不能为空。', [{ path: 'title', message: '必填' }]);
+    if (title.length > FORUM_LIMITS.postTitleMax) {
+      throw err.input(`标题不能超过 ${FORUM_LIMITS.postTitleMax} 字。`, [
+        { path: 'title', message: '过长' },
+      ]);
+    }
+    return title;
+  }
+
+  function validateBody(raw: unknown, max: number, field: string): string {
+    const body = typeof raw === 'string' ? raw.trim() : '';
+    if (body.length === 0) throw err.input('正文不能为空。', [{ path: field, message: '必填' }]);
+    if (body.length > max) {
+      throw err.input(`正文不能超过 ${max} 字。`, [{ path: field, message: '过长' }]);
+    }
+    return body;
+  }
+
+  /**
+   * 解析附件并把引用写进 `table`。
+   *
+   * 三件事都在**写事务内**做，顺序不能换：
+   *   1. 把 client 传来的「附件 id」解析成 attachment_files.id，同时判就绪与归属
+   *      ——直接拿 attachments.id 写 file_id 会被外键挡下、再被触发器转成 ABORT；
+   *   2. 数量上限：UI 限 9 张只是那条点击路径上的约束，开放接口照样能
+   *      一次传 200 个 id，所以上限必须在服务端再判一次；
+   *   3. 写引用。层级/归属约束仍由触发器兜底（这里判过只为人话，不替代它）。
+   */
+  function attachFiles(
+    conn: SqliteDatabase,
+    table: 'forum_post_attachment_links' | 'forum_reply_attachment_links',
+    keyColumn: 'post_id' | 'reply_id',
+    keyValue: string,
+    raw: unknown[] | undefined,
+    ownerId: string,
+    now: number,
+  ): void {
+    const fileIds = resolveAttachmentFileIds(conn, { raw, ownerId, field: 'attachmentIds' });
+    if (fileIds.length === 0) return;
+    if (fileIds.length > FORUM_LIMITS.postAttachmentsMax) {
+      throw err.input(`最多只能带 ${FORUM_LIMITS.postAttachmentsMax} 张图片，当前 ${fileIds.length} 张。`, [
+        { path: 'attachmentIds', message: 'too_many' },
+      ]);
+    }
+    for (const fileId of fileIds) {
+      conn
+        .prepare(`INSERT INTO ${table} (${keyColumn}, file_id, created_at) VALUES (?, ?, ?)`)
+        .run(keyValue, fileId, now);
+    }
+  }
+
+  const service: ForumPostService = {
+    async listPosts(_ctx, boardSlug, input) {
+      // 空库兜底：与 boards.listBoards 同一处兜底，否则全新库上"分区列表有、点进去 404"
+      ensureDefaultBoards(db);
+      return withRead((conn) => {
+        const board = boardBySlug(conn, boardSlug);
+        const page = Math.max(1, Math.floor(input?.page ?? 1));
+        const pageSize = Math.min(
+          Math.max(1, Math.floor(input?.pageSize ?? PaginationDefaults.default_page_size)),
+          FORUM_LIMITS.listPageSize * 2,
+        );
+        const sort = input?.sort ?? 'created';
+        const order =
+          sort === 'last_reply'
+            ? 'p.is_pinned DESC, COALESCE(p.last_reply_at, p.created_at) DESC, p.id DESC'
+            : 'p.is_pinned DESC, p.created_at DESC, p.id DESC';
+
+        const total = conn
+          .prepare(
+            "SELECT COUNT(*) AS c FROM forum_posts p WHERE p.board_id = ? AND p.status = 'published' AND p.review_state = 'published'",
+          )
+          .get(board.id) as { c: number };
+
+        const rows = conn
+          .prepare(
+            POST_SELECT +
+              ` WHERE p.board_id = ? AND p.status = 'published' AND p.review_state = 'published'
+                ORDER BY ${order} LIMIT ? OFFSET ?`,
+          )
+          .all(board.id, pageSize, (page - 1) * pageSize) as PostRow[];
+
+        return buildPage(
+          rows.map((r) => ({
+            postId: r.id,
+            boardId: r.board_id,
+            boardSlug: r.board_slug,
+            boardName: r.board_name,
+            authorId: r.author_id,
+            authorNickname: r.author_nickname,
+            authorAvatarUrl: r.author_avatar_url,
+            title: r.title,
+            excerpt: excerptOf(r.body_md),
+            status: r.status,
+            isPinned: r.is_pinned === 1,
+            likeCount: r.like_count,
+            replyCount: r.reply_count,
+            createdAt: r.created_at,
+            lastReplyAt: r.last_reply_at,
+          })),
+          Number(total.c),
+          { page, page_size: pageSize },
+        );
+      }, db);
+    },
+
+    async getPost(ctx, postId) {
+      return withRead((conn) => {
+        const row = readPost(conn, postId);
+        const liked =
+          ctx.userId === null
+            ? false
+            : conn
+                .prepare('SELECT 1 AS x FROM forum_post_likes WHERE post_id = ? AND user_id = ?')
+                .get(postId, ctx.userId) !== undefined;
+        const moderate = canModerateBoard(conn, ctx, row.board_id);
+        const isAuthor = ctx.userId !== null && ctx.userId === row.author_id;
+        // 越权时只脱敏正文与标题，不抛 404：已删除/待审这两种状态本身要留给作者与管理者看见
+        const readable = canReadPostContent(conn, ctx, row);
+
+        return {
+          postId: row.id,
+          boardId: row.board_id,
+          boardSlug: row.board_slug,
+          boardName: row.board_name,
+          authorId: row.author_id,
+          authorNickname: row.author_nickname,
+          authorAvatarUrl: row.author_avatar_url,
+          title: readable ? row.title : REDACTED_TITLE,
+          bodyMd: readable ? row.body_md : null,
+          status: row.status,
+          reviewState: row.review_state,
+          deletedBy: row.deleted_by,
+          isPinned: row.is_pinned === 1,
+          likeCount: row.like_count,
+          likedByMe: liked,
+          replyCount: row.reply_count,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          editedAt: row.edited_at,
+          canEdit: decideEdit({
+            isAuthor,
+            admin: isAdmin(ctx),
+            boardRole: boardRole(conn, row.board_id, ctx.userId),
+          }).allowed,
+          canDelete: isAuthor || moderate,
+          canModerate: moderate,
+        };
+      }, db);
+    },
+
+    async listReplies(ctx, postId) {
+      return withRead((conn) => {
+        const post = readPost(conn, postId);
+        const boardIdOfPost = post.board_id;
+        const moderateHere = canModerateBoard(conn, ctx, boardIdOfPost);
+        const rows = conn
+          .prepare(
+            `SELECT r.*, u.nickname AS author_nickname, u.avatar_url AS author_avatar_url
+               FROM forum_post_replies r
+               JOIN users u ON u.id = r.author_id
+              WHERE r.post_id = ?
+              ORDER BY r.created_at, r.id`,
+          )
+          .all(postId) as Array<{
+          id: string;
+          post_id: string;
+          author_id: string;
+          parent_id: string | null;
+          body_md: string;
+          status: ForumContentStatus;
+          like_count: number;
+          created_at: number;
+          edited_at: number | null;
+          author_nickname: string;
+          author_avatar_url: string | null;
+        }>;
+
+        const likedSet = new Set<string>();
+        if (ctx.userId !== null) {
+          const liked = conn
+            .prepare(
+              `SELECT l.reply_id FROM forum_post_reply_likes l
+                 JOIN forum_post_replies r ON r.id = l.reply_id
+                WHERE r.post_id = ? AND l.user_id = ?`,
+            )
+            .all(postId, ctx.userId) as Array<{ reply_id: string }>;
+          for (const l of liked) likedSet.add(l.reply_id);
+        }
+
+        // 已删除的回复：正文只给作者与管理者。匿名与其他人只拿到"这条被删了"，
+        // 作者、时间、层级都保留 —— 占位要能解释它为什么在这儿。
+        const redactable = (authorId: string): boolean =>
+          ctx.userId !== null && (ctx.userId === authorId || moderateHere);
+
+        const toView = (r: (typeof rows)[number]): ReplyView => ({
+          replyId: r.id,
+          postId: r.post_id,
+          authorId: r.author_id,
+          authorNickname: r.author_nickname,
+          authorAvatarUrl: r.author_avatar_url,
+          parentId: r.parent_id,
+          bodyMd: r.status === 'deleted' && !redactable(r.author_id) ? null : r.body_md,
+          status: r.status,
+          likeCount: r.like_count,
+          likedByMe: likedSet.has(r.id),
+          createdAt: r.created_at,
+          editedAt: r.edited_at,
+          children: [],
+        });
+
+        const tops = rows.filter((r) => r.parent_id === null).map(toView);
+        const byId = new Map(tops.map((t) => [t.replyId, t]));
+        for (const r of rows) {
+          if (r.parent_id === null) continue;
+          byId.get(r.parent_id)?.children.push(toView(r));
+        }
+        // 已删除的回复处理：有子回复时保留占位（否则子回复失去上下文）
+        return { items: tops, total: rows.length };
+      }, db);
+    },
+
+    async createPost(ctx, input) {
+      assertCanWrite(ctx);
+      // 走服务对象而**不是** this：解构后调用（`const { createPost } = service`）时 this 会丢，
+      // 那样每次发帖都会变成 "Cannot read properties of undefined"。
+      return withTransaction((tx) => service.createPostInTx(tx.db, ctx, input), db);
+    },
+
+    /**
+     * 建帖的**事务内核**：给"发布草稿"这类需要把建帖与别的一起原子提交的调用方用。
+     *
+     * 刻意与 createPost 共用同一段逻辑（createPost 只是包了一层 withTransaction），
+     * 不复制一份——发布草稿与直接发帖必须同权限、同审核、同附件规则，
+     * 两份实现是这类规则漂移的经典来源。调用方自己负责 assertCanWrite 与事务。
+     */
+    createPostInTx(conn: SqliteDatabase, ctx: CallerContext, input: CreatePostInput): CreatePostResult {
+      assertCanWrite(ctx);
+      const title = validateTitle(input.title);
+      const body = validateBody(input.bodyMd, FORUM_LIMITS.postBodyMax, 'bodyMd');
+      // 包一层块是为了让"建帖"与"审核记录"共享同一个 now 与缩写；
+      // 返回语句必须在块内，否则实现返回 undefined、与接口声明的 CreatePostResult 不符。
+      {
+        const board = boardBySlug(conn, input.boardSlug);
+        // 发帖权限：与分区服务同一套判定（归档 / 黑名单 / 白名单 / 仅管理员）
+        assertCanPostInBoard(conn, ctx, board);
+
+        const postId = newId();
+        const now = nowMs();
+
+        // 自动审核：命中规则就压成待审，不进公开列表
+        const screened = screenPost({
+          title,
+          body,
+          bannedWords: readBannedWords(conn),
+        });
+        const reviewState = screened.verdict === 'blocked' ? 'pending_review' : 'published';
+
+        conn
+          .prepare(
+            `INSERT INTO forum_posts
+               (id, board_id, author_id, title, body_md, status, review_state, is_pinned, like_count, reply_count, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, 'published', ?, 0, 0, 0, ?, ?)`,
+          )
+          .run(postId, board.id, ctx.userId, title, body, reviewState, now, now);
+        attachFiles(conn, 'forum_post_attachment_links', 'post_id', postId, rawAttachmentIds(input), ctx.userId, now);
+
+        // 审核记录：放行与挡下都记，后台能看到"这篇为什么进了人工"
+        conn
+          .prepare(
+            `INSERT INTO forum_post_screenings (id, post_id, rule, verdict, detail, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+          )
+          .run(newId(), postId, screened.rule, screened.verdict, screened.detail, now);
+
+        return { postId, pendingReview: reviewState === 'pending_review' };
+      }
+    },
+
+    async editPost(ctx, postId, input) {
+      assertCanWrite(ctx);
+      const title = validateTitle(input.title);
+      const body = validateBody(input.bodyMd, FORUM_LIMITS.postBodyMax, 'bodyMd');
+
+      await withTransaction((tx) => {
+        const conn = tx.db;
+        const row = readPost(conn, postId);
+        const isAuthor = row.author_id === ctx.userId;
+        // 编辑只给作者 / 站方管理员 / 分区 owner（设计文档 §5）；协管只有软删与置顶。
+        // 判定在 boards.ts 的 decideEdit，与 getPost 的 canEdit 用同一份，避免两处漂移。
+        const editable = decideEdit({
+          isAuthor,
+          admin: isAdmin(ctx),
+          boardRole: boardRole(conn, row.board_id, ctx.userId),
+        });
+        if (!editable.allowed) throw err.forbidden(editable.reason);
+        if (row.status === 'deleted') throw err.input('已删除的帖子不能编辑。', [{ path: 'postId', message: '已删除' }]);
+        const now = nowMs();
+
+        // 编辑要重跑自动审核：否则"先发干净帖过审、再改成违禁内容"就是一条现成的绕过路径。
+        // 判定与发帖同一套规则与同一张记录表，后台能看到这篇为什么又进了人工。
+        const screened = screenPost({ title, body, bannedWords: readBannedWords(conn) });
+        conn
+          .prepare(
+            'UPDATE forum_posts SET title = ?, body_md = ?, review_state = ?, updated_at = ?, edited_at = ? WHERE id = ?',
+          )
+          .run(title, body, screened.verdict === 'blocked' ? 'pending_review' : 'published', now, now, postId);
+        conn
+          .prepare(
+            `INSERT INTO forum_post_screenings (id, post_id, rule, verdict, detail, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+          )
+          .run(newId(), postId, screened.rule, screened.verdict, screened.detail, now);
+      }, db);
+    },
+
+    async deletePost(ctx, postId) {
+      assertCanWrite(ctx);
+      await withTransaction((tx) => {
+        const conn = tx.db;
+        const row = readPost(conn, postId);
+        const isAuthor = row.author_id === ctx.userId;
+        if (!isAuthor && !canModerateBoard(conn, ctx, row.board_id)) {
+          throw err.forbidden('只有作者或本区管理员可以删除该帖。');
+        }
+        if (row.status === 'deleted') return; // 幂等
+        const now = nowMs();
+        // 软删：不级联删回复与点赞，那些是别人的痕迹
+        conn
+          .prepare("UPDATE forum_posts SET status = 'deleted', deleted_by = ?, deleted_at = ?, updated_at = ? WHERE id = ?")
+          .run(ctx.userId, now, now, postId);
+      }, db);
+    },
+
+    async createReply(ctx, postId, input) {
+      assertCanWrite(ctx);
+      const body = validateBody(input.bodyMd, FORUM_LIMITS.replyBodyMax, 'bodyMd');
+      const parentId = typeof input.parentId === 'string' && input.parentId.length > 0 ? input.parentId : null;
+
+      return withTransaction((tx) => {
+        const conn = tx.db;
+        const post = readPost(conn, postId);
+        if (post.status === 'deleted') throw err.input('该帖已删除，不能回复。', [{ path: 'postId', message: '已删除' }]);
+        const board = conn
+          .prepare('SELECT id, status, posting_policy FROM forum_boards WHERE id = ?')
+          .get(post.board_id) as BoardShort | undefined;
+        if (!board) throw err.unavailable('分区不存在。');
+        // 回复与发帖同一口径：归档分区、被拉黑、白名单/仅管理员分区都拦得住
+        assertCanPostInBoard(conn, ctx, {
+          id: board.id,
+          status: board.status,
+          posting_policy: board.posting_policy as PostingPolicy,
+        });
+
+        let recipientId: string | null = post.author_id;
+        let kind: 'forum_reply' | 'forum_reply_to_reply' = 'forum_reply';
+
+        if (parentId !== null) {
+          const parent = conn
+            .prepare('SELECT id, post_id, author_id, parent_id, status FROM forum_post_replies WHERE id = ?')
+            .get(parentId) as
+            | { id: string; post_id: string; author_id: string; parent_id: string | null; status: ForumContentStatus }
+            | undefined;
+          if (!parent) throw err.input('要回复的那条不存在。', [{ path: 'parentId', message: '未知回复' }]);
+          if (parent.post_id !== postId) {
+            throw err.input('回复与帖子不匹配。', [{ path: 'parentId', message: '跨帖回复' }]);
+          }
+          // 两层封顶：给出能看懂的话，而不是把触发器的 ABORT 抛给用户
+          if (parent.parent_id !== null) {
+            throw err.input('回复最多两层：不能回复「回复的回复」。', [{ path: 'parentId', message: '层级超限' }]);
+          }
+          if (parent.status === 'deleted') {
+            throw err.input('那条回复已删除，不能回复。', [{ path: 'parentId', message: '已删除' }]);
+          }
+          // 回复的回复不允许带图片
+          if (
+            (Array.isArray(input.attachmentIds) && input.attachmentIds.length > 0) ||
+            (Array.isArray(input.fileIds) && input.fileIds.length > 0)
+          ) {
+            throw err.input('回复的回复不能带图片。', [{ path: 'attachmentIds', message: '不允许' }]);
+          }
+          recipientId = parent.author_id;
+          kind = 'forum_reply_to_reply';
+        }
+
+        const replyId = newId();
+        const now = nowMs();
+        conn
+          .prepare(
+            `INSERT INTO forum_post_replies
+               (id, post_id, author_id, parent_id, body_md, status, like_count, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, 'published', 0, ?, ?)`,
+          )
+          .run(replyId, postId, ctx.userId, parentId, body, now, now);
+
+        if (parentId === null) {
+          attachFiles(conn, 'forum_reply_attachment_links', 'reply_id', replyId, rawAttachmentIds(input), ctx.userId, now);
+        }
+
+        // 计数与最后回复时间在事务内维护
+        conn
+          .prepare('UPDATE forum_posts SET reply_count = reply_count + 1, last_reply_at = ?, updated_at = ? WHERE id = ?')
+          .run(now, now, postId);
+
+        if (recipientId !== null) {
+          deliverForumReplyNotification(conn, {
+            recipientId,
+            actorId: ctx.userId,
+            kind,
+            detail: excerptOf(body, 80),
+            deduplicationKey: 'forum_reply:' + replyId + ':' + recipientId,
+            // 通知点得开的锚点：回复本身 + 它所在的帖子
+            replyId,
+            postId,
+            now,
+          });
+        }
+
+        return { replyId };
+      }, db);
+    },
+
+    async deleteReply(ctx, replyId) {
+      assertCanWrite(ctx);
+      await withTransaction((tx) => {
+        const conn = tx.db;
+        const row = conn
+          .prepare('SELECT id, post_id, author_id, status FROM forum_post_replies WHERE id = ?')
+          .get(replyId) as
+          | { id: string; post_id: string; author_id: string; status: ForumContentStatus }
+          | undefined;
+        if (!row) throw err.unavailable('回复不存在。');
+        const post = conn.prepare('SELECT board_id FROM forum_posts WHERE id = ?').get(row.post_id) as {
+          board_id: string;
+        };
+        const isAuthor = row.author_id === ctx.userId;
+        if (!isAuthor && !canModerateBoard(conn, ctx, post.board_id)) {
+          throw err.forbidden('只有作者或本区管理员可以删除该回复。');
+        }
+        if (row.status === 'deleted') return;
+        const now = nowMs();
+        conn
+          .prepare("UPDATE forum_post_replies SET status = 'deleted', deleted_by = ?, deleted_at = ?, updated_at = ? WHERE id = ?")
+          .run(ctx.userId, now, now, replyId);
+        conn
+          .prepare('UPDATE forum_posts SET reply_count = MAX(reply_count - 1, 0), updated_at = ? WHERE id = ?')
+          .run(now, row.post_id);
+      }, db);
+    },
+
+    async togglePostLike(ctx, postId) {
+      assertCanWrite(ctx);
+      return withTransaction((tx) => {
+        const conn = tx.db;
+        const post = readPost(conn, postId);
+        if (post.status === 'deleted') throw err.input('不能给已删除的帖子点赞。', [{ path: 'postId', message: '已删除' }]);
+
+        const existing = conn
+          .prepare('SELECT 1 AS x FROM forum_post_likes WHERE post_id = ? AND user_id = ?')
+          .get(postId, ctx.userId);
+        const now = nowMs();
+        if (existing) {
+          conn.prepare('DELETE FROM forum_post_likes WHERE post_id = ? AND user_id = ?').run(postId, ctx.userId);
+          conn.prepare('UPDATE forum_posts SET like_count = MAX(like_count - 1, 0) WHERE id = ?').run(postId);
+          const row = conn.prepare('SELECT like_count FROM forum_posts WHERE id = ?').get(postId) as { like_count: number };
+          return { liked: false, count: row.like_count };
+        }
+        conn
+          .prepare('INSERT INTO forum_post_likes (post_id, user_id, created_at) VALUES (?, ?, ?)')
+          .run(postId, ctx.userId, now);
+        conn.prepare('UPDATE forum_posts SET like_count = like_count + 1 WHERE id = ?').run(postId);
+        const row = conn.prepare('SELECT like_count FROM forum_posts WHERE id = ?').get(postId) as { like_count: number };
+        return { liked: true, count: row.like_count };
+      }, db);
+    },
+
+    async toggleReplyLike(ctx, replyId) {
+      assertCanWrite(ctx);
+      return withTransaction((tx) => {
+        const conn = tx.db;
+        const reply = conn
+          .prepare('SELECT id, post_id, parent_id, status FROM forum_post_replies WHERE id = ?')
+          .get(replyId) as
+          | { id: string; post_id: string; parent_id: string | null; status: ForumContentStatus }
+          | undefined;
+        if (!reply) throw err.unavailable('回复不存在。');
+        if (reply.status === 'deleted') {
+          throw err.input('不能给已删除的回复点赞。', [{ path: 'replyId', message: '已删除' }]);
+        }
+        if (reply.parent_id !== null) {
+          // 回复的回复不参与点赞（使用者口径），触发器也拦，这里给可读原因
+          throw err.input('只有顶层回复可以点赞。', [{ path: 'replyId', message: '不支持' }]);
+        }
+
+        const existing = conn
+          .prepare('SELECT 1 AS x FROM forum_post_reply_likes WHERE reply_id = ? AND user_id = ?')
+          .get(replyId, ctx.userId);
+        const now = nowMs();
+        if (existing) {
+          conn
+            .prepare('DELETE FROM forum_post_reply_likes WHERE reply_id = ? AND user_id = ?')
+            .run(replyId, ctx.userId);
+          conn
+            .prepare('UPDATE forum_post_replies SET like_count = MAX(like_count - 1, 0) WHERE id = ?')
+            .run(replyId);
+        } else {
+          conn
+            .prepare('INSERT INTO forum_post_reply_likes (reply_id, user_id, created_at) VALUES (?, ?, ?)')
+            .run(replyId, ctx.userId, now);
+          conn.prepare('UPDATE forum_post_replies SET like_count = like_count + 1 WHERE id = ?').run(replyId);
+        }
+        const row = conn.prepare('SELECT like_count FROM forum_post_replies WHERE id = ?').get(replyId) as {
+          like_count: number;
+        };
+        return { liked: existing === undefined, count: row.like_count };
+      }, db);
+    },
+
+    async setPinned(ctx, postId, pinned) {
+      assertCanWrite(ctx);
+      await withTransaction((tx) => {
+        const conn = tx.db;
+        const row = readPost(conn, postId);
+        if (!canModerateBoard(conn, ctx, row.board_id)) {
+          throw err.forbidden('只有本区管理员或区长可以置顶。');
+        }
+        conn
+          .prepare('UPDATE forum_posts SET is_pinned = ?, updated_at = ? WHERE id = ?')
+          .run(pinned ? 1 : 0, nowMs(), postId);
+      }, db);
+    },
+
+    async listMine(ctx, input) {
+      assertCanWrite(ctx);
+      return withRead((conn) => {
+        const page = Math.max(1, Math.floor(input?.page ?? 1));
+        const pageSize = PaginationDefaults.default_page_size;
+        const status = input?.status ?? 'published';
+        const total = conn
+          .prepare('SELECT COUNT(*) AS c FROM forum_posts WHERE author_id = ? AND status = ?')
+          .get(ctx.userId, status) as { c: number };
+        const rows = conn
+          .prepare(
+            POST_SELECT + ' WHERE p.author_id = ? AND p.status = ? ORDER BY p.created_at DESC, p.id DESC LIMIT ? OFFSET ?',
+          )
+          .all(ctx.userId, status, pageSize, (page - 1) * pageSize) as PostRow[];
+        return buildPage(
+          rows.map((r) => ({
+            postId: r.id,
+            boardId: r.board_id,
+            boardSlug: r.board_slug,
+            boardName: r.board_name,
+            authorId: r.author_id,
+            authorNickname: r.author_nickname,
+            authorAvatarUrl: r.author_avatar_url,
+            title: r.title,
+            excerpt: excerptOf(r.body_md),
+            status: r.status,
+            isPinned: r.is_pinned === 1,
+            likeCount: r.like_count,
+            replyCount: r.reply_count,
+            createdAt: r.created_at,
+            lastReplyAt: r.last_reply_at,
+          })),
+          Number(total.c),
+          { page, page_size: pageSize },
+        );
+      }, db);
+    },
+  };
+
+  return service;
+}

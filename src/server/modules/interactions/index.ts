@@ -24,7 +24,12 @@ import { resolveVisibilityInTx } from '@/server/modules/content';
 import { deliverModerationResultNotification } from '@/server/modules/notifications';
 import { recordOperationInTx } from '@/server/modules/operations';
 
-export type ReportTargetKind = 'review' | 'comment' | 'pack_release';
+export type ReportTargetKind = 'review' | 'comment' | 'pack_release' | 'post' | 'forum_reply';
+
+/** 讨论区的两类目标不是 content_entities，隐藏语义也不同（走软删）。 */
+export function isForumReportTarget(kind: ReportTargetKind): kind is 'post' | 'forum_reply' {
+  return kind === 'post' || kind === 'forum_reply';
+}
 export type ReportReason = 'spam' | 'abuse' | 'misinformation' | 'copyright' | 'other';
 export type ReportAction = 'hide' | 'dismiss' | 'request_evidence';
 export type ReportState = 'open' | 'resolved' | 'dismissed';
@@ -39,6 +44,8 @@ export const REPORT_REASON_LABELS: Record<ReportReason, string> = {
 };
 
 export const REPORT_TARGET_LABELS: Record<ReportTargetKind, string> = {
+  post: '讨论区帖子',
+  forum_reply: '讨论区回复',
   review: '评测',
   comment: '评论',
   pack_release: '整合包版本',
@@ -71,8 +78,11 @@ export interface FavoriteFolderView {
 export interface ReportView {
   reportId: string;
   targetKind: ReportTargetKind;
-  contentEntityId: string;
+  /** 讨论区目标（post / forum_reply）没有内容实体，这两列为空。 */
+  contentEntityId: string | null;
   commentId: string | null;
+  postId: string | null;
+  forumReplyId: string | null;
   reason: ReportReason;
   detail: string | null;
   state: ReportState;
@@ -126,7 +136,33 @@ function ensureDefaultFolderInTx(conn: SqliteDatabase, userId: string): { id: st
 }
 
 /** 目标是否存在且"当前公开"——决定能不能投票/举报。 */
-function assertTargetPublic(db: SqliteDatabase, target: { kind: ReportTargetKind; id: string }): string {
+function assertTargetPublic(db: SqliteDatabase, target: { kind: ReportTargetKind; id: string }): string | null {
+  // 讨论区目标没有 content_entity_id（它们不是内容实体），返回 null。
+  // 可见性按自身状态判：已删除 / 待审的帖子不该被举报（举报者也看不到它）。
+  if (target.kind === 'post') {
+    const row = db
+      .prepare("SELECT id, status, review_state FROM forum_posts WHERE id = ?")
+      .get(target.id) as { id: string; status: string; review_state: string } | undefined;
+    if (!row) throw err.unavailable('要举报的帖子不存在。');
+    if (row.status === 'deleted') throw err.unavailable('该帖子已被删除。');
+    if (row.review_state !== 'published') throw err.unavailable('该帖子正在审核中。');
+    return null;
+  }
+  if (target.kind === 'forum_reply') {
+    const row = db
+      .prepare(
+        `SELECT r.id, r.status, p.status AS post_status
+           FROM forum_post_replies r
+           JOIN forum_posts p ON p.id = r.post_id
+          WHERE r.id = ?`,
+      )
+      .get(target.id) as { id: string; status: string; post_status: string } | undefined;
+    if (!row) throw err.unavailable('要举报的回复不存在。');
+    if (row.status === 'deleted') throw err.unavailable('该回复已被删除。');
+    if (row.post_status === 'deleted') throw err.unavailable('该回复所属帖子已被删除。');
+    return null;
+  }
+
   if (target.kind === 'pack_release') {
     const row = db.prepare('SELECT id, content_type FROM content_entities WHERE id = ?').get(target.id) as
       | { id: string; content_type: string }
@@ -175,8 +211,40 @@ function assertTargetPublic(db: SqliteDatabase, target: { kind: ReportTargetKind
 /** 评测/评论的一句话摘要（后台队列与通知里用）。 */
 function describeTarget(
   db: SqliteDatabase,
-  target: { kind: ReportTargetKind; id: string; contentEntityId: string; commentId: string | null },
+  target: { kind: ReportTargetKind; id: string; contentEntityId: string | null; commentId: string | null },
 ): { excerpt: string; href: string } {
+  // 讨论区：摘要取标题/正文开头，链接回讨论区。后台队列要能点进去看原文。
+  if (target.kind === 'post') {
+    const row = db
+      .prepare(
+        `SELECT p.title, p.body_md, b.slug
+           FROM forum_posts p JOIN forum_boards b ON b.id = p.board_id
+          WHERE p.id = ?`,
+      )
+      .get(target.id) as { title: string; body_md: string; slug: string } | undefined;
+    if (!row) return { excerpt: '（帖子已不存在）', href: '/forum' };
+    return {
+      excerpt: row.title + '：' + row.body_md.replace(/\s+/g, ' ').slice(0, 60),
+      href: '/forum/' + row.slug + '/' + target.id,
+    };
+  }
+  if (target.kind === 'forum_reply') {
+    const row = db
+      .prepare(
+        `SELECT r.body_md, r.post_id, b.slug
+           FROM forum_post_replies r
+           JOIN forum_posts p ON p.id = r.post_id
+           JOIN forum_boards b ON b.id = p.board_id
+          WHERE r.id = ?`,
+      )
+      .get(target.id) as { body_md: string; post_id: string; slug: string } | undefined;
+    if (!row) return { excerpt: '（回复已不存在）', href: '/forum' };
+    return {
+      excerpt: '回复：' + row.body_md.replace(/\s+/g, ' ').slice(0, 60),
+      href: '/forum/' + row.slug + '/' + row.post_id,
+    };
+  }
+
   if (target.kind === 'review') {
     const row = db
       .prepare(
@@ -767,21 +835,40 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
         const conn = tx.db;
         const contentEntityId = assertTargetPublic(conn, { kind: input.targetKind, id: input.targetId });
         const commentId = input.targetKind === 'comment' ? input.targetId : null;
+        // 讨论区目标填自己那一列，content_entity_id 为空（迁移 0038 的 CHECK 收口）
+        const postId = input.targetKind === 'post' ? input.targetId : null;
+        const forumReplyId = input.targetKind === 'forum_reply' ? input.targetId : null;
 
+        // 去重按**目标各自那一列**判，与迁移 0038 的四条部分唯一索引一一对应：
+        //   review / pack_release → content_entity_id
+        //   comment               → comment_id
+        //   post                  → post_id
+        //   forum_reply           → forum_reply_id
+        // 评论此前落到了 content_entity_id 上：同一条评测下两条不同评论的举报
+        // 会共用一个去重键，第一条挂起后第二条直接被当成"重复"挤掉。
+        const dedupeColumn =
+          postId !== null
+            ? 'post_id'
+            : forumReplyId !== null
+              ? 'forum_reply_id'
+              : commentId !== null
+                ? 'comment_id'
+                : 'content_entity_id';
+        const dedupeValue = postId ?? forumReplyId ?? commentId ?? contentEntityId;
         const existing = conn
           .prepare(
             `SELECT id FROM reports
-              WHERE reporter_id = ? AND target_kind = ? AND content_entity_id = ? AND reason = ? AND state = 'open'`,
+              WHERE reporter_id = ? AND target_kind = ? AND ${dedupeColumn} = ? AND reason = ? AND state = 'open'`,
           )
-          .get(userId, input.targetKind, contentEntityId, input.reason) as { id: string } | undefined;
+          .get(userId, input.targetKind, dedupeValue, input.reason) as { id: string } | undefined;
         if (existing) return { reportId: existing.id, created: false };
 
         const reportId = newId();
         conn
           .prepare(
             `INSERT INTO reports
-               (id, reporter_id, target_kind, content_entity_id, comment_id, reason, detail, state, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)`,
+               (id, reporter_id, target_kind, content_entity_id, comment_id, post_id, forum_reply_id, reason, detail, state, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)`,
           )
           .run(
             reportId,
@@ -789,6 +876,8 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
             input.targetKind,
             contentEntityId,
             commentId,
+            postId,
+            forumReplyId,
             input.reason,
             detail.length > 0 ? detail : null,
             nowMs(),
@@ -809,8 +898,8 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
       return withRead((conn) => {
         const rows = conn
           .prepare(
-            `SELECT rp.id, rp.target_kind, rp.content_entity_id, rp.comment_id, rp.reason, rp.detail,
-                    rp.state, rp.created_at, u.nickname AS reporter_nickname
+            `SELECT rp.id, rp.target_kind, rp.content_entity_id, rp.comment_id, rp.post_id, rp.forum_reply_id,
+                    rp.reason, rp.detail, rp.state, rp.created_at, u.nickname AS reporter_nickname
                FROM reports rp
                JOIN users u ON u.id = rp.reporter_id
               ${state === 'all' ? '' : "WHERE rp.state = ?"}
@@ -820,8 +909,10 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
           .all(...(state === 'all' ? [limit] : [state, limit])) as Array<{
           id: string;
           target_kind: ReportTargetKind;
-          content_entity_id: string;
+          content_entity_id: string | null;
           comment_id: string | null;
+          post_id: string | null;
+          forum_reply_id: string | null;
           reason: ReportReason;
           detail: string | null;
           state: ReportState;
@@ -831,7 +922,8 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
         return rows.map((r) => {
           const described = describeTarget(conn, {
             kind: r.target_kind,
-            id: r.comment_id ?? r.content_entity_id,
+            // 四列里恰有一列非空（迁移 0038 的 CHECK 保证），按目标类型取对应那列
+            id: (r.forum_reply_id ?? r.post_id ?? r.comment_id ?? r.content_entity_id) as string,
             contentEntityId: r.content_entity_id,
             commentId: r.comment_id,
           });
@@ -840,6 +932,8 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
             targetKind: r.target_kind,
             contentEntityId: r.content_entity_id,
             commentId: r.comment_id,
+            postId: r.post_id,
+            forumReplyId: r.forum_reply_id,
             reason: r.reason,
             detail: r.detail,
             state: r.state,
@@ -874,15 +968,18 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
         const conn = tx.db;
         const report = conn
           .prepare(
-            `SELECT id, reporter_id, target_kind, content_entity_id, comment_id, state FROM reports WHERE id = ?`,
+            `SELECT id, reporter_id, target_kind, content_entity_id, comment_id, post_id, forum_reply_id, state
+               FROM reports WHERE id = ?`,
           )
           .get(reportId) as
           | {
               id: string;
               reporter_id: string;
               target_kind: ReportTargetKind;
-              content_entity_id: string;
+              content_entity_id: string | null;
               comment_id: string | null;
+              post_id: string | null;
+              forum_reply_id: string | null;
               state: ReportState;
             }
           | undefined;
@@ -911,7 +1008,9 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
                 | { author_id: string }
                 | undefined
             )?.author_id ?? null;
-            if (!resolveVisibilityInTx(conn, report.content_entity_id).hidden) {
+            // 这一支只处理 review / pack_release，content_entity_id 必然非空
+            const entityId = report.content_entity_id as string;
+            if (!resolveVisibilityInTx(conn, entityId).hidden) {
               // 直接写三列而不是调 contentService.hide：那边是 async 接口，在一个同步事务里
               // 既不能 await，也会多开一层 savepoint。这里与它保持**同一套不变量**：
               // 三列同写 + visibility_control_version 递增（触发器会校验）。
@@ -934,8 +1033,77 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
                 actorKind: 'admin',
                 actorUserId: adminId,
                 targetType: 'content_entity',
-                targetId: report.content_entity_id,
+                targetId: entityId,
                 targetSnapshot: { hidden_at: now, target_kind: report.target_kind },
+                changes: { report_id: reportId, hidden: true },
+                reason: `举报处理：${reason}`,
+              },
+              now,
+            );
+          } else if (report.target_kind === 'post' && report.post_id !== null) {
+            // 讨论区没有 hidden_at 三列：隐藏 = 软删，与作者自己删走同一条路。
+            // 这样列表、详情、计数（reply_count 等）的判断只有一套，不会出现
+            // "被举报隐藏的帖子在某个页面还露着"这种分叉。
+            authorId = (
+              conn.prepare('SELECT author_id FROM forum_posts WHERE id = ?').get(report.post_id) as
+                | { author_id: string }
+                | undefined
+            )?.author_id ?? null;
+            conn
+              .prepare(
+                `UPDATE forum_posts
+                    SET status = 'deleted', deleted_by = ?, deleted_at = ?, updated_at = ?
+                  WHERE id = ? AND status = 'published'`,
+              )
+              .run(adminId, now, now, report.post_id);
+            recordOperationInTx(
+              conn,
+              {
+                actionType: 'report.hide',
+                operationKey: `report_hide:${reportId}`,
+                actorKind: 'admin',
+                actorUserId: adminId,
+                targetType: 'forum_post',
+                targetId: report.post_id,
+                targetSnapshot: { deleted_at: now, target_kind: report.target_kind },
+                changes: { report_id: reportId, hidden: true },
+                reason: `举报处理：${reason}`,
+              },
+              now,
+            );
+          } else if (report.target_kind === 'forum_reply' && report.forum_reply_id !== null) {
+            const reply = conn
+              .prepare('SELECT author_id, post_id, parent_id, status FROM forum_post_replies WHERE id = ?')
+              .get(report.forum_reply_id) as
+              | { author_id: string; post_id: string; parent_id: string | null; status: string }
+              | undefined;
+            authorId = reply?.author_id ?? null;
+            conn
+              .prepare(
+                `UPDATE forum_post_replies
+                    SET status = 'deleted', deleted_by = ?, deleted_at = ?, updated_at = ?
+                  WHERE id = ? AND status = 'published'`,
+              )
+              .run(adminId, now, now, report.forum_reply_id);
+            // 计数与 deleteReply 对齐：只有**顶层回复**才进 reply_count
+            // （createReply 只给 parent_id 为空的回复 +1）。漏掉这一步的话，
+            // 被举报隐藏的回复会一直算进"这条帖子有几条回复"，计数永久漂移；
+            // 而且 UPDATE 带 status='published' 守卫，重复处理不会重复扣减。
+            if (reply && reply.status === 'published' && reply.parent_id === null) {
+              conn
+                .prepare('UPDATE forum_posts SET reply_count = MAX(reply_count - 1, 0), updated_at = ? WHERE id = ?')
+                .run(now, reply.post_id);
+            }
+            recordOperationInTx(
+              conn,
+              {
+                actionType: 'report.hide',
+                operationKey: `report_hide:${reportId}`,
+                actorKind: 'admin',
+                actorUserId: adminId,
+                targetType: 'forum_reply',
+                targetId: report.forum_reply_id,
+                targetSnapshot: { deleted_at: now, target_kind: report.target_kind },
                 changes: { report_id: reportId, hidden: true },
                 reason: `举报处理：${reason}`,
               },

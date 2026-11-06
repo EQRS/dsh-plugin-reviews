@@ -24,8 +24,8 @@ export interface SettingDefinition {
   key: string;
   label: string;
   description: string;
-  kind: 'integer' | 'boolean';
-  defaultValue: number | boolean;
+  kind: 'integer' | 'boolean' | 'string';
+  defaultValue: number | boolean | string;
   /** 整数项的有效范围（含端点）。 */
   min?: number;
   max?: number;
@@ -98,6 +98,16 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     unit: '次/时/用户',
   },
   {
+    key: 'rate_limits.forum_post_per_hour',
+    label: '讨论区发帖上限',
+    description: '每个用户每小时最多在讨论区发布多少个帖子。',
+    kind: 'integer',
+    defaultValue: 10,
+    min: 1,
+    max: 200,
+    unit: '次/时/用户',
+  },
+  {
     key: 'feedback.max_attachments',
     label: '反馈截图张数上限',
     description: '每条问题反馈最多能挂几张截图。只收 jpeg/png/webp，像素与格式闸复用媒体模块。',
@@ -111,6 +121,40 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     key: 'feedback.enabled',
     label: '问题反馈开关',
     description: '关闭后隐藏入口、接口返回 404；已存在的票仍可由管理员处理（回滚用）。',
+    kind: 'boolean',
+    defaultValue: true,
+  },
+  {
+    key: 'rate_limits.forum_reply_per_hour',
+    label: '讨论区回复上限',
+    description: '每个用户每小时最多在讨论区发表多少条回复（含回复的回复）。',
+    kind: 'integer',
+    defaultValue: 30,
+    min: 1,
+    max: 500,
+    unit: '次/时/用户',
+  },
+  {
+    key: 'rate_limits.forum_board_applications_per_day',
+    label: '分区申请上限',
+    description: '每个用户每天最多提交多少次新分区申请。',
+    kind: 'integer',
+    defaultValue: 3,
+    min: 1,
+    max: 50,
+    unit: '次/天/用户',
+  },
+  {
+    key: 'forum.banned_words',
+    label: '讨论区违禁词',
+    description: '逗号分隔。发帖命中这些词会被压成待审，交人工处理；留空则用内置词表。',
+    kind: 'string',
+    defaultValue: '',
+  },
+  {
+    key: 'forum.enabled',
+    label: '讨论区开关',
+    description: '关闭后讨论区页面与接口一律 404，不暴露入口。',
     kind: 'boolean',
     defaultValue: true,
   },
@@ -195,7 +239,7 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
   },
 ];
 
-export type SettingValue = number | boolean;
+export type SettingValue = number | boolean | string;
 export type EffectiveSettings = Record<string, SettingValue>;
 
 export interface SettingsRevisionView {
@@ -236,6 +280,15 @@ export const SETTING_BY_KEY: ReadonlyMap<string, SettingDefinition> = new Map(
 
 /** 校验并规范化一个设置值；类型/范围不对就抛输入错误（带字段路径，前端能直接标红）。 */
 export function parseSettingValue(def: SettingDefinition, raw: unknown): SettingValue {
+  if (def.kind === 'string') {
+    if (typeof raw !== 'string') {
+      throw err.input(`${def.label} 必须是文本。`, [{ path: def.key, message: '类型不合法' }]);
+    }
+    if (raw.length > 2000) {
+      throw err.input(`${def.label} 不能超过 2000 字。`, [{ path: def.key, message: '过长' }]);
+    }
+    return raw;
+  }
   if (def.kind === 'boolean') {
     if (typeof raw !== 'boolean') {
       throw err.input(`${def.label} 必须是 true 或 false。`, [{ path: def.key, message: '类型不合法' }]);
@@ -275,7 +328,15 @@ export function effectiveSettings(db: SqliteDatabase): SettingsReadModel {
       continue;
     }
     try {
-      effective[def.key] = def.kind === 'boolean' ? raw === true : Number(raw);
+      // 三类各按自己的类型收口：字符串不能被 Number() 拧成 NaN
+      effective[def.key] =
+        def.kind === 'boolean'
+          ? raw === true
+          : def.kind === 'string'
+            ? typeof raw === 'string'
+              ? raw
+              : def.defaultValue
+            : Number(raw);
       overriddenKeys.push(def.key);
     } catch {
       effective[def.key] = def.defaultValue;

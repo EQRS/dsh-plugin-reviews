@@ -16,7 +16,7 @@ import { currentContext, okJson, errorResponse, requestMeta, readJson } from '..
 
 export const runtime = 'nodejs';
 
-const TARGET_KINDS: ReportTargetKind[] = ['review', 'comment', 'pack_release'];
+const TARGET_KINDS: ReportTargetKind[] = ['review', 'comment', 'pack_release', 'post', 'forum_reply'];
 
 export async function POST(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);

@@ -33,6 +33,11 @@ interface SessionData {
   accountStatus?: 'active' | 'disabled' | null;
   githubLoginConfigured: boolean;
   testLoginEnabled: boolean;
+  /**
+   * 讨论区总开关（站点配置 forum.enabled）。缺省按"开"处理：
+   * 老版本接口没有这个字段时不能把入口藏掉，那是比 404 更糟的"功能凭空消失"。
+   */
+  forumEnabled?: boolean;
 }
 
 export function SessionNav() {
@@ -99,6 +104,8 @@ export function SessionNav() {
   const inPlugins = pathname === '/plugins' || pathname.startsWith('/plugins/');
   const inPacks = pathname === '/packs' || pathname.startsWith('/packs/');
   const inReviews = pathname === '/reviews' || pathname.startsWith('/reviews/');
+  const inForum = pathname === '/forum' || pathname.startsWith('/forum/');
+  const forumEnabled = session?.forumEnabled !== false;
   const inSpec = pathname === '/spec' || pathname.startsWith('/spec/');
   const inFeatured = pathname === '/featured' || pathname.startsWith('/featured/');
 
@@ -122,6 +129,13 @@ export function SessionNav() {
           <Link href="/featured" className={inFeatured ? 'active' : ''} aria-current={inFeatured ? 'page' : undefined}>
             精选
           </Link>
+          {/* 讨论区关闭时整个入口隐藏：关站期间 /forum 一律 404，
+              留一个点了就 404 的入口等于骗人点。 */}
+          {forumEnabled ? (
+            <Link href="/forum" className={inForum ? 'active' : ''} aria-current={inForum ? 'page' : undefined}>
+              讨论区
+            </Link>
+          ) : null}
           <Link href="/spec" className={inSpec ? 'active' : ''} aria-current={inSpec ? 'page' : undefined}>
             规范
           </Link>

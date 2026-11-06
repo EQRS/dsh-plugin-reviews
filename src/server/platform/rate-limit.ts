@@ -43,7 +43,15 @@ import { log } from './log';
 export const RATE_LIMIT_TABLE = 'rate_limiter_flexible';
 
 /** 业务动作：一个动作一个独立额度。 */
-export type RateLimitAction = 'comment_change' | 'plugin_submission' | 'report' | 'correction' | 'feedback';
+export type RateLimitAction =
+  | 'comment_change'
+  | 'plugin_submission'
+  | 'report'
+  | 'correction'
+  | 'feedback'
+  | 'forum_post'
+  | 'forum_reply'
+  | 'forum_board_application';
 
 export interface RateLimitRule {
   action: RateLimitAction;
@@ -91,6 +99,27 @@ export const RATE_LIMIT_RULES: Record<RateLimitAction, RateLimitRule> = {
     points: 10,
     durationMs: 3_600_000,
     description: '每用户每小时最多 10 次问题反馈提交',
+  },
+  forum_post: {
+    action: 'forum_post',
+    specKey: 'rate_limits.forum_post_per_hour',
+    points: 10,
+    durationMs: 3_600_000,
+    description: '每用户每小时最多发布 10 个帖子',
+  },
+  forum_reply: {
+    action: 'forum_reply',
+    specKey: 'rate_limits.forum_reply_per_hour',
+    points: 30,
+    durationMs: 3_600_000,
+    description: '每用户每小时最多发表 30 条回复',
+  },
+  forum_board_application: {
+    action: 'forum_board_application',
+    specKey: 'rate_limits.forum_board_applications_per_day',
+    points: 3,
+    durationMs: 86_400_000,
+    description: '每用户每天最多提交 3 次分区申请',
   },
 };
 

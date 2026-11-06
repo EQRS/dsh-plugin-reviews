@@ -197,6 +197,22 @@ export const REQUIRED_TABLES = [
   'feedback_tickets',
   'feedback_handling_records',
   'feedback_attachment_links',
+  // 0037：讨论区（分区 / 区长协管 / 白黑名单 / 帖子 / 两层回复 / 点赞 / 分区申请 / 附件链接）
+  //       这 10 张此前没登记，自检报"缺表"却什么都不缺，等于把这道门禁废掉了。
+  'forum_boards',
+  'forum_board_moderators',
+  'forum_board_posting_rules',
+  'forum_posts',
+  'forum_post_replies',
+  'forum_post_likes',
+  'forum_post_reply_likes',
+  'forum_board_applications',
+  'forum_post_attachment_links',
+  'forum_reply_attachment_links',
+  // 0038：发帖草稿 / 草稿附件 / 自动审核记录
+  'forum_post_drafts',
+  'forum_post_draft_attachment_links',
+  'forum_post_screenings',
 ] as const;
 
 export function selfCheck(db: SqliteDatabase): SelfCheckResult {
