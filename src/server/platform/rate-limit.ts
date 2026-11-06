@@ -43,7 +43,13 @@ import { log } from './log';
 export const RATE_LIMIT_TABLE = 'rate_limiter_flexible';
 
 /** 业务动作：一个动作一个独立额度。 */
-export type RateLimitAction = 'comment_change' | 'plugin_submission' | 'report' | 'correction' | 'feedback';
+export type RateLimitAction =
+  | 'comment_change'
+  | 'plugin_submission'
+  | 'report'
+  | 'correction'
+  | 'feedback'
+  | 'role_application';
 
 export interface RateLimitRule {
   action: RateLimitAction;
@@ -91,6 +97,15 @@ export const RATE_LIMIT_RULES: Record<RateLimitAction, RateLimitRule> = {
     points: 10,
     durationMs: 3_600_000,
     description: '每用户每小时最多 10 次问题反馈提交',
+  },
+  // 身份申请一天 3 次的用量级：审核要走人工，一天内反复改口只会淹掉审核队列，
+  // 所以按**天**而不是小时计窗口（设计 §6 末尾的限流口径）。
+  role_application: {
+    action: 'role_application',
+    specKey: 'rate_limits.role_applications_per_day',
+    points: 3,
+    durationMs: 86_400_000,
+    description: '每用户每天最多 3 次身份申请提交',
   },
 };
 

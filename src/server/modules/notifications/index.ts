@@ -22,7 +22,9 @@ export type NotificationKind =
   | 'reply_to_comment'
   | 'moderation_result'
   | 'featured_published'
-  | 'feedback_result';
+  | 'feedback_result'
+  | 'role_application_result'
+  | 'plugin_claim_result';
 
 export interface NotificationView {
   id: string;
@@ -260,6 +262,100 @@ export function deliverFeedbackResultNotification(
       input.deduplicationKey,
       detail,
       input.linkUrl,
+      input.now,
+    );
+
+  if (inserted.changes === 0) return { created: false, reason: 'duplicate', recipientId: input.recipientId };
+  return { created: true, reason: null, recipientId: input.recipientId };
+}
+
+/**
+ * 投递一条「身份申请结果」通知（迁移 0041 新增的 kind）。
+ *
+ * 与精选发布同构：身份申请是一条申请记录，不是 content_entities 的某一行，
+ * 所以没有 content_entity_id，跳转地址由调用方给（默认 /me/settings，存 link_url）。
+ * 去重键由调用方给（role_application:<申请>:<收件人>:<结果>）：同一次审核重放不会刷屏；
+ * 但"先驳回、补充材料后再通过"是两次不同的结果，应各发一条。
+ */
+export function deliverRoleApplicationResultNotification(
+  db: SqliteDatabase,
+  input: {
+    recipientId: string;
+    actorId: string;
+    detail: string;
+    linkUrl: string;
+    deduplicationKey: string;
+    now: number;
+  },
+): DeliverResult {
+  return deliverColumnNotification(db, 'role_application_result', '身份申请结果通知', input);
+}
+
+/**
+ * 投递一条「插件认领结果」通知（迁移 0041 新增的 kind）。
+ *
+ * 认领的是别人已收录的插件，结果与插件条目相关但**不是那条插件内容本身的任务结果**，
+ * 因此同样按栏目类处理：无 content_entity_id，跳转地址由调用方给（默认 /me/my-plugins）。
+ * 去重键由调用方给（plugin_claim:<认领>:<收件人>:<结果>）。
+ */
+export function deliverPluginClaimResultNotification(
+  db: SqliteDatabase,
+  input: {
+    recipientId: string;
+    actorId: string;
+    detail: string;
+    linkUrl: string;
+    deduplicationKey: string;
+    now: number;
+  },
+): DeliverResult {
+  return deliverColumnNotification(db, 'plugin_claim_result', '插件认领结果通知', input);
+}
+
+/** 栏目类通知（精选 / 反馈 / 身份申请 / 认领）共用的写入：无 comment_id、无 content_entity_id、有 detail 与 link_url。 */
+function deliverColumnNotification(
+  db: SqliteDatabase,
+  kind: NotificationKind,
+  label: string,
+  input: {
+    recipientId: string;
+    actorId: string;
+    detail: string;
+    linkUrl: string;
+    deduplicationKey: string;
+    now: number;
+  },
+): DeliverResult {
+  const detail = input.detail.trim();
+  if (detail.length === 0) {
+    // 编程错误：结果类通知必须有一句人话说明，否则用户收到一条空通知。
+    throw err.internal(`${label}缺少说明文字，拒绝写入。`);
+  }
+  const linkUrl = input.linkUrl.trim();
+  if (linkUrl.length === 0) {
+    // 栏目类通知没有内容锚点，link_url 是它唯一的跳转依据，不能为空。
+    throw err.internal(`${label}缺少跳转地址，拒绝写入。`);
+  }
+  // 自己不通知自己（数据库 CHECK 兜底；这里先判是为了不去撞约束）
+  if (input.recipientId === input.actorId) {
+    return { created: false, reason: 'self', recipientId: input.recipientId };
+  }
+
+  const inserted = db
+    .prepare(
+      `INSERT INTO notifications
+         (id, recipient_id, kind, actor_id, comment_id, content_entity_id, deduplication_key, detail, link_url, read_at, created_at)
+       VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?, NULL, ?)
+       ON CONFLICT (deduplication_key) DO NOTHING`,
+    )
+    .run(
+      newId(input.now),
+      input.recipientId,
+      kind,
+      input.actorId,
+      input.deduplicationKey,
+      detail,
+      linkUrl,
       input.now,
     );
 
