@@ -187,7 +187,7 @@ describe('收藏夹', () => {
     expect(folders.find((f) => f.folderId === defaultFolder.folderId)?.isDefault).toBe(true);
   });
 
-  it('删除收藏夹：夹内收藏一并取消；默认夹不可删；越权拒绝', async () => {
+  it('删除收藏夹：夹内收藏移回默认夹；默认夹不可删；越权拒绝', async () => {
     const { db } = setup();
     const user = insertUser(db);
     const other = insertUser(db);
@@ -199,12 +199,14 @@ describe('收藏夹', () => {
     await service.setFavorite(caller(user), { pluginId: plugin, folderId: folder.folderId });
 
     const result = await service.deleteFavoriteFolder(caller(user), folder.folderId);
-    expect(result.removed).toBe(1);
+    // 删夹 = 移回默认夹（审查后纠正：原先会把夹内收藏一并删掉，那是数据丢失）
+    expect(result.moved).toBe(1);
 
     const folders = await service.listFavoriteFolders(caller(user));
     expect(folders.find((f) => f.folderId === folder.folderId)).toBeUndefined();
     const defaultFolder = folders.find((f) => f.isDefault)!;
-    expect(defaultFolder.count).toBe(0);
+    // 收藏被移进默认夹，而不是消失（审查后纠正的语义）
+    expect(defaultFolder.count).toBe(1);
 
     // 默认夹不可删
     await expectCode(

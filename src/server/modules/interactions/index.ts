@@ -698,6 +698,61 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
     },
 
     /**
+     * 取消某一类收藏（**不校验目标当前是否可公开**）。
+     *
+     * 与 toggleFavorite 的关键差别：toggle 会先 assertFavoriteTarget，目标被撤回/下架后
+     * 那行收藏就永远删不掉了——用户点「取消」只会一直看到错误。
+     *
+     * 取消收藏只该看**归属**（是不是我的收藏），不该看目标的当前可公开性：
+     * 东西下架了，我更不能被它绑住。
+     */
+    async removeFavoriteInKind(
+      ctx: CallerContext,
+      input: { kind: FavoriteTargetKind; targetId: string },
+      injectedDb?: SqliteDatabase,
+    ): Promise<{ favorited: false }> {
+      assertCanWrite(ctx);
+      const userId = ctx.userId;
+      const spec = favoriteTable(input.kind);
+      return withTransaction((tx) => {
+        tx.db
+          .prepare(`DELETE FROM ${spec.table} WHERE user_id = ? AND ${spec.column} = ?`)
+          .run(userId, input.targetId);
+        return { favorited: false as const };
+      }, injectedDb ?? db);
+    },
+
+    /**
+     * **幂等**收藏到该类的默认夹：已收藏则保持不动（不取消）。
+     *
+     * 与 toggleFavorite 的区别就是「重复点不翻转」。POST 用这个、DELETE 用 removeFavoriteInKind，
+     * 两端语义各自单一，不会出现「同一个按钮，插件点两次没反应、帖子点两次取消」。
+     */
+    async favoriteToDefaultFolder(
+      ctx: CallerContext,
+      input: { kind: FavoriteTargetKind; targetId: string },
+      injectedDb?: SqliteDatabase,
+    ): Promise<{ favorited: true; folderId: string }> {
+      assertCanWrite(ctx);
+      const userId = ctx.userId;
+      const spec = favoriteTable(input.kind);
+      return withTransaction((tx) => {
+        const conn = tx.db;
+        assertFavoriteTarget(conn, input.kind, input.targetId);
+        const folder = ensureDefaultFolderInTx(conn, userId, input.kind);
+        conn
+          .prepare(
+            `INSERT INTO ${spec.table} (user_id, ${spec.column}, folder_id, created_at)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(user_id, ${spec.column})
+             DO UPDATE SET folder_id = excluded.folder_id, created_at = excluded.created_at`,
+          )
+          .run(userId, input.targetId, folder.id, nowMs());
+        return { favorited: true as const, folderId: folder.id };
+      }, injectedDb ?? db);
+    },
+
+    /**
      * 某一类内容的收藏夹列表（含每夹收藏数）；首次访问时创建该类默认夹。
      *
      * 默认按插件：老的 /me/favorites 与插件详情页仍是插件语义。传 kind 读写对应类型。
@@ -972,7 +1027,7 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
       ctx: CallerContext,
       folderId: string,
       injectedDb?: SqliteDatabase,
-    ): Promise<{ folderId: string; removed: number }> {
+    ): Promise<{ folderId: string; moved: number }> {
       assertCanWrite(ctx);
       const userId = ctx.userId;
       return withTransaction((tx) => {
@@ -987,13 +1042,17 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
           throw err.input('默认收藏夹不能删除。', [{ path: 'folderId', message: '默认夹不可删' }]);
         }
 
-        // 先删夹内收藏（显式删除以便拿到计数；外键 CASCADE 也保证不会留下孤儿）。
+        // 夹内收藏**移回默认夹**，而不是一并删除。
+        // 删除夹子是「整理收纳」，不是「清空收藏」——用户整理一下夹子就把收藏全丢了，
+        // 那是数据丢失，不是他表达的意思。
+        // 默认夹不可删（上面已挡），所以移动目标一定存在。
         const spec = favoriteTable(folder.target_kind);
-        const removed = conn
-          .prepare(`DELETE FROM ${spec.table} WHERE user_id = ? AND folder_id = ?`)
-          .run(userId, folderId).changes;
+        const fallback = ensureDefaultFolderInTx(conn, userId, folder.target_kind);
+        const moved = conn
+          .prepare(`UPDATE ${spec.table} SET folder_id = ? WHERE user_id = ? AND folder_id = ?`)
+          .run(fallback.id, userId, folderId).changes;
         conn.prepare('DELETE FROM favorite_folders WHERE id = ? AND user_id = ?').run(folderId, userId);
-        return { folderId, removed };
+        return { folderId, moved };
       }, injectedDb ?? db);
     },
 

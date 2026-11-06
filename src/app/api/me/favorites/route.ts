@@ -74,13 +74,11 @@ export async function DELETE(request: Request): Promise<Response> {
       const result = await service.removeFavorite(ctx, targetId);
       return okJson(result, requestId);
     }
-    const result = await service.toggleFavorite(ctx, { kind, targetId });
-    // toggle 在"本来就没收藏"时会把状态翻成已收藏；取消语义要求最终必须是未收藏
-    if (result.favorited) {
-      const undone = await service.toggleFavorite(ctx, { kind, targetId });
-      return okJson(undone, requestId);
-    }
-    return okJson({ favorited: false }, requestId);
+    // 取消收藏**不校验目标是否还可公开**：
+    // 目标被撤回/下架后，那行收藏不该变成删不掉的死结。
+    // 归属由 user_id 保证，目标状态与此无关。
+    const result = await service.removeFavoriteInKind(ctx, { kind, targetId });
+    return okJson(result, requestId);
   } catch (e) {
     return errorResponse(e, requestId);
   }
@@ -118,12 +116,11 @@ export async function POST(request: Request): Promise<Response> {
       });
       return okJson(result, requestId);
     }
-    // 没给夹：插件的旧语义是 setFavorite（可显式指定默认夹），其余两类是 toggle
-    if (kind === 'plugin') {
-      const result = await service.setFavorite(ctx, { pluginId: targetId });
-      return okJson(result, requestId);
-    }
-    const result = await service.toggleFavorite(ctx, { kind, targetId });
+    // 没给夹：一律**幂等收藏到默认夹**，三类同一语义。
+    //
+    // 审查指出过原先的不一致：插件走 setFavorite（幂等）、帖子走 toggle（再点取消），
+    // 同一个按钮两种行为。现在 POST 只负责「收藏」，取消一律走 DELETE。
+    const result = await service.favoriteToDefaultFolder(ctx, { kind, targetId });
     return okJson(result, requestId);
   } catch (e) {
     return errorResponse(e, requestId);

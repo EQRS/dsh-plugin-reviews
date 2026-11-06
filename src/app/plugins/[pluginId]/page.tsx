@@ -23,7 +23,13 @@ import { tierLabel, securityLabel } from '@/packages/common/assessment';
 
 export const dynamic = 'force-dynamic';
 
-export default async function PluginDetailPage({ params }: { params: Promise<{ pluginId: string }> }) {
+export default async function PluginDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ pluginId: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { pluginId } = await params;
   const db = getDb();
   const catalog = createCatalogService({ db });
@@ -33,6 +39,24 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ p
   const ctx = await currentContext();
   // 收藏状态（未登录恒 false）—— idea.md §15
   const favorited = await createInteractionsService({ db }).isFavorite(ctx, pluginId);
+
+  // 「收藏到哪个夹」的预选值。
+  //
+  // 插件详情页本身不知道该用户从哪个夹子点进来——所以收藏夹列表在链接上带 ?from=。
+  // 没带（从目录/搜索/首页进来）就落 null，组件回落到默认夹。
+  // 带了但那个夹不属于本人或类型不对，也按 null 处理：不因一个坏参数把页面打挂。
+  const sp = await searchParams;
+  const fromRaw = Array.isArray(sp.from) ? sp.from[0] : sp.from;
+  const interactions = createInteractionsService({ db });
+  let initialFolderId: string | null = null;
+  if (ctx.userId !== null && typeof fromRaw === 'string' && fromRaw.length > 0) {
+    try {
+      const folders = await interactions.listFavoriteFolders(ctx, 'plugin');
+      initialFolderId = folders.some((x) => x.folderId === fromRaw) ? fromRaw : null;
+    } catch {
+      initialFolderId = null;
+    }
+  }
 
   // 本插件下的公开评测
   const rows = db
@@ -64,6 +88,7 @@ export default async function PluginDetailPage({ params }: { params: Promise<{ p
           {/* 收藏（idea.md §15）：读者把插件收进「我的 → 收藏」 */}
           <FavoriteButton
             pluginId={plugin.pluginId}
+            initialFolderId={initialFolderId}
             initialFavorited={favorited}
             authenticated={ctx.userId !== null}
           />

@@ -12,10 +12,13 @@ import { FavoritePicker } from './favorite-picker';
 export function FavoriteButton({
   pluginId,
   initialFavorited,
+  initialFolderId = null,
   authenticated,
 }: {
   pluginId: string;
   initialFavorited: boolean;
+  /** 从收藏夹点进来时预选的夹子（详情页从 ?from= 解析后传入）；拿不到就 null。 */
+  initialFolderId?: string | null;
   authenticated: boolean;
 }) {
   return (
@@ -23,6 +26,7 @@ export function FavoriteButton({
       kind="plugin"
       targetId={pluginId}
       initialFavorited={initialFavorited}
+      initialFolderId={initialFolderId}
       authenticated={authenticated}
     />
   );

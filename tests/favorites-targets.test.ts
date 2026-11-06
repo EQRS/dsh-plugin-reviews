@@ -198,9 +198,12 @@ describe('收藏重构 · 三类内容共用收藏夹', () => {
     await service.setFavoriteInKind(me, { kind: 'post', targetId: postId, folderId: postFolder.folderId });
     await service.toggleFavorite(me, { kind: 'plugin', targetId: plugin });
 
-    const removed = await service.deleteFavoriteFolder(me, postFolder.folderId);
-    expect(removed.removed).toBe(1);
-    expect(await service.listFavoritePosts(me)).toHaveLength(0);
+    const result = await service.deleteFavoriteFolder(me, postFolder.folderId);
+    // 删夹 = 把夹内收藏**移回默认夹**，不是删掉（行为在审查后被纠正）
+    expect(result.moved).toBe(1);
+    const postsAfter = await service.listFavoritePosts(me);
+    expect(postsAfter).toHaveLength(1);
+    expect(postsAfter[0]!.folderName).not.toBe('要删的');
     // 插件收藏没被波及
     expect(await service.isFavorited(me, 'plugin', plugin)).toBe(true);
   });
