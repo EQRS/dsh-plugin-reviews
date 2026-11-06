@@ -179,6 +179,12 @@ function deliverClaimResult(
     approved: boolean;
     note: string | null;
     now: number;
+    /**
+     * 第几轮审核：同一个 ownership 行会被「驳回 → 重新认领 → 再驳回」反复使用，
+     * 去掉重键里的轮次会让第二次驳回的通知与第一次逐字相同，被 ON CONFLICT DO NOTHING 吞掉，
+     * 用户收不到第二次结论。
+     */
+    reviewedAt: number;
   },
 ): void {
   deliverPluginClaimResultNotification(conn, {
@@ -188,7 +194,7 @@ function deliverClaimResult(
       ? '你认领的插件已通过审核，可以在「我的插件」里看到。'
       : `你认领的插件未通过审核${input.note ? `：${input.note}` : '。'}`,
     linkUrl: '/me/my-plugins',
-    deduplicationKey: `plugin_claim:${input.ownershipId}:${input.recipientId}:${input.approved ? 'approved' : 'rejected'}`,
+    deduplicationKey: `plugin_claim:${input.ownershipId}:${input.recipientId}:${input.approved ? 'approved' : 'rejected'}:${input.reviewedAt}`,
     now: input.now,
   });
 }
@@ -230,6 +236,19 @@ export function createPluginOwnershipService(deps: { db: SqliteDatabase }): Plug
 
         const now = nowMs();
 
+        // 有人已经在这个插件上拿到 verified 了：不管他是从哪条分支进来，都必须先挡住。
+        //
+        // 审查复现过一条 500：A 被驳回 → B 自动 verified → A 重新绑 GitHub 再认领。
+        // 那时走的是下面「rejected 复用同一行」的分支，而那分支原先不做 taken 检查，
+        // 直接 UPDATE 成 verified 就撞了部分唯一索引，errors-http 只映射 DomainError → 500。
+        // 所以把检查提到分支之前，两条路径共用。
+        if (matched) {
+          const taken = conn
+            .prepare("SELECT 1 AS x FROM plugin_ownerships WHERE plugin_id = ? AND status = 'verified' AND user_id <> ?")
+            .get(pluginId, userId);
+          if (taken) throw err.conflict('这个插件已经归属其他用户，不能自动认领。如有异议请联系管理员。');
+        }
+
         if (existing) {
           if (existing.status === 'verified') {
             throw err.conflict('这个插件已经在你名下。');
@@ -253,15 +272,6 @@ export function createPluginOwnershipService(deps: { db: SqliteDatabase }): Plug
               existing.id,
             );
           return { status: (matched ? 'verified' : 'pending') as OwnershipStatus, autoVerified: matched };
-        }
-
-        // 有人在别人名下验证过了：不阻止发起认领（pending 允许并存），但直接 verified 会撞唯一索引，
-        // 这里提前给人话，而不是把约束错误抛出去。
-        if (matched) {
-          const taken = conn
-            .prepare("SELECT 1 AS x FROM plugin_ownerships WHERE plugin_id = ? AND status = 'verified'")
-            .get(pluginId);
-          if (taken) throw err.conflict('这个插件已经归属其他用户，不能自动认领。如有异议请联系管理员。');
         }
 
         conn
@@ -331,6 +341,7 @@ export function createPluginOwnershipService(deps: { db: SqliteDatabase }): Plug
             adminId: adminId as string,
             approved: true,
             note: null,
+            reviewedAt: now,
             now,
           });
           return;
@@ -349,6 +360,7 @@ export function createPluginOwnershipService(deps: { db: SqliteDatabase }): Plug
           adminId: adminId as string,
           approved: false,
           note: note !== null && note.trim().length > 0 ? note.trim().slice(0, 500) : null,
+            reviewedAt: now,
           now,
         });
       }, injectedDb ?? db);

@@ -11,7 +11,7 @@
 import { getDb } from '@/server/platform/db';
 import { createRoleService, parseRoleType } from '@/server/modules/roles/service';
 import { booleanSetting, rateLimitOverrideFor } from '@/server/modules/settings';
-import { RATE_LIMIT_RULES, enforceRateLimit } from '@/server/platform/rate-limit';
+import { RATE_LIMIT_RULES, enforceRateLimit, refundQuietly, type RateLimitTicket } from '@/server/platform/rate-limit';
 import { err } from '@/packages/common/errors';
 import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../../../_lib/context';
 
@@ -30,17 +30,30 @@ export async function POST(request: Request): Promise<Response> {
     const roleType = parseRoleType(body.roleType);
     const note = typeof body.note === 'string' ? body.note : null;
 
-    await enforceRateLimit(
-      db,
-      'role_application',
-      ctx.userId,
-      1,
-      await rateLimitOverrideFor(db, RATE_LIMIT_RULES.role_application),
-    );
+    // 频控额度在**业务真正写成之前**就先扣了，所以下面任何一步失败都必须退回去。
+    //
+    // 审查指出的问题：服务层还会因「已持有该身份 / 有待审申请 / 处于冷却期 / 资格不足 /
+    // note 超长」拒绝，这些全发生在频控之后 —— 用户点错 3 次，当天额度就烧光，
+    // 只能等 24 小时。rate-limit.ts 的注释写得很清楚「没有产生业务变更时必须退还」，
+    // refundQuietly 也早就提供，只是一直没人调用。
+    let ticket: RateLimitTicket | null = null;
+    try {
+      ticket = await enforceRateLimit(
+        db,
+        'role_application',
+        ctx.userId,
+        1,
+        await rateLimitOverrideFor(db, RATE_LIMIT_RULES.role_application),
+      );
 
-    const service = createRoleService({ db });
-    const application = await service.applyForRole(ctx, roleType, note);
-    return okJson(application, requestId, 201);
+      const service = createRoleService({ db });
+      const application = await service.applyForRole(ctx, roleType, note);
+      ticket = null; // 成功落地，额度不退
+      return okJson(application, requestId, 201);
+    } finally {
+      // 失败（含校验不通过、服务端内部错误）一律退还：用户没做错什么，不该烧他的额度。
+      await refundQuietly(ticket);
+    }
   } catch (e) {
     return errorResponse(e, requestId);
   }

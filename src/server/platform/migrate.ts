@@ -197,6 +197,10 @@ export const REQUIRED_TABLES = [
   'feedback_tickets',
   'feedback_handling_records',
   'feedback_attachment_links',
+  // 0040：用户身份体系——身份、申请、插件归属（认领）
+  'user_roles',
+  'role_applications',
+  'plugin_ownerships',
 ] as const;
 
 export function selfCheck(db: SqliteDatabase): SelfCheckResult {
