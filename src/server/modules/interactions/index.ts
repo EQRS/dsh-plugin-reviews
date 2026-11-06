@@ -73,6 +73,38 @@ export interface FavoriteFolderView {
   isDefault: boolean;
   count: number;
   createdAt: number;
+  /** 这个夹装哪一类内容（插件 / 整合包 / 帖子）。 */
+  targetKind: FavoriteTargetKind;
+}
+
+export interface FavoritePackView {
+  packId: string;
+  title: string;
+  authorNickname: string;
+  releaseNumber: number | null;
+  pluginCount: number;
+  /** 全部版本都被撤回/隐藏时 false：收藏页显示状态而不是一个点不开的标题。 */
+  hasPublicRelease: boolean;
+  withdrawn: boolean;
+  hidden: boolean;
+  createdAt: number;
+  folderId: string;
+  folderName: string;
+}
+
+export interface FavoritePostView {
+  postId: string;
+  title: string;
+  boardSlug: string;
+  boardName: string;
+  authorNickname: string;
+  status: 'published' | 'deleted';
+  /** 已删除的帖子仍列出来（软删），但标题可读、点不进去正文。 */
+  replyCount: number;
+  likeCount: number;
+  createdAt: number;
+  folderId: string;
+  folderName: string;
 }
 
 export interface ReportView {
@@ -104,35 +136,214 @@ export interface HandleReportResult {
 
 const EXCERPT_MAX = 120;
 
-/** 默认收藏夹的固定名称（服务端创建，唯一）。 */
+/** 默认收藏夹的固定名称（服务端创建，每类内容各一个，互不相干）。 */
 export const DEFAULT_FAVORITE_FOLDER_NAME = '默认收藏夹';
 
+/** 收藏夹装哪一类内容。夹内只放同类收藏，「取消收藏」的语义才不会含糊。 */
+export type FavoriteTargetKind = 'plugin' | 'pack' | 'post';
+
+export const FAVORITE_TARGET_LABELS: Record<FavoriteTargetKind, string> = {
+  plugin: '插件',
+  pack: '整合包',
+  post: '帖子',
+};
+
 /**
- * 确保用户存在默认收藏夹；历史收藏（folder_id IS NULL）回填进来。
+ * 每类内容的收藏表与目标表。
+ *
+ * 三张收藏表结构一致（user_id + 目标 id + folder_id + created_at），差异只在表名与
+ * 「收藏目标此刻能不能收藏」的判定，所以共用一套读写函数，差异集中在这里。
+ */
+const FAVORITE_TABLES: Record<FavoriteTargetKind, { table: string; column: string }> = {
+  plugin: { table: 'plugin_favorites', column: 'plugin_id' },
+  pack: { table: 'pack_favorites', column: 'pack_id' },
+  post: { table: 'post_favorites', column: 'post_id' },
+};
+
+/**
+ * 确保用户在该类内容下存在默认收藏夹；插件历史收藏（folder_id IS NULL）回填进来。
  * 必须在事务内调用（会写库）。
  */
-function ensureDefaultFolderInTx(conn: SqliteDatabase, userId: string): { id: string } {
+function ensureDefaultFolderInTx(
+  conn: SqliteDatabase,
+  userId: string,
+  kind: FavoriteTargetKind = 'plugin',
+): { id: string } {
   const existing = conn
-    .prepare('SELECT id FROM favorite_folders WHERE user_id = ? AND is_default = 1')
-    .get(userId) as { id: string } | undefined;
+    .prepare('SELECT id FROM favorite_folders WHERE user_id = ? AND target_kind = ? AND is_default = 1')
+    .get(userId, kind) as { id: string } | undefined;
   if (existing) {
-    conn
-      .prepare('UPDATE plugin_favorites SET folder_id = ? WHERE user_id = ? AND folder_id IS NULL')
-      .run(existing.id, userId);
+    if (kind === 'plugin') {
+      conn
+        .prepare('UPDATE plugin_favorites SET folder_id = ? WHERE user_id = ? AND folder_id IS NULL')
+        .run(existing.id, userId);
+    }
     return existing;
   }
   const id = newId();
   const now = nowMs();
   conn
     .prepare(
-      `INSERT INTO favorite_folders (id, user_id, name, is_default, created_at, updated_at)
-       VALUES (?, ?, ?, 1, ?, ?)`,
+      `INSERT INTO favorite_folders (id, user_id, name, target_kind, is_default, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 1, ?, ?)`,
     )
-    .run(id, userId, DEFAULT_FAVORITE_FOLDER_NAME, now, now);
-  conn
-    .prepare('UPDATE plugin_favorites SET folder_id = ? WHERE user_id = ? AND folder_id IS NULL')
-    .run(id, userId);
+    .run(id, userId, DEFAULT_FAVORITE_FOLDER_NAME, kind, now, now);
+  if (kind === 'plugin') {
+    conn
+      .prepare('UPDATE plugin_favorites SET folder_id = ? WHERE user_id = ? AND folder_id IS NULL')
+      .run(id, userId);
+  }
   return { id };
+}
+
+/** 校验收藏夹属于本人且类型匹配；不匹配按「不存在」处理，不泄漏别的类型的夹。 */
+function assertFolderOwned(conn: SqliteDatabase, userId: string, folderId: string, kind: FavoriteTargetKind): void {
+  const row = conn
+    .prepare('SELECT id FROM favorite_folders WHERE id = ? AND user_id = ? AND target_kind = ?')
+    .get(folderId, userId, kind);
+  if (!row) {
+    throw err.input('收藏夹不存在。', [
+      { path: 'folderId', message: `需要属于你的${FAVORITE_TARGET_LABELS[kind]}收藏夹` },
+    ]);
+  }
+}
+
+/** 取某类内容的收藏表与目标列（三张表结构一致，读写函数共用）。 */
+function favoriteTable(kind: FavoriteTargetKind): { table: string; column: string } {
+  return FAVORITE_TABLES[kind];
+}
+
+/**
+ * 目标此刻能不能被收藏（存在且公开）。不能就抛出，调用方不用再判。
+ *
+ * 三类口径不同，每条都写清为什么：
+ *  - 插件：行存在即可（插件本身没有「未发布」态）。
+ *  - 整合包：至少要有一个公开版本。全部撤回/隐藏的包不该被新收藏 —— 收进来只能看到
+ *    「暂无可公开版本」，对用户没用，也等于给了它一个虚假的活跃信号。
+ *  - 帖子：已删除的不能新收藏；待审（review_state='pending_review'）的更不能 —— 举报者
+ *    根本看不到它。已经在夹里的老收藏不清（作者被删帖后收藏者仍能看到痕迹）。
+ */
+function assertFavoriteTarget(conn: SqliteDatabase, kind: FavoriteTargetKind, targetId: string): void {
+  if (kind === 'plugin') {
+    if (!conn.prepare('SELECT 1 AS x FROM plugins WHERE id = ?').get(targetId)) {
+      throw err.unavailable('要收藏的插件不存在。');
+    }
+    return;
+  }
+  if (kind === 'pack') {
+    if (!conn.prepare('SELECT 1 AS x FROM plugin_packs WHERE id = ?').get(targetId)) {
+      throw err.unavailable('整合包不存在。');
+    }
+    const publicCount = (
+      conn
+        .prepare(
+          `SELECT COUNT(*) AS c FROM plugin_pack_releases rel
+             JOIN content_entities ce ON ce.id = rel.id
+            WHERE rel.pack_id = ? AND rel.release_number IS NOT NULL AND rel.review_status = 'published'
+              AND ce.withdrawn_at IS NULL AND ce.hidden_at IS NULL`,
+        )
+        .get(targetId) as { c: number }
+    ).c;
+    if (Number(publicCount) === 0) throw err.unavailable('这个整合包当前没有公开版本，无法收藏。');
+    return;
+  }
+  const post = conn.prepare('SELECT status, review_state FROM forum_posts WHERE id = ?').get(targetId) as
+    | { status: string; review_state: string }
+    | undefined;
+  if (!post) throw err.unavailable('要收藏的帖子不存在。');
+  if (post.status === 'deleted') throw err.unavailable('该帖子已被删除，无法收藏。');
+  if (post.review_state !== 'published') throw err.unavailable('该帖子正在审核中，暂时无法收藏。');
+}
+
+/** 某夹内的整合包收藏（含包的最近版本概况）。 */
+function readFavoritePacks(conn: SqliteDatabase, userId: string, folderId: string): FavoritePackView[] {
+  const rows = conn
+    .prepare(
+      `WITH latest AS (
+         SELECT rel.*, ROW_NUMBER() OVER (
+           PARTITION BY rel.pack_id ORDER BY rel.release_number DESC, rel.submitted_at DESC
+         ) AS rn
+           FROM plugin_pack_releases rel
+       )
+       SELECT f.pack_id, f.created_at, l.release_number, l.title, l.review_status,
+              l.submitted_at, ce.withdrawn_at, ce.hidden_at, u.nickname,
+              (SELECT COUNT(*) FROM plugin_pack_release_items i WHERE i.release_id = l.id) AS item_count
+         FROM pack_favorites f
+         JOIN plugin_packs p ON p.id = f.pack_id
+         LEFT JOIN latest l ON l.pack_id = p.id AND l.rn = 1
+         LEFT JOIN content_entities ce ON ce.id = l.id
+         JOIN users u ON u.id = p.author_id
+        WHERE f.user_id = ? AND f.folder_id = ?
+        ORDER BY f.created_at DESC, f.pack_id ASC`,
+    )
+    .all(userId, folderId) as Array<{
+    pack_id: string;
+    created_at: number;
+    release_number: number | null;
+    title: string | null;
+    review_status: string | null;
+    submitted_at: number | null;
+    withdrawn_at: number | null;
+    hidden_at: number | null;
+    nickname: string;
+    item_count: number;
+  }>;
+  return rows.map((r) => ({
+    packId: r.pack_id,
+    title: r.title ?? '（整合包暂无可公开版本）',
+    authorNickname: r.nickname,
+    releaseNumber: r.release_number === null ? null : Number(r.release_number),
+    pluginCount: Number(r.item_count),
+    hasPublicRelease:
+      r.release_number !== null &&
+      r.review_status === 'published' &&
+      r.withdrawn_at === null &&
+      r.hidden_at === null,
+    withdrawn: r.withdrawn_at !== null,
+    hidden: r.hidden_at !== null,
+    createdAt: r.created_at,
+    folderId,
+    folderName: '',
+  }));
+}
+
+/** 某夹内的帖子收藏。已删除的帖子照样列出来（软删），由调用方按 status 显示痕迹。 */
+function readFavoritePosts(conn: SqliteDatabase, userId: string, folderId: string): FavoritePostView[] {
+  const rows = conn
+    .prepare(
+      `SELECT f.post_id, f.created_at, p.title, p.status, p.reply_count, p.like_count,
+              b.slug AS board_slug, b.name AS board_name, u.nickname
+         FROM post_favorites f
+         JOIN forum_posts p ON p.id = f.post_id
+         JOIN forum_boards b ON b.id = p.board_id
+         JOIN users u ON u.id = p.author_id
+        WHERE f.user_id = ? AND f.folder_id = ?
+        ORDER BY f.created_at DESC, f.post_id ASC`,
+    )
+    .all(userId, folderId) as Array<{
+    post_id: string;
+    created_at: number;
+    title: string;
+    status: 'published' | 'deleted';
+    reply_count: number;
+    like_count: number;
+    board_slug: string;
+    board_name: string;
+    nickname: string;
+  }>;
+  return rows.map((r) => ({
+    postId: r.post_id,
+    title: r.title,
+    boardSlug: r.board_slug,
+    boardName: r.board_name,
+    authorNickname: r.nickname,
+    status: r.status,
+    replyCount: Number(r.reply_count),
+    likeCount: Number(r.like_count),
+    createdAt: r.created_at,
+    folderId,
+    folderName: '',
+  }));
 }
 
 /** 目标是否存在且"当前公开"——决定能不能投票/举报。 */
@@ -384,33 +595,32 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
       }, injectedDb ?? db);
     },
 
-    /** 收藏/取消收藏插件（P1 只支持插件；整合包等 P4）。 */
+    /** 收藏/取消收藏（三类内容同一套语义：没收藏就收进该类默认夹，已收藏就取消）。 */
     async toggleFavorite(
       ctx: CallerContext,
-      input: { kind: 'plugin' | 'pack'; targetId: string },
+      input: { kind: FavoriteTargetKind; targetId: string },
       injectedDb?: SqliteDatabase,
     ): Promise<{ favorited: boolean }> {
       assertCanWrite(ctx);
       const userId = ctx.userId;
-      if (input.kind === 'pack') {
-        throw err.input('整合包收藏将在整合包上线后开放。', [{ path: 'kind', message: '暂不支持' }]);
-      }
+      const spec = favoriteTable(input.kind);
       return withTransaction((tx) => {
         const conn = tx.db;
-        const exists = conn.prepare('SELECT 1 AS x FROM plugins WHERE id = ?').get(input.targetId);
-        if (!exists) throw err.unavailable('要收藏的插件不存在。');
+        assertFavoriteTarget(conn, input.kind, input.targetId);
 
         const current = conn
-          .prepare('SELECT 1 AS x FROM plugin_favorites WHERE user_id = ? AND plugin_id = ?')
+          .prepare(`SELECT 1 AS x FROM ${spec.table} WHERE user_id = ? AND ${spec.column} = ?`)
           .get(userId, input.targetId);
         if (current) {
-          conn.prepare('DELETE FROM plugin_favorites WHERE user_id = ? AND plugin_id = ?').run(userId, input.targetId);
+          conn
+            .prepare(`DELETE FROM ${spec.table} WHERE user_id = ? AND ${spec.column} = ?`)
+            .run(userId, input.targetId);
           return { favorited: false };
         }
-        const folder = ensureDefaultFolderInTx(conn, userId);
+        const folder = ensureDefaultFolderInTx(conn, userId, input.kind);
         conn
           .prepare(
-            'INSERT INTO plugin_favorites (user_id, plugin_id, folder_id, created_at) VALUES (?, ?, ?, ?)',
+            `INSERT INTO ${spec.table} (user_id, ${spec.column}, folder_id, created_at) VALUES (?, ?, ?, ?)`,
           )
           .run(userId, input.targetId, folder.id, nowMs());
         return { favorited: true };
@@ -427,15 +637,11 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
       const userId = ctx.userId;
       return withTransaction((tx) => {
         const conn = tx.db;
-        const plugin = conn.prepare('SELECT id FROM plugins WHERE id = ?').get(input.pluginId);
-        if (!plugin) throw err.unavailable('要收藏的插件不存在。');
+        assertFavoriteTarget(conn, 'plugin', input.pluginId);
 
-        const defaultFolder = ensureDefaultFolderInTx(conn, userId);
+        const defaultFolder = ensureDefaultFolderInTx(conn, userId, 'plugin');
         const folderId = input.folderId ?? defaultFolder.id;
-        const folder = conn
-          .prepare('SELECT id FROM favorite_folders WHERE id = ? AND user_id = ?')
-          .get(folderId, userId);
-        if (!folder) throw err.input('收藏夹不存在。', [{ path: 'folderId', message: '未知收藏夹' }]);
+        if (input.folderId) assertFolderOwned(conn, userId, input.folderId, 'plugin');
 
         conn
           .prepare(
@@ -446,6 +652,34 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
           )
           .run(userId, input.pluginId, folderId, nowMs());
         return { favorited: true as const, folderId };
+      }, injectedDb ?? db);
+    },
+
+    /**
+     * 收藏到指定收藏夹（下拉选择器用；三类内容共用）。
+     * 与 setFavorite 的区别：这里 folderId 必填，且类型必须与目标一致。
+     */
+    async setFavoriteInKind(
+      ctx: CallerContext,
+      input: { kind: FavoriteTargetKind; targetId: string; folderId: string },
+      injectedDb?: SqliteDatabase,
+    ): Promise<{ favorited: true; folderId: string }> {
+      assertCanWrite(ctx);
+      const userId = ctx.userId;
+      const spec = favoriteTable(input.kind);
+      return withTransaction((tx) => {
+        const conn = tx.db;
+        assertFavoriteTarget(conn, input.kind, input.targetId);
+        assertFolderOwned(conn, userId, input.folderId, input.kind);
+        conn
+          .prepare(
+            `INSERT INTO ${spec.table} (user_id, ${spec.column}, folder_id, created_at)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(user_id, ${spec.column})
+             DO UPDATE SET folder_id = excluded.folder_id, created_at = excluded.created_at`,
+          )
+          .run(userId, input.targetId, input.folderId, nowMs());
+        return { favorited: true as const, folderId: input.folderId };
       }, injectedDb ?? db);
     },
 
@@ -463,27 +697,89 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
       }, injectedDb ?? db);
     },
 
-    /** 收藏夹列表（含每夹收藏数）；首次访问时创建默认夹。 */
+    /**
+     * 取消某一类收藏（**不校验目标当前是否可公开**）。
+     *
+     * 与 toggleFavorite 的关键差别：toggle 会先 assertFavoriteTarget，目标被撤回/下架后
+     * 那行收藏就永远删不掉了——用户点「取消」只会一直看到错误。
+     *
+     * 取消收藏只该看**归属**（是不是我的收藏），不该看目标的当前可公开性：
+     * 东西下架了，我更不能被它绑住。
+     */
+    async removeFavoriteInKind(
+      ctx: CallerContext,
+      input: { kind: FavoriteTargetKind; targetId: string },
+      injectedDb?: SqliteDatabase,
+    ): Promise<{ favorited: false }> {
+      assertCanWrite(ctx);
+      const userId = ctx.userId;
+      const spec = favoriteTable(input.kind);
+      return withTransaction((tx) => {
+        tx.db
+          .prepare(`DELETE FROM ${spec.table} WHERE user_id = ? AND ${spec.column} = ?`)
+          .run(userId, input.targetId);
+        return { favorited: false as const };
+      }, injectedDb ?? db);
+    },
+
+    /**
+     * **幂等**收藏到该类的默认夹：已收藏则保持不动（不取消）。
+     *
+     * 与 toggleFavorite 的区别就是「重复点不翻转」。POST 用这个、DELETE 用 removeFavoriteInKind，
+     * 两端语义各自单一，不会出现「同一个按钮，插件点两次没反应、帖子点两次取消」。
+     */
+    async favoriteToDefaultFolder(
+      ctx: CallerContext,
+      input: { kind: FavoriteTargetKind; targetId: string },
+      injectedDb?: SqliteDatabase,
+    ): Promise<{ favorited: true; folderId: string }> {
+      assertCanWrite(ctx);
+      const userId = ctx.userId;
+      const spec = favoriteTable(input.kind);
+      return withTransaction((tx) => {
+        const conn = tx.db;
+        assertFavoriteTarget(conn, input.kind, input.targetId);
+        const folder = ensureDefaultFolderInTx(conn, userId, input.kind);
+        conn
+          .prepare(
+            `INSERT INTO ${spec.table} (user_id, ${spec.column}, folder_id, created_at)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(user_id, ${spec.column})
+             DO UPDATE SET folder_id = excluded.folder_id, created_at = excluded.created_at`,
+          )
+          .run(userId, input.targetId, folder.id, nowMs());
+        return { favorited: true as const, folderId: folder.id };
+      }, injectedDb ?? db);
+    },
+
+    /**
+     * 某一类内容的收藏夹列表（含每夹收藏数）；首次访问时创建该类默认夹。
+     *
+     * 默认按插件：老的 /me/favorites 与插件详情页仍是插件语义。传 kind 读写对应类型。
+     */
     async listFavoriteFolders(
       ctx: CallerContext,
+      kind: FavoriteTargetKind = 'plugin',
       injectedDb?: SqliteDatabase,
     ): Promise<FavoriteFolderView[]> {
       if (ctx.userId === null) throw err.unauthenticated();
       const userId = ctx.userId;
+      const spec = favoriteTable(kind);
       return withTransaction((tx) => {
-        ensureDefaultFolderInTx(tx.db, userId);
+        ensureDefaultFolderInTx(tx.db, userId, kind);
         const rows = tx.db
           .prepare(
-            `SELECT f.id, f.name, f.is_default, f.created_at,
-                    (SELECT COUNT(*) FROM plugin_favorites pf WHERE pf.folder_id = f.id) AS c
+            `SELECT f.id, f.name, f.is_default, f.target_kind, f.created_at,
+                    (SELECT COUNT(*) FROM ${spec.table} t WHERE t.folder_id = f.id) AS c
                FROM favorite_folders f
-              WHERE f.user_id = ?
+              WHERE f.user_id = ? AND f.target_kind = ?
               ORDER BY f.is_default DESC, f.created_at ASC, f.id ASC`,
           )
-          .all(userId) as Array<{
+          .all(userId, kind) as Array<{
           id: string;
           name: string;
           is_default: number;
+          target_kind: FavoriteTargetKind;
           created_at: number;
           c: number;
         }>;
@@ -493,14 +789,16 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
           isDefault: r.is_default === 1,
           count: Number(r.c),
           createdAt: r.created_at,
+          targetKind: r.target_kind,
         }));
       }, injectedDb ?? db);
     },
 
-    /** 新建收藏夹（不能重名；1-40 字）。 */
+    /** 新建收藏夹（同一类内不能重名；1-40 字）。 */
     async createFavoriteFolder(
       ctx: CallerContext,
       name: string,
+      kind: FavoriteTargetKind = 'plugin',
       injectedDb?: SqliteDatabase,
     ): Promise<FavoriteFolderView> {
       assertCanWrite(ctx);
@@ -511,40 +809,85 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
       }
       return withTransaction((tx) => {
         const conn = tx.db;
-        ensureDefaultFolderInTx(conn, userId);
+        ensureDefaultFolderInTx(conn, userId, kind);
         const existing = conn
-          .prepare('SELECT 1 AS x FROM favorite_folders WHERE user_id = ? AND name = ?')
-          .get(userId, trimmed);
+          .prepare('SELECT 1 AS x FROM favorite_folders WHERE user_id = ? AND target_kind = ? AND name = ?')
+          .get(userId, kind, trimmed);
         if (existing) throw err.input('同名收藏夹已存在。', [{ path: 'name', message: '重名' }]);
         const id = newId();
         const now = nowMs();
         conn
           .prepare(
-            `INSERT INTO favorite_folders (id, user_id, name, is_default, created_at, updated_at)
-             VALUES (?, ?, ?, 0, ?, ?)`,
+            `INSERT INTO favorite_folders (id, user_id, name, target_kind, is_default, created_at, updated_at)
+             VALUES (?, ?, ?, ?, 0, ?, ?)`,
           )
-          .run(id, userId, trimmed, now, now);
-        return { folderId: id, name: trimmed, isDefault: false, count: 0, createdAt: now };
+          .run(id, userId, trimmed, kind, now, now);
+        return {
+          folderId: id,
+          name: trimmed,
+          isDefault: false,
+          count: 0,
+          createdAt: now,
+          targetKind: kind,
+        };
       }, injectedDb ?? db);
     },
 
-    /** 某个收藏夹的内容（校验归属）。 */
+    /**
+     * 某个收藏夹的内容（校验归属）。
+     *
+     * 返回三份列表而不是一份：夹本身知道自己的类型，但读的一方（老的 /me/favorites/[folderId]
+     * 页面）只认 plugins，新页面按 folder.targetKind 取对应的那份。只用一份带联合类型的
+     * 列表会逼每个调用方去 narrow，反而更易错。
+     */
     async getFavoriteFolder(
       ctx: CallerContext,
       folderId: string,
       injectedDb?: SqliteDatabase,
-    ): Promise<{ folder: FavoriteFolderView; plugins: FavoritePluginView[] }> {
+    ): Promise<{
+      folder: FavoriteFolderView;
+      plugins: FavoritePluginView[];
+      packs: FavoritePackView[];
+      posts: FavoritePostView[];
+    }> {
       if (ctx.userId === null) throw err.unauthenticated();
       const userId = ctx.userId;
       return withRead((conn) => {
         const folder = conn
           .prepare(
-            'SELECT id, name, is_default, created_at FROM favorite_folders WHERE id = ? AND user_id = ?',
+            'SELECT id, name, is_default, target_kind, created_at FROM favorite_folders WHERE id = ? AND user_id = ?',
           )
           .get(folderId, userId) as
-          | { id: string; name: string; is_default: number; created_at: number }
+          | { id: string; name: string; is_default: number; target_kind: FavoriteTargetKind; created_at: number }
           | undefined;
         if (!folder) throw err.unavailable('收藏夹不存在或不可访问。');
+
+        if (folder.target_kind !== 'plugin') {
+          const view = {
+            folderId: folder.id,
+            name: folder.name,
+            isDefault: folder.is_default === 1,
+            count: 0,
+            createdAt: folder.created_at,
+            targetKind: folder.target_kind,
+          };
+          if (folder.target_kind === 'pack') {
+            const packs = readFavoritePacks(conn, userId, folder.id);
+            return {
+              folder: { ...view, count: packs.length },
+              plugins: [] as FavoritePluginView[],
+              packs,
+              posts: [] as FavoritePostView[],
+            };
+          }
+          const posts = readFavoritePosts(conn, userId, folder.id);
+          return {
+            folder: { ...view, count: posts.length },
+            plugins: [] as FavoritePluginView[],
+            packs: [] as FavoritePackView[],
+            posts,
+          };
+        }
 
         const rows = conn
           .prepare(
@@ -573,6 +916,7 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
             isDefault: folder.is_default === 1,
             count: rows.length,
             createdAt: folder.created_at,
+            targetKind: 'plugin' as const,
           },
           plugins: rows.map((r) => ({
             pluginId: r.plugin_id,
@@ -584,6 +928,8 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
             folderId: folder.id,
             folderName: folder.name,
           })),
+          packs: [] as FavoritePackView[],
+          posts: [] as FavoritePostView[],
         };
       }, injectedDb ?? db);
     },
@@ -655,9 +1001,14 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
           .prepare('SELECT id FROM favorite_folders WHERE id = ? AND user_id = ?')
           .get(folderId, userId);
         if (!folder) throw err.unavailable('收藏夹不存在或不可访问。');
+        // 同类内查重名：插件夹与帖子夹可以同名，它们是两套东西。
         const duplicate = conn
-          .prepare('SELECT 1 AS x FROM favorite_folders WHERE user_id = ? AND name = ? AND id <> ?')
-          .get(userId, trimmed, folderId);
+          .prepare(
+            `SELECT 1 AS x FROM favorite_folders
+              WHERE user_id = ? AND name = ? AND id <> ?
+                AND target_kind = (SELECT target_kind FROM favorite_folders WHERE id = ?)`,
+          )
+          .get(userId, trimmed, folderId, folderId);
         if (duplicate) throw err.input('同名收藏夹已存在。', [{ path: 'name', message: '重名' }]);
         conn
           .prepare('UPDATE favorite_folders SET name = ?, updated_at = ? WHERE id = ?')
@@ -669,32 +1020,39 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
     /**
      * 删除收藏夹（默认夹不可删）。
      *
-     * 夹内收藏**一并取消收藏**（按用户要求：删除收藏夹 = 删除夹内插件收藏），
-     * 确认框必须提前写明这一点。
+     * 夹内收藏**一并取消收藏**（按用户要求：删除收藏夹 = 删除夹内收藏），
+     * 确认框必须提前写明这一点。三类内容都按各自的表清，不会漏掉别的类型。
      */
     async deleteFavoriteFolder(
       ctx: CallerContext,
       folderId: string,
       injectedDb?: SqliteDatabase,
-    ): Promise<{ folderId: string; removed: number }> {
+    ): Promise<{ folderId: string; moved: number }> {
       assertCanWrite(ctx);
       const userId = ctx.userId;
       return withTransaction((tx) => {
         const conn = tx.db;
         const folder = conn
-          .prepare('SELECT id, is_default FROM favorite_folders WHERE id = ? AND user_id = ?')
-          .get(folderId, userId) as { id: string; is_default: number } | undefined;
+          .prepare('SELECT id, is_default, target_kind FROM favorite_folders WHERE id = ? AND user_id = ?')
+          .get(folderId, userId) as
+          | { id: string; is_default: number; target_kind: FavoriteTargetKind }
+          | undefined;
         if (!folder) throw err.unavailable('收藏夹不存在或不可访问。');
         if (folder.is_default === 1) {
           throw err.input('默认收藏夹不能删除。', [{ path: 'folderId', message: '默认夹不可删' }]);
         }
 
-        // 先删夹内收藏（显式删除以便拿到计数；外键 CASCADE 也保证不会留下孤儿）。
-        const removed = conn
-          .prepare('DELETE FROM plugin_favorites WHERE user_id = ? AND folder_id = ?')
-          .run(userId, folderId).changes;
+        // 夹内收藏**移回默认夹**，而不是一并删除。
+        // 删除夹子是「整理收纳」，不是「清空收藏」——用户整理一下夹子就把收藏全丢了，
+        // 那是数据丢失，不是他表达的意思。
+        // 默认夹不可删（上面已挡），所以移动目标一定存在。
+        const spec = favoriteTable(folder.target_kind);
+        const fallback = ensureDefaultFolderInTx(conn, userId, folder.target_kind);
+        const moved = conn
+          .prepare(`UPDATE ${spec.table} SET folder_id = ? WHERE user_id = ? AND folder_id = ?`)
+          .run(fallback.id, userId, folderId).changes;
         conn.prepare('DELETE FROM favorite_folders WHERE id = ? AND user_id = ?').run(folderId, userId);
-        return { folderId, removed };
+        return { folderId, moved };
       }, injectedDb ?? db);
     },
 
@@ -747,8 +1105,9 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
         if (!targetFolderId) {
           throw err.input('请选择目标收藏夹。', [{ path: 'folderId', message: '必填' }]);
         }
+        // 目标夹必须是插件夹：批量移动只处理插件收藏，移到帖子夹会把两类混装。
         const folder = conn
-          .prepare('SELECT id FROM favorite_folders WHERE id = ? AND user_id = ?')
+          .prepare("SELECT id FROM favorite_folders WHERE id = ? AND user_id = ? AND target_kind = 'plugin'")
           .get(targetFolderId, userId);
         if (!folder) throw err.input('目标收藏夹不存在。', [{ path: 'folderId', message: '未知收藏夹' }]);
 
@@ -771,6 +1130,96 @@ export function createInteractionsService(deps: { db: SqliteDatabase }) {
           undefined,
         injectedDb ?? db,
       );
+    },
+
+    /** 列表用：当前用户是否收藏过这条（三类内容共用一套判定）。 */
+    async isFavorited(
+      ctx: CallerContext,
+      kind: FavoriteTargetKind,
+      targetId: string,
+      injectedDb?: SqliteDatabase,
+    ): Promise<boolean> {
+      if (ctx.userId === null) return false;
+      const spec = favoriteTable(kind);
+      return withRead(
+        (conn) =>
+          conn
+            .prepare(`SELECT 1 AS x FROM ${spec.table} WHERE user_id = ? AND ${spec.column} = ?`)
+            .get(ctx.userId, targetId) !== undefined,
+        injectedDb ?? db,
+      );
+    },
+
+    /**
+     * 列表用：当前用户已收藏的那批 id（一次查询，避免每行问一次库）。
+     * 传空数组直接返回空集。
+     */
+    async favoritedIdsAmong(
+      ctx: CallerContext,
+      kind: FavoriteTargetKind,
+      targetIds: string[],
+      injectedDb?: SqliteDatabase,
+    ): Promise<Set<string>> {
+      if (ctx.userId === null || targetIds.length === 0) return new Set<string>();
+      const spec = favoriteTable(kind);
+      const placeholders = targetIds.map(() => '?').join(', ');
+      return withRead((conn) => {
+        const rows = conn
+          .prepare(
+            `SELECT ${spec.column} AS id FROM ${spec.table}
+              WHERE user_id = ? AND ${spec.column} IN (${placeholders})`,
+          )
+          .all(ctx.userId, ...targetIds) as Array<{ id: string }>;
+        return new Set(rows.map((r) => r.id));
+      }, injectedDb ?? db);
+    },
+
+    /** 个人中心"收藏的整合包"（跨夹，全部一次给；夹内计数用 listFavoriteFolders）。 */
+    async listFavoritePacks(ctx: CallerContext, injectedDb?: SqliteDatabase): Promise<FavoritePackView[]> {
+      if (ctx.userId === null) throw err.unauthenticated();
+      const userId = ctx.userId;
+      return withRead((conn) => {
+        const rows = conn
+          .prepare(
+            `SELECT f.folder_id, ff.name AS folder_name FROM pack_favorites f
+               LEFT JOIN favorite_folders ff ON ff.id = f.folder_id
+              WHERE f.user_id = ?`,
+          )
+          .all(userId) as Array<{ folder_id: string; folder_name: string | null }>;
+        const names = new Map(rows.map((r) => [r.folder_id, r.folder_name ?? DEFAULT_FAVORITE_FOLDER_NAME]));
+        const folderIds = [...new Set(rows.map((r) => r.folder_id))];
+        const out: FavoritePackView[] = [];
+        for (const folderId of folderIds) {
+          for (const pack of readFavoritePacks(conn, userId, folderId)) {
+            out.push({ ...pack, folderName: names.get(folderId) ?? DEFAULT_FAVORITE_FOLDER_NAME });
+          }
+        }
+        return out.sort((a, b) => b.createdAt - a.createdAt || a.packId.localeCompare(b.packId));
+      }, injectedDb ?? db);
+    },
+
+    /** 个人中心"收藏的帖子"（跨夹）。 */
+    async listFavoritePosts(ctx: CallerContext, injectedDb?: SqliteDatabase): Promise<FavoritePostView[]> {
+      if (ctx.userId === null) throw err.unauthenticated();
+      const userId = ctx.userId;
+      return withRead((conn) => {
+        const rows = conn
+          .prepare(
+            `SELECT f.folder_id, ff.name AS folder_name FROM post_favorites f
+               LEFT JOIN favorite_folders ff ON ff.id = f.folder_id
+              WHERE f.user_id = ?`,
+          )
+          .all(userId) as Array<{ folder_id: string; folder_name: string | null }>;
+        const names = new Map(rows.map((r) => [r.folder_id, r.folder_name ?? DEFAULT_FAVORITE_FOLDER_NAME]));
+        const folderIds = [...new Set(rows.map((r) => r.folder_id))];
+        const out: FavoritePostView[] = [];
+        for (const folderId of folderIds) {
+          for (const post of readFavoritePosts(conn, userId, folderId)) {
+            out.push({ ...post, folderName: names.get(folderId) ?? DEFAULT_FAVORITE_FOLDER_NAME });
+          }
+        }
+        return out.sort((a, b) => b.createdAt - a.createdAt || a.postId.localeCompare(b.postId));
+      }, injectedDb ?? db);
     },
 
     /** 个人中心"收藏的插件"。 */

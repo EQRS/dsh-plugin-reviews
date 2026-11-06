@@ -97,8 +97,22 @@ export function migrate(options: {
     if (NO_TRANSACTION_MARKER.test(sql)) {
       // 本文件自带 BEGIN/COMMIT 与 PRAGMA（见 NO_TRANSACTION_MARKER 注释）：
       // 再包一层事务会让它的 `PRAGMA foreign_keys=OFF` 失效。
+      //
+      // ⚠️ 执行器不替它回滚，所以「执行成功但记录失败」会留下
+      // schema 已变、schema_migrations 却没写的半成品，下次重跑撞「表已存在」。
+      // 这里能做的是**把记录写失败变成响亮的错误**，而不是让它悄悄发生：
+      // 迁移已经提交，回滚不了，但至少启动会失败并指出是哪一份没记上，
+      // 而不是留一个下次必炸的库。
       db.exec(sql);
-      record();
+      try {
+        record();
+      } catch (e) {
+        throw new Error(
+          `迁移 ${name} 已执行但登记失败（schema 已变、schema_migrations 未写）：${
+            e instanceof Error ? e.message : String(e)
+          }。请人工处理：确认库结构后手工补登这条记录，否则下次启动会因重复建表失败。`,
+        );
+      }
     } else {
       db.transaction(() => {
         db.exec(sql);
@@ -213,6 +227,9 @@ export const REQUIRED_TABLES = [
   'forum_post_drafts',
   'forum_post_draft_attachment_links',
   'forum_post_screenings',
+  // 0039：收藏重构——整合包与帖子各一张收藏表（与插件收藏分表，夹按 target_kind 隔离）
+  'pack_favorites',
+  'post_favorites',
 ] as const;
 
 export function selfCheck(db: SqliteDatabase): SelfCheckResult {

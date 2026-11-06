@@ -2,13 +2,16 @@
 
 /**
  * 新建收藏夹表单（只有收藏页顶层用它；收藏夹详情里不提供新建，避免嵌套收藏夹）。
+ *
+ * `kind` 决定这个夹属于哪一类内容（0039 之后夹按类型隔离，缺省仍是插件）。
  */
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import type { FavoriteTargetKind } from '@/server/modules/interactions';
 import { ApiError, ErrorNotice, apiFetch } from './api-client';
 
-export function CreateFolderForm() {
+export function CreateFolderForm({ kind = 'plugin' }: { kind?: FavoriteTargetKind }) {
   const router = useRouter();
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -21,7 +24,7 @@ export function CreateFolderForm() {
     setBusy(true);
     setError(null);
     try {
-      await apiFetch('/api/me/favorites/folders', { method: 'POST', json: { name: trimmed } });
+      await apiFetch('/api/me/favorites/folders', { method: 'POST', json: { name: trimmed, kind } });
       setName('');
       router.refresh();
     } catch (e) {

@@ -142,7 +142,13 @@ export function FolderPluginList({
             </label>
             <div className="item-body">
               <h3>
-                <Link href={`/plugins/${p.pluginId}`}>{p.displayName ?? p.repositoryFullName}</Link>
+                {/*
+                  带上来源夹子：插件详情页据此预选「收藏到哪个夹」。
+                  不传的话，用户在某个夹子里点进插件再收藏，会落到默认夹。
+                */}
+                <Link href={`/plugins/${p.pluginId}?from=${encodeURIComponent(currentFolderId)}`}>
+                  {p.displayName ?? p.repositoryFullName}
+                </Link>
                 {p.pluginPath !== '.' ? <span className="muted"> · {p.pluginPath}</span> : null}
               </h3>
               <div className="list-meta">
