@@ -51,7 +51,8 @@ export type RateLimitAction =
   | 'feedback'
   | 'forum_post'
   | 'forum_reply'
-  | 'forum_board_application';
+  | 'forum_board_application'
+  | 'role_application';
 
 export interface RateLimitRule {
   action: RateLimitAction;
@@ -120,6 +121,15 @@ export const RATE_LIMIT_RULES: Record<RateLimitAction, RateLimitRule> = {
     points: 3,
     durationMs: 86_400_000,
     description: '每用户每天最多提交 3 次分区申请',
+  },
+  // 身份申请一天 3 次的用量级：审核要走人工，一天内反复改口只会淹掉审核队列，
+  // 所以按**天**而不是小时计窗口（设计 §6 末尾的限流口径）。
+  role_application: {
+    action: 'role_application',
+    specKey: 'rate_limits.role_applications_per_day',
+    points: 3,
+    durationMs: 86_400_000,
+    description: '每用户每天最多 3 次身份申请提交',
   },
 };
 

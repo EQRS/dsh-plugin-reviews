@@ -9,7 +9,7 @@
  */
 
 import { getDb } from '@/server/platform/db';
-import { isAdmin } from '@/server/platform/context';
+import { assertCanAdmin } from '@/server/platform/context';
 import { createTasksService } from '@/server/modules/tasks/service';
 import { createSettingsService, discoverySettingsFrom } from '@/server/modules/settings';
 import { DISCOVERY_DEFAULTS, discoveryBudgetFor } from '@/server/modules/catalog/discovery';
@@ -23,7 +23,7 @@ export async function GET(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
     const ctx = await currentContext();
-    if (!isAdmin(ctx)) throw err.forbidden('该操作需要管理员权限。');
+    assertCanAdmin(ctx);
 
     const db = getDb();
     const rows = db
@@ -87,7 +87,7 @@ export async function POST(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
     const ctx = await currentContext();
-    if (!isAdmin(ctx)) throw err.forbidden('该操作需要管理员权限。');
+    assertCanAdmin(ctx);
 
     const body = (await readJson(request)) as { requestKey?: unknown; maxPlugins?: unknown };
     if (typeof body.requestKey !== 'string' || body.requestKey.trim().length === 0) {

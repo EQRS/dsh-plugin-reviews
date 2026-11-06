@@ -2,7 +2,7 @@
 import { getDb } from '@/server/platform/db';
 import { createPacksService } from '@/server/modules/packs';
 import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../../../_lib/context';
-import { isAdmin } from '@/server/platform/context';
+import { assertCanAdmin } from '@/server/platform/context';
 import { err } from '@/packages/common/errors';
 
 export const runtime = 'nodejs';
@@ -15,7 +15,7 @@ export async function POST(
   try {
     const { releaseId } = await params;
     const ctx = await currentContext();
-    if (!isAdmin(ctx)) throw err.forbidden('只有管理员可以审核整合包。');
+    assertCanAdmin(ctx);
     const body = (await readJson(request)) as { action?: unknown; note?: unknown };
     const service = createPacksService({ db: getDb() });
     if (body.action === 'approve') {

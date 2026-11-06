@@ -230,6 +230,10 @@ export const REQUIRED_TABLES = [
   // 0039：收藏重构——整合包与帖子各一张收藏表（与插件收藏分表，夹按 target_kind 隔离）
   'pack_favorites',
   'post_favorites',
+  // 0040：用户身份体系——身份、申请、插件归属（认领）
+  'user_roles',
+  'role_applications',
+  'plugin_ownerships',
 ] as const;
 
 export function selfCheck(db: SqliteDatabase): SelfCheckResult {

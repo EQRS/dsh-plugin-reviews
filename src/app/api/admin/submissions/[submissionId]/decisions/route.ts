@@ -11,7 +11,7 @@
  */
 
 import { getDb } from '@/server/platform/db';
-import { isAdmin } from '@/server/platform/context';
+import { assertCanAdmin } from '@/server/platform/context';
 import { err } from '@/packages/common/errors';
 import { decideSubmission } from '@/server/workflows/decide-submission';
 import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../../../../_lib/context';
@@ -25,7 +25,7 @@ export async function POST(
   const { requestId } = requestMeta(request);
   try {
     const ctx = await currentContext();
-    if (!isAdmin(ctx)) throw err.forbidden('该操作需要管理员权限。');
+    assertCanAdmin(ctx);
 
     const { submissionId } = await params;
     const body = (await readJson(request)) as {

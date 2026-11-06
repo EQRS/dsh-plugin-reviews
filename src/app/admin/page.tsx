@@ -109,6 +109,17 @@ export default async function AdminPage({
     }).c,
   );
 
+  // 插件认领待审数：与整合包同一口径，并入入口卡片上的角标。
+  // 只数 pending——自动 github_match 的行直接是 verified，本来就不该出现在待办里。
+  const pendingOwnerships = Number(
+    (db.prepare("SELECT COUNT(*) AS c FROM plugin_ownerships WHERE status = 'pending'").get() as { c: number }).c,
+  );
+
+  // 身份申请待审数：与认领队列并列（一个是「插件是谁的」，一个是「他有没有资格」）。
+  const pendingRoleApplications = Number(
+    (db.prepare("SELECT COUNT(*) AS c FROM role_applications WHERE status = 'pending'").get() as { c: number }).c,
+  );
+
   // 复核申请：整合包被退回后作者的申诉，按提交时间正序（先来先处理）。
   const appealRows = db
     .prepare(
@@ -345,6 +356,40 @@ export default async function AdminPage({
         </p>
         <p style={{ marginBottom: 0 }}>
           <Link href="/admin/forum">前往分区申请审核 →</Link>
+        </p>
+      </section>
+
+      {/* 插件认领：开发者身份的前置（插件表没有作者字段，归属只能靠认领或账号匹配确定）。 */}
+      <section className="panel" style={{ marginTop: 24 }}>
+        <div className="section-head">
+          <h2>插件认领审核</h2>
+          <span className={pendingOwnerships > 0 ? 'tag warn' : 'tag site'}>
+            {pendingOwnerships > 0 ? `${pendingOwnerships} 条待审` : '无待审'}
+          </span>
+        </div>
+        <p className="muted" style={{ marginTop: 0 }}>
+          用户声明「这个插件是我的」。GitHub 账号与仓库 owner 对得上时系统自动通过，不进队列；
+          这里只有需要人工核实的（仓库属于组织、申请人是协作者等）。
+        </p>
+        <p style={{ marginBottom: 0 }}>
+          <Link href="/admin/plugins/ownerships">前往插件认领审核 →</Link>
+        </p>
+      </section>
+
+      {/* 身份申请：测评员 / 开发者。与认领并列，先认领插件才有开发者的资格。 */}
+      <section className="panel" style={{ marginTop: 24 }}>
+        <div className="section-head">
+          <h2>身份申请审核</h2>
+          <span className={pendingRoleApplications > 0 ? 'tag warn' : 'tag site'}>
+            {pendingRoleApplications > 0 ? `${pendingRoleApplications} 条待审` : '无待审'}
+          </span>
+        </div>
+        <p className="muted" style={{ marginTop: 0 }}>
+          测评员（至少一篇已发布测评）与开发者（至少一个已验证归属的插件）的申请审核。
+          申请带着提交那一刻的资格快照，按快照判断即可。
+        </p>
+        <p style={{ marginBottom: 0 }}>
+          <Link href="/admin/roles">前往身份申请审核 →</Link>
         </p>
       </section>
 

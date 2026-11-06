@@ -35,7 +35,7 @@
  */
 
 import { getDb } from '@/server/platform/db';
-import { isAdmin } from '@/server/platform/context';
+import { assertCanAdmin } from '@/server/platform/context';
 import { contentService } from '@/server/modules/content';
 import { err } from '@/packages/common/errors';
 import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../../../../_lib/context';
@@ -56,7 +56,7 @@ export async function POST(
   try {
     const ctx = await currentContext();
     // 权限判定放在任何业务读取之前：非管理员连"这条内容存不存在"都不该问出来。
-    if (!isAdmin(ctx)) throw err.forbidden('该操作需要管理员权限。');
+    assertCanAdmin(ctx);
 
     const { contentId } = await params;
 

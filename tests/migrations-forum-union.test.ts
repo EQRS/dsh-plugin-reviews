@@ -74,7 +74,11 @@ describeWithUpstream('迁移 0037：notifications 重建取并集，不丢 0034/
 
   it('kind 列表是 0034 + 0036 + 0037 的并集', () => {
     const { db } = setup();
-    expect(kindsIn(tableSql(db, 'notifications'))).toEqual([
+    // 0037 这一份只负责"不丢 0034/0036 加的东西"。后面的迁移会继续扩 kind
+    // （0041 加了 role_application_result / plugin_claim_result），所以这里判**包含**，
+    // 判等会让每加一个 kind 都要回来改一次这条用例。
+    const kinds = kindsIn(tableSql(db, 'notifications'));
+    for (const kind of [
       'comment_on_content',
       'reply_to_comment',
       'moderation_result',
@@ -83,7 +87,9 @@ describeWithUpstream('迁移 0037：notifications 重建取并集，不丢 0034/
       'forum_reply',
       'forum_reply_to_reply',
       'forum_board_application',
-    ]);
+    ]) {
+      expect(kinds).toContain(kind);
+    }
   });
 
   it('featured_published / feedback_result 能落库，并写进 link_url（列还在只是"能建表"不够）', () => {
@@ -118,19 +124,24 @@ describeWithUpstream('迁移 0037：notifications 重建取并集，不丢 0034/
     const detailGroup = /CHECK \(\(kind IN \(([^)]*)\)\) = \(detail IS NOT NULL\)\)/.exec(sql);
     expect(detailGroup).not.toBeNull();
     const detailKinds = (detailGroup as RegExpExecArray)[1].replace(/'/g, '').split(', ');
-    expect(detailKinds).toEqual([
+    // 同上：后续迁移会往这一组里加 kind，判包含而不是判等。
+    for (const kind of [
       'moderation_result',
       'featured_published',
       'feedback_result',
       'forum_reply',
       'forum_reply_to_reply',
       'forum_board_application',
-    ]);
+    ]) {
+      expect(detailKinds).toContain(kind);
+    }
 
     // 同一组 kind 也是"允许没有 content_entity_id"的那一组
     const anchorGroup = /CHECK \(kind IN \(([^)]*)\) OR content_entity_id IS NOT NULL\)/.exec(sql);
     expect(anchorGroup).not.toBeNull();
-    expect((anchorGroup as RegExpExecArray)[1].replace(/'/g, '').split(', ')).toEqual(detailKinds);
+    const anchorKinds = (anchorGroup as RegExpExecArray)[1].replace(/'/g, '').split(', ');
+    // 两条约束必须覆盖同一组 kind（一个说"这类必须有 detail"，一个说"这类可以没有 content_entity_id"）。
+    expect([...anchorKinds].sort()).toEqual([...detailKinds].sort());
 
     // 反向：featured_published 不带 detail 必须被拒（不能因为并集把约束写松）
     expect(() =>

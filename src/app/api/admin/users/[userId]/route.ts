@@ -16,7 +16,7 @@
  */
 
 import { getDb } from '@/server/platform/db';
-import { isAdmin } from '@/server/platform/context';
+import { assertCanAdmin } from '@/server/platform/context';
 import { err } from '@/packages/common/errors';
 import {
   setUserRole,
@@ -37,7 +37,7 @@ export async function PATCH(
   try {
     const ctx = await currentContext();
     if (ctx.userId === null) throw err.unauthenticated('该操作需要登录。');
-    if (!isAdmin(ctx)) throw err.forbidden('该操作需要管理员权限。');
+    assertCanAdmin(ctx);
 
     const { userId } = await params;
     const body = (await readJson(request)) as {

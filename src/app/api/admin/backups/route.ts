@@ -14,7 +14,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { getDb } from '@/server/platform/db';
-import { isAdmin } from '@/server/platform/context';
+import { assertCanAdmin } from '@/server/platform/context';
 import { err } from '@/packages/common/errors';
 import { currentContext, okJson, errorResponse, requestMeta } from '../../_lib/context';
 
@@ -78,7 +78,7 @@ export async function GET(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
     const ctx = await currentContext();
-    if (!isAdmin(ctx)) throw err.forbidden('该操作需要管理员权限。');
+    assertCanAdmin(ctx);
     getDb(); // 顺手确认库可用（挂了的话这条接口也该明确报错，而不是返回空清单）
 
     const root = backupRoot();
@@ -101,7 +101,7 @@ export async function POST(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
     const ctx = await currentContext();
-    if (!isAdmin(ctx)) throw err.forbidden('该操作需要管理员权限。');
+    assertCanAdmin(ctx);
     if (running) throw err.conflict('已经有一份备份在进行中，请稍后刷新。');
 
     running = true;

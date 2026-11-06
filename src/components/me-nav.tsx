@@ -3,7 +3,8 @@
  *
  * 为什么只列三项：`页面布局.md` §10 规划了七栏（评测/整合包/导入投稿/收藏/通知/事项/设置），
  * 但其中整合包、导入投稿、收藏、事项**连表都没有**（见 `docs/HANDOFF.md`）。
- * 这里只摆已经真有页面的三栏，不给死链。
+ * 这里只摆已经真有页面的栏目，不给死链。「我的插件」是用户身份体系的入口：
+ * 开发者身份的门槛是「至少一个本人插件」，归属关系在这里认领与查看。
  *
  * 手机上由 `.side-nav` 的断点规则自动变成横向 chips（§10：手机为栏目选择或可展开导航）。
  * 服务端组件（无 hooks），可在任何页面里直接用。
@@ -11,7 +12,7 @@
 
 import Link from 'next/link';
 
-type MeSection = 'reviews' | 'packs' | 'posts' | 'favorites' | 'notifications' | 'settings';
+type MeSection = 'reviews' | 'packs' | 'posts' | 'my-plugins' | 'favorites' | 'notifications' | 'settings';
 
 export function MeNav({ current }: { current: MeSection }) {
   return (
@@ -41,6 +42,13 @@ export function MeNav({ current }: { current: MeSection }) {
           aria-current={current === 'favorites' ? 'page' : undefined}
         >
           <span>收藏</span>
+        </Link>
+        <Link
+          href="/me/my-plugins"
+          className={current === 'my-plugins' ? 'active' : ''}
+          aria-current={current === 'my-plugins' ? 'page' : undefined}
+        >
+          <span>我的插件</span>
         </Link>
         <Link
           href="/me/notifications"

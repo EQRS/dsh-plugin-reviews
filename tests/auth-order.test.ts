@@ -7,7 +7,7 @@
  * 与前端正确处理分支失配：前端收到 400 会提示"参数有误"，而不是引导登录。
  *
  * 本用例钉的是**顺序**，不是文案：
- *  - 非法 body + 匿名 → 401/403（旧实现会是 400，必然变红）；
+ *  - 非法 body + 匿名 → 401（管理员接口同样是 401：匿名是「没登录」，不是「没权限」）；
  *  - 非法 body + 已登录 → 仍然是 400（权限通过后 body 校验不能被跳过）；
  *  - 合法身份 + 合法 body → 进入服务层（用服务层自己的参数错误证明"确实走到那里"）。
  */
@@ -121,11 +121,13 @@ describe('收藏夹批量操作：先鉴权后读 body', () => {
 });
 
 describe('管理员处理申诉：先鉴权后读 body', () => {
-  it('匿名 + 非法 body → 403（不是 400）', async () => {
+  it('匿名 + 非法 body → 401（不是 400）', async () => {
+    // 管理员守卫统一走 assertCanAdmin：匿名先撞「没登录」（401），
+    // 已登录的非管理员才落到「没权限」（403）。全站后台接口同一口径。
     const res = await resolveAppeal(postJson({}), appealParams());
     const body = (await res.json()) as ErrorBody;
-    expect(res.status).toBe(403);
-    expect(body.error.code).toBe('forbidden');
+    expect(res.status).toBe(401);
+    expect(body.error.code).toBe('unauthenticated');
   });
 
   it('普通用户 + 非法 body → 403', async () => {

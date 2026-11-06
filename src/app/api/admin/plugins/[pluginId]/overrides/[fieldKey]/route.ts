@@ -7,7 +7,7 @@
  */
 
 import { getDb } from '@/server/platform/db';
-import { isAdmin } from '@/server/platform/context';
+import { assertCanAdmin } from '@/server/platform/context';
 import { createCorrectionsService, type CorrectionField } from '@/server/modules/corrections';
 import { err } from '@/packages/common/errors';
 import { currentContext, okJson, errorResponse, requestMeta } from '../../../../../_lib/context';
@@ -21,7 +21,7 @@ export async function DELETE(
   const { requestId } = requestMeta(request);
   try {
     const ctx = await currentContext();
-    if (!isAdmin(ctx)) throw err.forbidden('该操作需要管理员权限。');
+    assertCanAdmin(ctx);
 
     const { pluginId, fieldKey } = await params;
     const service = createCorrectionsService({ db: getDb() });

@@ -9,7 +9,7 @@
  */
 
 import { getDb } from '@/server/platform/db';
-import { isAdmin } from '@/server/platform/context';
+import { assertCanAdmin } from '@/server/platform/context';
 import { createSettingsService } from '@/server/modules/settings';
 import { err } from '@/packages/common/errors';
 import { currentContext, okJson, errorResponse, requestMeta, readJson } from '../../_lib/context';
@@ -20,7 +20,7 @@ export async function GET(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
     const ctx = await currentContext();
-    if (!isAdmin(ctx)) throw err.forbidden('该操作需要管理员权限。');
+    assertCanAdmin(ctx);
 
     const service = createSettingsService({ db: getDb() });
     const model = await service.read();
@@ -35,7 +35,7 @@ export async function PUT(request: Request): Promise<Response> {
   const { requestId } = requestMeta(request);
   try {
     const ctx = await currentContext();
-    if (!isAdmin(ctx)) throw err.forbidden('该操作需要管理员权限。');
+    assertCanAdmin(ctx);
 
     const body = (await readJson(request)) as { changes?: unknown; reason?: unknown; requestKey?: unknown };
     if (typeof body.changes !== 'object' || body.changes === null || Array.isArray(body.changes)) {

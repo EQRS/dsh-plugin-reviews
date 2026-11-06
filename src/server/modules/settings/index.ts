@@ -237,6 +237,38 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     kind: 'boolean',
     defaultValue: true,
   },
+  // ---- 用户身份体系（设计 docs/项目规划/设计-用户身份体系.md §6）----
+  // 追加式并入：这三项由 R3 前台统一加在这里，避免与限流（R4）两边同时改同一个数组。
+  {
+    key: 'roles.application_cooldown_days',
+    label: '身份申请冷却天数',
+    description:
+      '被驳回后多少天可以再次申请同一身份。撤回（withdrawn）不受此限，可立即再申请；改成 0 表示没有冷却。',
+    kind: 'integer',
+    defaultValue: 30,
+    min: 0,
+    max: 365,
+    unit: '天',
+  },
+  {
+    key: 'roles.enabled',
+    label: '身份申请开关',
+    description:
+      '关闭后隐藏 /me/settings 的申请入口、申请相关接口返回 404；已持有的身份仍然有效（回滚用）。',
+    kind: 'boolean',
+    defaultValue: true,
+  },
+  {
+    key: 'rate_limits.role_applications_per_day',
+    label: '身份申请提交上限',
+    description:
+      '每用户每天最多提交几次身份申请。审核要走人工，一天内反复改口只会淹掉审核队列，所以按天计窗口（键名与 RATE_LIMIT_RULES 的 specKey 逐字一致）。',
+    kind: 'integer',
+    defaultValue: 3,
+    min: 1,
+    max: 20,
+    unit: '次/天/用户',
+  },
 ];
 
 export type SettingValue = number | boolean | string;
