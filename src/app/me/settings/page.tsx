@@ -21,6 +21,18 @@ import { MeNav } from '@/components/me-nav';
 import { EditorAutosaveSetting } from '@/components/editor-autosave-setting';
 import { readPreferences } from '@/server/modules/preferences';
 import { formatDateTimeOr } from '@/packages/common/time';
+import { createRoleService, COOLDOWN_DAYS_DEFAULT, COOLDOWN_DAYS_KEY } from '@/server/modules/roles/service';
+import { booleanSetting, numberSetting } from '@/server/modules/settings';
+import { RoleApplicationPanel } from '@/components/role-application-panel';
+import {
+  buildRolePanel,
+  heldRolesText,
+  type HeldRole,
+  type PendingApplication,
+  type RejectedApplication,
+  type RolePanelView,
+  type RoleType,
+} from '@/packages/common/roles';
 
 export const dynamic = 'force-dynamic';
 
@@ -64,6 +76,59 @@ export default async function MeSettingsPage() {
     )
     .get(ctx.userId) as Row | undefined;
 
+  const db = getDb();
+  // 身份体系的数据。任何一步出错都不该让设置页 500 —— 资料表单是这一页的主功能，
+  // 身份区坏了只影响那一块，按"没有任何身份"降级。
+  let rolePanel: RolePanelView | null = null;
+  let heldLabels: string[] = [];
+  let boardModerators: { boardName: string; role: string }[] = [];
+  let cooldownDays = COOLDOWN_DAYS_DEFAULT;
+  const rolesEnabled = booleanSetting(db, 'roles.enabled', true);
+  if (rolesEnabled) {
+    try {
+      const roleService = createRoleService({ db });
+      const mine = await roleService.listMyRoles(ctx);
+      const held: HeldRole[] = mine.roles
+        .filter((r) => r.status === 'active')
+        .map((r) => ({ roleType: r.roleType as RoleType, grantedAt: r.grantedAt }));
+      const pending: PendingApplication[] = mine.history
+        .filter((h) => h.status === 'pending')
+        .map((h) => ({ id: h.id, roleType: h.roleType as RoleType, createdAt: h.createdAt, note: h.note }));
+      const rejected: RejectedApplication[] = mine.history
+        .filter((h) => h.status === 'rejected' && h.reviewedAt !== null)
+        .map((h) => ({
+          id: h.id,
+          roleType: h.roleType as RoleType,
+          reviewedAt: h.reviewedAt as number,
+          reviewNote: h.reviewNote,
+        }));
+      const eligibility = {
+        reviewer: { count: 0, required: 1 },
+        developer: { count: 0, required: 1 },
+      } as Record<RoleType, { count: number; required: number }>;
+      for (const summary of mine.applications) {
+        eligibility[summary.roleType as RoleType] = {
+          count: summary.count,
+          required: summary.roleType === 'reviewer' ? 1 : 1,
+        };
+      }
+      cooldownDays = numberSetting(db, COOLDOWN_DAYS_KEY, COOLDOWN_DAYS_DEFAULT);
+      rolePanel = buildRolePanel({
+        roles: held,
+        pending,
+        rejected,
+        eligibility,
+        cooldownDays,
+        now: Date.now(),
+      });
+      heldLabels = rolePanel.heldLabels;
+      boardModerators = mine.boardModerators.map((b) => ({ boardName: b.boardName, role: b.role }));
+    } catch {
+      // 身份区读失败：降级成"暂无"，不打断页面
+      rolePanel = null;
+    }
+  }
+
   const nickname = row?.nickname ?? '';
   // 偏好读取失败不该让整页 500：设置页里已登录用户读到默认值即可（写回时会再校验）。
   const preferences = readPreferences(getDb(), ctx.userId);
@@ -104,6 +169,21 @@ export default async function MeSettingsPage() {
               </dd>
               <dt>角色</dt>
               <dd>{row?.role === 'admin' ? '管理员' : '普通用户'}</dd>
+              <dt>附加身份</dt>
+              <dd>{heldRolesText(heldLabels)}</dd>
+              {boardModerators.length > 0 ? (
+                <>
+                  <dt>讨论区角色</dt>
+                  <dd>
+                    {boardModerators
+                      .map((b) => `${b.boardName}·${b.role === 'owner' ? '区长' : '协管'}`)
+                      .join('、')}
+                    <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>
+                      （分区内生效，不计入附加身份）
+                    </span>
+                  </dd>
+                </>
+              ) : null}
               <dt>账户状态</dt>
               <dd>{row?.account_status === 'disabled' ? '已禁用' : '正常'}</dd>
               <dt>注册时间</dt>
@@ -112,6 +192,12 @@ export default async function MeSettingsPage() {
               <dd>{formatDateTimeOr(row?.last_login_at ?? null, '未知')}</dd>
             </dl>
           </section>
+          {rolesEnabled && rolePanel ? (
+            <div style={{ marginTop: 20 }}>
+              <RoleApplicationPanel panel={rolePanel} cooldownDays={cooldownDays} />
+            </div>
+          ) : null}
+
           <section className="panel" style={{ marginTop: 20 }}>
             <div className="section-head">
               <h2>编辑</h2>
