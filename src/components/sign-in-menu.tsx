@@ -1,7 +1,6 @@
 'use client';
 
 
-import Link from 'next/link';
 /**
  * 登录入口（M3 菜单形态）。
  *
@@ -71,10 +70,6 @@ export function SignInMenu({
             </a>
           ) : (
             <>
-          {/* 教程入口也放在这里：未登录的人才最需要它，只放账户菜单等于对访客关上门 */}
-          <Link href="/guide" role="menuitem" className="menu-row" onClick={() => setOpen(false)}>
-            <span className="menu-row-label">使用教程</span>
-          </Link>
               <p className="menu-label">登录</p>
               <p className="menu-note">GitHub 登录未配置：服务端还没有设置 GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET。</p>
             </>

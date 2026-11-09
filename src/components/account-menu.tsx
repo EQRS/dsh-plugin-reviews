@@ -223,10 +223,6 @@ export function AccountMenu({
             <span className="menu-row-label">反馈问题</span>
             <Glyph name="chevron" />
           </Link>
-          <Link href="/guide" role="menuitem" className="menu-row" onClick={() => close()}>
-            <span className="menu-row-label">使用教程</span>
-            <Glyph name="chevron" />
-          </Link>
           <p className="menu-label">外观</p>
           <ThemeMenuRow />
 
