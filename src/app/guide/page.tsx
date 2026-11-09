@@ -59,7 +59,11 @@ export default function GuidePage() {
         </tbody>
       </table>
       <p style={V}>
-        另外还有<strong>讨论区</strong>（用户之间交流）与<strong>精选专栏</strong>（编辑推荐位）。
+        另外还有<strong>讨论区</strong>（用户之间交流）与<strong>精选专栏</strong>（站方编辑挑选的推荐位）。
+      </p>
+      <p style={V}>
+        精选有一条前提：<strong>被选进精选的插件，一定已经有官方测评</strong>。
+        精选是站方的背书，而不是随手转发——所以点进精选，你能读到站方对这个插件的正式结论。
       </p>
 
       <h2 style={h2}>二、要不要登录</h2>
